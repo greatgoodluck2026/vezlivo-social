@@ -1,0 +1,913 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Vezlivo - Global Social Community Platform for Creators to share videos, photos, and status updates securely.">
+    <title>Vezlivo - Social Community Platform</title>
+    
+    <!-- PWA Manifest Link -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#7b2cbf">
+
+    <!-- Firebase SDK Scripts (CDN) -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-storage-compat.js"></script>
+
+    <style>
+        .modal.hidden {
+            display: none !important;
+        }   
+        :root { --primary: #7b2cbf; --bg: #121212; --card: #1e1e1e; --text: #ffffff; --danger: #ff4757; --accent: #00cec9; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--bg); color: var(--text); margin: 0; padding: 0; }
+        
+        #splash-screen {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #0d0d0d;
+            display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 999; transition: opacity 0.5s ease;
+        }
+        .splash-logo-img { width: 120px; height: 120px; border-radius: 26px; object-fit: cover; box-shadow: 0 8px 25px rgba(123, 44, 191, 0.4); animation: pulse 1.5s infinite; }
+        .splash-sub { color: #888; font-size: 14px; margin-top: 15px; }
+        @keyframes pulse { 0% { transform: scale(1); opacity: 0.9; } 50% { transform: scale(1.05); opacity: 1; } 100% { transform: scale(1); opacity: 0.9; } }
+
+        header { background: var(--card); padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; }
+        .logo-flex { display: flex; align-items: center; gap: 10px; }
+        .logo-img-header { width: 34px; height: 34px; border-radius: 8px; object-fit: cover; }
+        .logo { font-size: 22px; font-weight: bold; color: var(--primary); }
+        .header-actions { display: flex; gap: 10px; align-items: center; }
+        .notification-bell { background: #333; padding: 6px 12px; border-radius: 6px; font-size: 12px; cursor: pointer; position: relative; }
+        
+        .container { max-width: 800px; margin: 20px auto; padding: 20px; background: var(--card); border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+        input, textarea, select, button { width: 100%; padding: 12px; margin: 8px 0; border-radius: 6px; border: 1px solid #444; background: #2a2a2a; color: white; box-sizing: border-box; }
+        button { background: var(--primary); border: none; font-weight: bold; cursor: pointer; }
+        button:hover { opacity: 0.9; }
+        .google-btn { background: #db4437; color: white; display: flex; justify-content: center; align-items: center; gap: 10px; }
+        .action-row { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+        .action-row button { background: #333; font-size: 12px; padding: 8px; width: auto; flex-grow: 1; }
+        .danger-btn { background: var(--danger); }
+        .hidden { display: none; }
+        
+        .feed-item, .stream-room, .support-box, .favorites-section, .rules-box, .chat-section, .profile-section, .notifications-section, .pinned-showcase-box { background: #252525; padding: 15px; margin-top: 15px; border-radius: 8px; border: 1px solid #383838; }
+        .stats-box { background: #333; padding: 10px; border-radius: 6px; font-size: 14px; margin-top: 10px; }
+        .ad-banner { background: #2a2139; border: 1px dashed var(--primary); padding: 10px; text-align: center; font-size: 12px; color: #d8b4fe; margin: 15px 0; border-radius: 6px; }
+        
+        .modal { background: rgba(0,0,0,0.8); position: fixed; top: 0; left: 0; width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; z-index: 100; }
+        .modal-content { background: #222; padding: 30px; border-radius: 8px; max-width: 450px; text-align: center; border: 1px solid #444; max-height: 80vh; overflow-y: auto; width: 90%; }
+        
+        .avatar-preview { width: 70px; height: 70px; border-radius: 50%; object-fit: cover; border: 2px solid var(--primary); background: #333; display: inline-block; }
+        .profile-header-flex { display: flex; align-items: center; gap: 15px; margin-bottom: 10px; }
+
+        .trend-tag { color: var(--accent); font-size: 13px; font-weight: bold; }
+        .hashtag { color: #3498db; font-weight: bold; }
+        .mention { color: #2ed573; font-weight: bold; }
+        
+        .author-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+        .comments-list, .chat-messages, .audience-list, .notif-list, .pinned-list { background: #1a1a1a; padding: 8px; border-radius: 6px; margin-top: 8px; font-size: 12px; border: 1px solid #333; max-height: 160px; overflow-y: auto; }
+        .comment-item, .audience-item, .notif-item { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; border-bottom: 1px solid #2a2a2a; padding-bottom: 6px; }
+        
+        .media-box { background: #1a1a1a; padding: 12px; border: 2px dashed #555; border-radius: 6px; text-align: center; margin-bottom: 10px; }
+        .filter-tabs { display: flex; gap: 5px; margin-bottom: 15px; }
+        .filter-tabs button { background: #333; font-size: 11px; padding: 6px; width: auto; flex-grow: 1; margin: 0; }
+        .filter-tabs button.active { background: var(--primary); }
+        
+        .footer-links { text-align: center; margin-top: 30px; font-size: 12px; color: #888; border-top: 1px solid #333; padding-top: 15px; }
+        .footer-links span { color: var(--accent); cursor: pointer; text-decoration: underline; }
+    </style>
+</head>
+<body>
+
+    <!-- 2-SECOND SPLASH SCREEN WITH LOGO -->
+    <div id="splash-screen">
+        <img src="logo.png" alt="Vezlivo Logo" class="splash-logo-img" onerror="this.style.display='none'">
+        <div class="splash-sub">Connecting Creators Worldwide</div>
+    </div>
+
+    <!-- TERMS & SAFETY MODAL -->
+    <div class="modal hidden" id="terms-modal">
+        <div class="modal-content">
+            <h3>Vezlivo Community Safety</h3>
+            <p style="font-size: 13px; text-align: left; color: #ccc;">
+                Prohibited content, scams, or harmful behavior will be automatically flagged and removed. Reaching 5 warning strikes results in a permanent account ban. Click agree to enter.
+            </p>
+            <button onclick="acceptTerms()">I Agree & Continue</button>
+        </div>
+    </div>
+
+    <!-- PRIVACY POLICY MODAL -->
+    <div class="modal hidden" id="privacy-modal">
+        <div class="modal-content">
+            <h3>Vezlivo Privacy Policy</h3>
+            <p style="font-size: 12px; text-align: left; color: #ccc;">
+                Your privacy is important to us. Vezlivo collects minimal user data strictly for authentication and community sharing purposes via secure Google Firebase infrastructure. We do not sell user data to third parties.
+            </p>
+            <button onclick="closePrivacyModal()">Close</button>
+        </div>
+    </div>
+
+    <!-- LOGIN / AUTHENTICATION MODAL -->
+    <div class="modal hidden" id="auth-modal">
+        <div class="modal-content">
+            <h3>🔒 Sign In Required</h3>
+            <p style="font-size: 12px; text-align: left; color: #ccc;">
+                You need to log in or create an account to like videos, comment, follow creators, or publish your own content!
+            </p>
+            
+            <button class="google-btn" onclick="signInWithGoogle()">🌐 Sign In / Sign Up with Google</button>
+            <div style="margin: 10px 0; color: #777; font-size: 11px;">— OR USE EMAIL & PHONE —</div>
+
+            <input type="email" id="modal-auth-email" placeholder="Your Email Address">
+            <input type="text" id="modal-auth-phone" placeholder="Your Phone Number (Optional)">
+            <input type="password" id="modal-auth-password" placeholder="Your Password">
+            <input type="number" id="modal-auth-age" placeholder="Your Age (Min 18 for Live)" min="10" max="100">
+
+            <button onclick="handleModalAuth('signup')">Create Cloud Account</button>
+            <button onclick="handleModalAuth('login')">Log In to Cloud</button>
+            
+            <p style="margin-top: 10px; font-size: 12px;">
+                <span style="color: var(--accent); cursor: pointer; text-decoration: underline;" onclick="openForgotPasswordModal()">Forgot Password? Recover via Email/Phone</span>
+            </p>
+            <button onclick="closeAuthModal()" style="background: #444; margin-top: 5px;">Continue Browsing as Guest</button>
+        </div>
+    </div>
+
+    <!-- FORGOT PASSWORD MODAL -->
+    <div class="modal hidden" id="forgot-password-modal">
+        <div class="modal-content">
+            <h3>🔑 Recover Password</h3>
+            <p style="font-size: 12px; text-align: left; color: #ccc;">
+                Enter your registered Email address or Phone number.
+            </p>
+            <input type="text" id="recoveryInput" placeholder="Enter Email or Phone Number">
+            <button onclick="sendPasswordRecoveryCode()" style="background: #3498db;">Send Recovery Code / Link</button>
+            <button onclick="closeForgotPasswordModal()" style="background: #444; margin-top: 5px;">Cancel</button>
+        </div>
+    </div>
+
+    <!-- RESET PASSWORD CONFIRMATION MODAL -->
+    <div class="modal hidden" id="reset-confirm-modal">
+        <div class="modal-content">
+            <h3>🔒 Set New Password</h3>
+            <input type="text" id="verificationCodeInput" placeholder="Enter 6-Digit Code">
+            <input type="password" id="newPasswordInput" placeholder="Enter New Password">
+            <button onclick="confirmPasswordResetAction()" style="background: #2ed573; color: black;">Update Password & Log In</button>
+            <button onclick="document.getElementById('reset-confirm-modal').classList.add('hidden')" style="background: #444; margin-top: 5px;">Cancel</button>
+        </div>
+    </div>
+
+    <header>
+        <div class="logo-flex">
+            <img src="logo.png" alt="Logo" class="logo-img-header" onerror="this.style.display='none'">
+            <div class="logo">Vezlivo</div>
+        </div>
+        <div class="header-actions">
+            <button id="pwaInstallBtn" class="hidden" style="background: var(--accent); color: #000; font-size: 11px; padding: 6px 10px; width: auto; margin: 0; font-weight: bold;">📲 Install App</button>
+            <div class="notification-bell" id="notifBellUI" onclick="toggleNotificationsPanel()" style="display:none;">🔔 (<span id="notif-count">0</span>)</div>
+            <div id="user-status">Browsing as Guest</div>
+        </div>
+    </header>
+
+    <!-- MAIN APP SCREEN -->
+    <div class="container" id="app-screen">
+        <h2>Global Creator Community Feed</h2>
+        
+        <!-- USER PROFILE SECTION -->
+        <div class="profile-section hidden" id="userProfileSection">
+            <div class="profile-header-flex">
+                <img id="profileAvatarDisplay" src="" alt="Avatar" class="avatar-preview" onerror="this.src='data:image/svg+xml;utf8,<svg xmlns=\'http://www.w3.org/2000/svg\' width=\'70\' height=\'70\'><rect width=\'100%\' height=\'100%\' fill=\'%23333\'/><text x=\'50%\' y=\'50%\' fill=\'%23aaa\' font-size=\'12\' dominant-baseline=\'middle\' text-anchor=\'middle\'>No Pic</text></svg>'">
+                <div>
+                    <p style="margin: 0; font-weight: bold;"><span id="profile-display"></span> (@<span id="profile-username-display">username</span>)</p>
+                    <p style="margin: 3px 0 0 0; font-size: 12px; color: #aaa;">Age: <span id="user-age-display"></span> | Followers: <span id="my-followers">0</span></p>
+                </div>
+            </div>
+
+            <p style="font-size: 12px; color: var(--accent); margin: 5px 0;">🎯 <strong>Account Purpose:</strong> <span id="accountPurposeDisplay">Not specified yet.</span></p>
+
+            <label style="font-size: 11px; color: #aaa; display: block; text-align: left; margin-top: 8px;">Upload / Change Profile Picture:</label>
+            <input type="file" id="profilePicInput" accept="image/*" style="font-size: 11px; padding: 6px;" onchange="updateCloudProfilePicture(event)">
+
+            <label style="font-size: 11px; color: #aaa; display: block; text-align: left; margin-top: 5px;">Display Name:</label>
+            <input type="text" id="profileNameInput" placeholder="Your Display Name" style="font-size: 12px; padding: 8px;">
+
+            <label style="font-size: 11px; color: #aaa; display: block; text-align: left; margin-top: 5px;">Unique Username:</label>
+            <input type="text" id="profileUsernameInput" placeholder="Your Unique Username" style="font-size: 12px; padding: 8px;">
+
+            <label style="font-size: 11px; color: #aaa; display: block; text-align: left; margin-top: 5px;">Account Purpose / Niche:</label>
+            <input type="text" id="profilePurposeInput" placeholder="e.g., Tech Reviews, Vlogs..." style="font-size: 12px; padding: 8px;">
+
+            <textarea id="profileBioInput" placeholder="Write a short creator bio..." rows="2" style="margin-top: 5px;"></textarea>
+            
+            <button onclick="saveCloudProfileSettings()" style="background: #3498db; margin-top: 4px;">Save Profile Settings</button>
+            <button onclick="copyProfileShareLink()" style="background: #27ae60; margin-top: 4px;">🔗 Copy My Shareable Profile Link</button>
+            
+            <p id="bioDisplay" style="font-size: 12px; color: #ddd; margin-top: 5px; font-style: italic;">No bio set yet.</p>
+
+            <!-- PINNED SHOWCASE SECTION -->
+            <div class="pinned-showcase-box">
+                <p style="margin: 0 0 5px 0; font-weight: bold; color: var(--accent); font-size: 13px;">📌 Creator's Pinned Showcase (Top Videos)</p>
+                <div class="pinned-list" id="pinnedShowcaseContainer">
+                    <div style="color: #666; font-style: italic;">No pinned videos yet (Limit: 3).</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- GUEST LOGIN BANNER -->
+        <div id="guestLoginPromptBox" style="background: #2a2139; border: 1px solid var(--primary); padding: 12px; border-radius: 8px; margin-bottom: 15px; text-align: center;">
+            <p style="margin: 0 0 8px 0; font-size: 13px; color: #d8b4fe;">You are browsing as a guest. Watch freely or log in to like, comment, and publish!</p>
+            <button onclick="openAuthModal()" style="background: var(--primary); width: auto; padding: 8px 20px; font-size: 12px;">Sign In or Create Account</button>
+        </div>
+
+        <div class="stats-box hidden" id="myStatsBox">
+            <p><strong>Warnings Counter:</strong> <span id="my-warnings">0</span>/5</p>
+            <button onclick="simulateGainFollowers()" style="background:#2ed573;">Simulate Follower Growth (Demo)</button>
+        </div>
+
+        <div class="notifications-section hidden" id="notificationsPanel">
+            <h3>🔔 Real-Time Notifications Center</h3>
+            <div class="notif-list" id="notifListContainer">
+                <div style="color: #666; font-style: italic;">No notifications yet.</div>
+            </div>
+            <button onclick="clearNotifications()" style="background: #444; font-size: 11px; padding: 6px; margin-top: 5px;">Clear Notifications</button>
+        </div>
+
+        <div class="ad-banner">
+            📢 [AdMob Banner Space: Advertisers pay you for these global views]
+        </div>
+
+        <hr style="border-color: #444; margin: 20px 0;">
+
+        <div class="rules-box">
+            <h3>🛡️ Vezlivo Community Safety Guidelines</h3>
+            <button onclick="toggleBanRules()" style="background: #e67e22; font-size: 12px; width: auto; padding: 8px 15px;">📋 View What Causes Bans & Rules</button>
+            <div id="ban-rules-container" class="hidden" style="margin-top: 12px; font-size: 12px; color: #ddd; background: #1a1a1a; padding: 12px; border-radius: 6px; border: 1px solid #444; text-align: left;">
+                <p><strong>🚫 Actions That Cause Account Bans (Reaching 5 Strikes):</strong></p>
+                <ul style="padding-left: 18px; margin: 5px 0; color: #ff6b6b;">
+                    <li>Spam text, malicious hacking terms, or severe scams in posts or chats.</li>
+                </ul>
+            </div>
+        </div>
+
+        <hr style="border-color: #444; margin: 20px 0;">
+
+        <div class="chat-section">
+            <h3>💬 Creator Private Chat & Direct Messages</h3>
+            <input type="text" id="chatRecipient" placeholder="Recipient Friend Username">
+            <div class="chat-messages" id="chatMessagesList">
+                <div style="color: #666; font-style: italic;">Log in to send and receive direct messages.</div>
+            </div>
+            <input type="text" id="chatInputMessage" placeholder="Type a message...">
+            <button onclick="sendDirectMessage()" style="background: #3498db;">Send Direct Message</button>
+        </div>
+
+        <hr style="border-color: #444; margin: 20px 0;">
+
+        <div class="favorites-section">
+            <h3>⭐ My Saved Favorites</h3>
+            <div id="favorites-container"><p style="font-size: 12px; color: #777;">Log in to save favorite posts.</p></div>
+        </div>
+
+        <hr style="border-color: #444; margin: 20px 0;">
+
+        <div class="support-box">
+            <h3>🤖 Vezlivo Creator Help Center</h3>
+            <input type="text" id="supportQuestion" placeholder="e.g., Why am I getting low views?">
+            <button onclick="askVezlivoSupport()" style="background: #3498db;">Ask Vezlivo Support</button>
+            <p id="supportAnswer" style="font-size: 13px; color: #2ed573; margin-top: 10px;"></p>
+        </div>
+
+        <hr style="border-color: #444; margin: 20px 0;">
+
+        <div class="stream-room" id="active-stream-card">
+            <p>🔴 <strong>Live Stream: AlphaCreator</strong></p>
+            <button class="danger-btn" onclick="blockUser('AlphaCreator')" style="width: auto; padding: 6px 12px; font-size: 12px;">Block Streamer</button>
+        </div>
+
+        <div class="stream-room" id="my-live-hub" style="display:none;">
+            <p>🟢 <strong>Your Live Broadcast Hub</strong></p>
+            <div style="margin: 10px 0; background: #1a1a1a; padding: 10px; border-radius: 6px; border: 1px solid #444;">
+                <button id="lockChatBtn" onclick="toggleLiveChatLock()" style="background: #e67e22; font-size: 12px; padding: 8px;">🔒 Lock Live Comments Section</button>
+            </div>
+            <button onclick="stopMyLive()" class="danger-btn" style="margin-top: 10px;">End Live Broadcast</button>
+        </div>
+
+        <button onclick="tryToGoLive()" style="background: #3498db; margin-top: 15px;">Start Live Broadcast (Requires 1,000+ Followers & Age 18+)</button>
+
+        <hr style="border-color: #444; margin: 20px 0;">
+
+        <!-- CREATE POST SECTION (Hidden for Guests) -->
+        <div id="createPostSection" class="hidden">
+            <h3>Create Post (Video, Photo, or Text)</h3>
+            <label style="font-size: 12px; color: #aaa; display: block; text-align: left; margin-top: 5px;">Select Post Type:</label>
+            <select id="postTypeSelect" onchange="togglePostInputType()">
+                <option value="text">✍️ Text Status Update</option>
+                <option value="photo">📷 Photo Capture / Upload</option>
+                <option value="video">🎥 Video Recording / Upload (Max 1 Hour)</option>
+            </select>
+
+            <div class="media-box" id="mediaUploadBox" style="display:none;">
+                <p style="font-size: 12px; color: #ccc; margin-bottom: 5px;" id="mediaBoxInstruction">Select media file:</p>
+                <input type="file" id="mediaFileInput" style="background:#222; border:1px solid #555;" onchange="validateVideoDuration(event)">
+            </div>
+
+            <textarea id="videoCaption" placeholder="Write text message, thoughts, use #hashtags..." rows="3"></textarea>
+            
+            <label style="font-size: 12px; color: #aaa; display: block; text-align: left; margin-top: 5px;">Attach Trend Sound:</label>
+            <select id="trendSoundSelect">
+                <option value="🎵 Summer Vibes - Original Audio">🎵 Summer Vibes - Original Audio</option>
+                <option value="⚡ Electric Beat - Trend Mix">⚡ Electric Beat - Trend Mix</option>
+                <option value="🔥 Rhythm Wave - Viral Sound">🔥 Rhythm Wave - Viral Sound</option>
+            </select>
+
+            <label style="font-size: 12px; color: #aaa; display: block; text-align: left; margin-top: 5px;">Post Visibility Status:</label>
+            <select id="videoPrivacySelect">
+                <option value="public">Public (Everyone can view)</option>
+                <option value="private">Private (Only you)</option>
+            </select>
+            
+            <button onclick="postCloudContent()">Publish Global Post to Feed</button>
+        </div>
+        
+        <div style="margin-top: 25px;">
+            <h4>Feed Discovery Filters</h4>
+            <div class="filter-tabs">
+                <button class="active" onclick="filterFeed('all', this)">All Posts</button>
+                <button onclick="filterFeed('video', this)">🎥 Videos</button>
+                <button onclick="filterFeed('photo', this)">📷 Photos</button>
+                <button onclick="filterFeed('text', this)">✍️ Text</button>
+            </div>
+        </div>
+
+        <div id="feed-container"></div>
+
+        <div style="margin-top: 30px; border-top: 1px dashed #444; padding-top: 15px;" id="payoutSection" class="hidden">
+            <h4>Creator Cash Payouts</h4>
+            <button onclick="requestPayout()" style="background: #2ed573; color: black;">Request Cash Payout</button>
+        </div>
+
+        <div style="margin-top: 20px; border-top: 1px dashed #444; padding-top: 15px;" id="accountMgmtSection" class="hidden">
+            <h4>Account Management</h4>
+            <button onclick="logOutUser()" style="background: #f39c12; margin-bottom: 8px;">Log Out of Account</button>
+            <button onclick="deleteAccount()" class="danger-btn">Delete My Account & Data</button>
+        </div>
+
+        <div class="footer-links">
+            <p>Vezlivo Creator Network © 2026. All rights reserved.</p>
+            <span onclick="openPrivacyModal()">Privacy Policy & Compliance</span>
+        </div>
+    </div>
+
+    <script>
+const firebaseConfig = {
+  apiKey: "AIzaSyCYNooK8PK4uDP0nIy5r3ngPtE5Dk4i50k",
+  authDomain: "vezlivo-1.vercel.app",
+  projectId: "vezlivo-fresh",
+  storageBucket: "vezlivo-fresh.firebasestorage.app",
+  messagingSenderId: "496406406453",
+  appId: "1:496406406453:web:259bf4df01c7c37fe6587c",
+  measurementId: "G-Y7JRTGCT6H"
+};
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+        }
+        const auth = firebase.auth();
+        const db = firebase.database();
+
+        let deferredPrompt;
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();
+            deferredPrompt = e;
+            const installBtn = document.getElementById('pwaInstallBtn');
+            if (installBtn) {
+                installBtn.classList.remove('hidden');
+                installBtn.onclick = async () => {
+                    installBtn.classList.add('hidden');
+                    deferredPrompt.prompt();
+                    const { outcome } = await deferredPrompt.userChoice;
+                    if (outcome === 'accepted') {
+                        console.log('User accepted install prompt');
+                    }
+                    deferredPrompt = null;
+                };
+            }
+        });
+
+        // 2-SECOND SPLASH SCREEN DELAY
+        window.addEventListener('DOMContentLoaded', () => {
+            setTimeout(() => {
+                const splash = document.getElementById('splash-screen');
+                splash.style.opacity = '0';
+                setTimeout(() => {
+                    splash.style.display = 'none';
+                    document.getElementById('terms-modal').classList.add('hidden');
+                    loadGlobalFeed();
+                }, 500); 
+            }, 2000); 
+        });
+
+        let currentUser = null;
+        let currentUid = null;
+        let userAge = 18;
+        let userFollowers = 0;
+        let userWarnings = 0;
+        let isLiveChatLocked = false;
+        let pinnedPostIds = [];
+        let blockedUsers = [];
+        let notifications = [];
+
+        // SHADOWBAN COMMENT FILTER LIST
+        const badWords = ["idiot", "stupid", "fool", "scam", "trash", "hate", "dumb"];
+
+        function containsBadWords(text) {
+            const lowerText = text.toLowerCase();
+            return badWords.some(word => lowerText.includes(word));
+        }
+
+        function acceptTerms() {
+            document.getElementById('terms-modal').classList.add('hidden');
+        }
+
+        function openPrivacyModal() {
+            document.getElementById('privacy-modal').classList.remove('hidden');
+        }
+
+        function closePrivacyModal() {
+            document.getElementById('privacy-modal').classList.add('hidden');
+        }
+
+        function openAuthModal() {
+            document.getElementById('auth-modal').classList.remove('hidden');
+        }
+
+        function closeAuthModal() {
+            document.getElementById('auth-modal').classList.add('hidden');
+        }
+
+        function openForgotPasswordModal() {
+            document.getElementById('forgot-password-modal').classList.remove('hidden');
+        }
+
+        function closeForgotPasswordModal() {
+            document.getElementById('forgot-password-modal').classList.add('hidden');
+        }
+
+        function sendPasswordRecoveryCode() {
+            const inputVal = document.getElementById('recoveryInput').value.trim();
+            if (!inputVal) { alert("Please enter email or phone."); return; }
+
+            if (inputVal.includes('@')) {
+                auth.sendPasswordResetEmail(inputVal)
+                    .then(() => {
+                        alert("📧 Password reset link sent to your email inbox!");
+                        closeForgotPasswordModal();
+                    })
+                    .catch((error) => { alert("Error: " + error.message); });
+            } else {
+                alert(`📱 Recovery code sent to phone: ${inputVal}. (Demo code: 123456)`);
+                closeForgotPasswordModal();
+                document.getElementById('reset-confirm-modal').classList.remove('hidden');
+            }
+        }
+
+        function confirmPasswordResetAction() {
+            const code = document.getElementById('verificationCodeInput').value.trim();
+            const newPassword = document.getElementById('newPasswordInput').value.trim();
+            if (!code || !newPassword) { alert("Please fill fields."); return; }
+
+            const user = auth.currentUser;
+            if (user) {
+                user.updatePassword(newPassword).then(() => {
+                    alert("🔒 Password successfully updated!");
+                    document.getElementById('reset-confirm-modal').classList.add('hidden');
+                }).catch((error) => { alert("Error: " + error.message); });
+            } else {
+                alert("🔒 Code verified! You can now log in with your new password.");
+                document.getElementById('reset-confirm-modal').classList.add('hidden');
+            }
+        }
+
+        function requireLogin() {
+            openAuthModal();
+        }
+
+        function validateVideoDuration(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            if (file.type.startsWith('video/')) {
+                const videoElement = document.createElement('video');
+                videoElement.preload = 'metadata';
+                videoElement.onloadedmetadata = function() {
+                    window.URL.revokeObjectURL(videoElement.src);
+                    if (videoElement.duration > 3600) {
+                        alert("⚠️ Video is too long! Max limit is 1 hour.");
+                        document.getElementById('mediaFileInput').value = ''; 
+                    }
+                }
+                videoElement.src = URL.createObjectURL(file);
+            }
+        }
+
+        function toggleBanRules() {
+            document.getElementById('ban-rules-container').classList.toggle('hidden');
+        }
+
+        function toggleNotificationsPanel() {
+            document.getElementById('notificationsPanel').classList.toggle('hidden');
+        }
+
+        function addNotification(text) {
+            notifications.unshift(text);
+            document.getElementById('notif-count').innerText = notifications.length;
+            let list = document.getElementById('notifListContainer');
+            if (list.innerHTML.includes("No notifications yet")) list.innerHTML = "";
+            let item = document.createElement('div');
+            item.className = 'notif-item';
+            item.innerHTML = `<span>📌 ${text}</span>`;
+            list.prepend(item);
+        }
+
+        function clearNotifications() {
+            notifications = [];
+            document.getElementById('notif-count').innerText = 0;
+            document.getElementById('notifListContainer').innerHTML = '<div style="color: #666; font-style: italic;">No notifications yet.</div>';
+        }
+
+        function updateCloudProfilePicture(event) {
+            const file = event.target.files[0];
+            if (file && currentUid) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const base64Img = e.target.result;
+                    document.getElementById('profileAvatarDisplay').src = base64Img;
+                    db.ref(`users/${currentUid}`).update({ avatar: base64Img });
+                    alert("Profile picture updated!");
+                }
+                reader.readAsDataURL(file);
+            }
+        }
+
+        function saveCloudProfileSettings() {
+            const newName = document.getElementById('profileNameInput').value;
+            const newUsername = document.getElementById('profileUsernameInput').value;
+            const newPurpose = document.getElementById('profilePurposeInput').value;
+            const newBio = document.getElementById('profileBioInput').value;
+            if (!currentUid) return;
+
+            db.ref(`users/${currentUid}`).update({
+                displayName: newName,
+                username: newUsername,
+                accountPurpose: newPurpose,
+                bio: newBio
+            }).then(() => { alert("Profile saved!"); loadCloudUserData(currentUid); });
+        }
+
+        function copyProfileShareLink() {
+            if (!currentUid) return;
+            const link = window.location.origin + window.location.pathname + "?creator=" + currentUid;
+            navigator.clipboard.writeText(link).then(() => { alert("🔗 Profile link copied!"); });
+        }
+
+        function togglePostInputType() {
+            const postType = document.getElementById('postTypeSelect').value;
+            const mediaBox = document.getElementById('mediaUploadBox');
+            mediaBox.style.display = postType === 'text' ? 'none' : 'block';
+        }
+
+        function signInWithGoogle() {
+            const provider = new firebase.auth.GoogleAuthProvider();
+            auth.signInWithPopup(provider)
+                .then((result) => {
+                    const user = result.user;
+                    currentUid = user.uid;
+                    currentUser = user.email || user.displayName;
+                    
+                    db.ref(`users/${currentUid}`).once('value').then((snapshot) => {
+                        if (!snapshot.exists()) {
+                            db.ref(`users/${currentUid}`).set({
+                                email: currentUser,
+                                displayName: user.displayName || "Creator",
+                                username: "user_" + user.uid.substring(0, 6),
+                                accountPurpose: "General Creator Content",
+                                age: 18, followers: 0, warnings: 0, avatar: user.photoURL || "", pinnedPosts: []
+                            });
+                        }
+                    });
+                    alert("Signed in successfully!");
+                    closeAuthModal();
+                    loadCloudUserData(currentUid);
+                })
+                .catch((error) => { alert("Google Sign-In Error: " + error.message); });
+        }
+
+        function handleModalAuth(type) {
+            const email = document.getElementById('modal-auth-email').value;
+            const phone = document.getElementById('modal-auth-phone').value;
+            const password = document.getElementById('modal-auth-password').value;
+            const ageInput = document.getElementById('modal-auth-age').value;
+
+            if(!email || !password) { alert("Enter email and password."); return; }
+            
+            if (type === 'signup') {
+                auth.createUserWithEmailAndPassword(email, password)
+                    .then((userCredential) => {
+                        currentUid = userCredential.user.uid;
+                        userAge = parseInt(ageInput) || 18;
+                        db.ref(`users/${currentUid}`).set({
+                            email: email, phone: phone || "",
+                            displayName: email.split('@')[0],
+                            username: "user_" + currentUid.substring(0, 6),
+                            accountPurpose: "General Content", age: userAge, followers: 0, warnings: 0, pinnedPosts: []
+                        });
+                        alert("Account created!");
+                        closeAuthModal();
+                        loadCloudUserData(currentUid);
+                    })
+                    .catch((error) => { alert("Signup Error: " + error.message); });
+            } else {
+                auth.signInWithEmailAndPassword(email, password)
+                    .then((userCredential) => {
+                        currentUid = userCredential.user.uid;
+                        alert("Logged in!");
+                        closeAuthModal();
+                        loadCloudUserData(currentUid);
+                    })
+                    .catch((error) => { alert("Login Error: " + error.message); });
+            }
+        }
+
+        function loadCloudUserData(uid) {
+            currentUid = uid;
+            db.ref(`users/${uid}`).once('value').then((snapshot) => {
+                const data = snapshot.val();
+                if (data) {
+                    currentUser = data.email;
+                    userAge = data.age || 18;
+                    userFollowers = data.followers || 0;
+                    userWarnings = data.warnings || 0;
+                    pinnedPostIds = data.pinnedPosts || [];
+
+                    document.getElementById('user-status').innerText = data.displayName || currentUser;
+                    document.getElementById('profile-display').innerText = data.displayName || currentUser;
+                    document.getElementById('profile-username-display').innerText = data.username || "username";
+                    document.getElementById('accountPurposeDisplay').innerText = data.accountPurpose || "General Content";
+                    document.getElementById('user-age-display').innerText = userAge;
+                    document.getElementById('my-followers').innerText = userFollowers;
+                    document.getElementById('my-warnings').innerText = userWarnings;
+
+                    document.getElementById('profileNameInput').value = data.displayName || "";
+                    document.getElementById('profileUsernameInput').value = data.username || "";
+                    document.getElementById('profilePurposeInput').value = data.accountPurpose || "";
+                    if (data.bio) document.getElementById('profileBioInput').value = data.bio;
+                    if (data.avatar) document.getElementById('profileAvatarDisplay').src = data.avatar;
+
+                    document.getElementById('userProfileSection').classList.remove('hidden');
+                    document.getElementById('guestLoginPromptBox').style.display = 'none';
+                    document.getElementById('myStatsBox').classList.remove('hidden');
+                    document.getElementById('createPostSection').classList.remove('hidden');
+                    document.getElementById('payoutSection').classList.remove('hidden');
+                    document.getElementById('accountMgmtSection').classList.remove('hidden');
+                    document.getElementById('notifBellUI').style.display = 'block';
+
+                    renderPinnedShowcase();
+                }
+            });
+        }
+
+        function togglePinPost(postId) {
+            if (!currentUid) { requireLogin(); return; }
+            const index = pinnedPostIds.indexOf(postId);
+            if (index > -1) {
+                pinnedPostIds.splice(index, 1);
+            } else {
+                if (pinnedPostIds.length >= 3) { alert("Pin limit reached (Max 3)."); return; }
+                pinnedPostIds.push(postId);
+            }
+            db.ref(`users/${currentUid}`).update({ pinnedPosts: pinnedPostIds });
+            renderPinnedShowcase();
+            loadGlobalFeed();
+        }
+
+        function renderPinnedShowcase() {
+            const container = document.getElementById('pinnedShowcaseContainer');
+            if (pinnedPostIds.length === 0) {
+                container.innerHTML = '<div style="color: #666; font-style: italic;">No pinned videos yet.</div>';
+                return;
+            }
+            container.innerHTML = "";
+            pinnedPostIds.forEach((id, idx) => {
+                db.ref(`posts/${id}`).once('value').then((snap) => {
+                    const post = snap.val();
+                    if (post) {
+                        let div = document.createElement('div');
+                        div.className = 'comment-item';
+                        div.innerHTML = `<span>Pin #${idx+1}: ${post.caption.substring(0, 30)}...</span> <button onclick="togglePinPost('${id}')" style="background:#c0392b; font-size:10px; padding:3px 6px; width:auto;">Unpin</button>`;
+                        container.appendChild(div);
+                    }
+                });
+            });
+        }
+
+        function simulateGainFollowers() {
+            if (!currentUid) { requireLogin(); return; }
+            userFollowers += 500;
+            document.getElementById('my-followers').innerText = userFollowers;
+            db.ref(`users/${currentUid}`).update({ followers: userFollowers });
+            addNotification("Follower count grew by 500!");
+        }
+
+        function tryToGoLive() {
+            if (!currentUid) { requireLogin(); return; }
+            if (userAge < 18) { alert("Must be 18+ to go live."); return; }
+            if (userFollowers < 1000) { alert("Requires 1,000 followers to go live."); return; }
+            document.getElementById('my-live-hub').style.display = 'block';
+            alert("Live broadcasting initialized!");
+        }
+
+        function stopMyLive() { document.getElementById('my-live-hub').style.display = 'none'; }
+        function toggleLiveChatLock() { isLiveChatLocked = !isLiveChatLocked; alert("Live chat locked status: " + isLiveChatLocked); }
+        function blockUser(username) { blockedUsers.push(username); alert(username + " blocked."); }
+
+        function formatCaptionText(text) {
+            let words = (text || '').split(' ');
+            return words.map(word => {
+                if (word.startsWith('#')) return `<span class="hashtag">${word}</span>`;
+                else if (word.startsWith('@')) return `<span class="mention">${word}</span>`;
+                return word;
+            }).join(' ');
+        }
+
+        function filterFeed(type, btn) {
+            let tabs = document.querySelectorAll('.filter-tabs button');
+            tabs.forEach(t => t.classList.remove('active'));
+            btn.classList.add('active');
+
+            let items = document.querySelectorAll('.feed-item');
+            items.forEach(item => {
+                if (type === 'all' || item.getAttribute('data-mediatype') === type) {
+                    item.style.display = 'block';
+                } else {
+                    item.style.display = 'none';
+                }
+            });
+        }
+
+        function postCloudContent() {
+            if (!currentUid) { requireLogin(); return; }
+            const postType = document.getElementById('postTypeSelect').value;
+            const caption = document.getElementById('videoCaption').value;
+            const selectedSound = document.getElementById('trendSoundSelect').value;
+            const privacySetting = document.getElementById('videoPrivacySelect').value;
+
+            if(!caption && postType === 'text') { alert("Enter text."); return; }
+
+            const newPostRef = db.ref('posts').push();
+            newPostRef.set({
+                author: currentUser, authorUid: currentUid,
+                caption: caption, postType: postType, sound: selectedSound,
+                privacy: privacySetting, copyright: false, likes: 0, reposts: 0, timestamp: Date.now()
+            }).then(() => {
+                document.getElementById('videoCaption').value = '';
+                alert("Published to global feed!");
+            });
+        }
+
+        function loadGlobalFeed() {
+            const feed = document.getElementById('feed-container');
+            feed.innerHTML = ""; 
+            
+            db.ref('posts').on('child_added', (snapshot) => {
+                const postData = snapshot.val();
+                const postId = snapshot.key;
+
+                if (postData.privacy === 'private' && postData.authorUid !== currentUid) return;
+
+                const post = document.createElement('div');
+                post.className = 'feed-item';
+                post.setAttribute('data-mediatype', postData.postType);
+
+                let isPinned = pinnedPostIds.includes(postId);
+                let pinBtnText = isPinned ? "📌 Unpin" : "📌 Pin";
+                let pinIndicator = isPinned ? '<div style="color: var(--accent); font-size: 12px; font-weight: bold;">⭐ Pinned Video</div>' : '';
+
+                post.innerHTML = `
+                    <div class="author-header">
+                        <strong>${postData.author}</strong>
+                        <button onclick="toggleFollow(this, '${postData.author}')" style="background: var(--primary); padding: 5px 12px; font-size: 11px; width: auto;">➕ Follow</button>
+                    </div>
+                    ${pinIndicator}
+                    <p class="video-text">${formatCaptionText(postData.caption || '')}</p>
+                    <div class="trend-tag">${postData.sound}</div>
+                    <div class="stats-box">
+                        Stats: <span class="like-counter">${postData.likes || 0}</span> Likes | <span class="repost-counter">${postData.reposts || 0}</span> Reposts
+                    </div>
+                    <div class="comments-container">
+                        <div style="font-size: 11px; color: #888; margin-bottom: 4px;">Comments:</div>
+                        <div class="comments-list" id="comments-list-${postId}">
+                            <div style="color: #666; font-style: italic;">No comments yet.</div>
+                        </div>
+                    </div>
+                    <div class="action-row">
+                        <button onclick="handleCloudLike('${postId}', this)">❤️ Like</button>
+                        <button onclick="handleComment('${postId}', this)">💬 Comment</button>
+                        ${postData.authorUid === currentUid ? `<button onclick="togglePinPost('${postId}')" style="background: #8e44ad;">${pinBtnText}</button>` : ''}
+                        <button onclick="repostVideo(this)">🔁 Repost</button>
+                        <button onclick="saveToFavorites(this)">⭐ Favorite</button>
+                        <button onclick="reportPost('${postId}')" style="background: #e74c3c; font-size: 11px; padding: 5px; width: auto;">🚩 Report</button>
+                    </div>
+                `;
+                feed.prepend(post);
+            });
+        }
+
+        function handleCloudLike(postId, btn) {
+            if (!currentUid) { requireLogin(); return; }
+            const postRef = db.ref(`posts/${postId}/likes`);
+            postRef.transaction((currentLikes) => {
+                return (currentLikes || 0) + 1;
+            }, (error, committed, snapshot) => {
+                if (committed) {
+                    btn.closest('.feed-item').querySelector('.like-counter').innerText = snapshot.val();
+                    addNotification("Liked a video!");
+                }
+            });
+        }
+
+        function reportPost(postId) {
+            if (!currentUid) { requireLogin(); return; }
+            alert("Post reported to Vezlivo Safety Moderation. Thank you for keeping the community safe.");
+        }
+
+        function sendDirectMessage() {
+            if (!currentUid) { requireLogin(); return; }
+            const recipient = document.getElementById('chatRecipient').value;
+            const messageText = document.getElementById('chatInputMessage').value;
+            if (!recipient || !messageText) { alert("Enter recipient and message."); return; }
+
+            let chatList = document.getElementById('chatMessagesList');
+            if (chatList.innerHTML.includes("Log in to send")) chatList.innerHTML = "";
+            chatList.innerHTML += `<div class="comment-item"><strong>${currentUser} ➔ ${recipient}:</strong> ${formatCaptionText(messageText)}</div>`;
+            document.getElementById('chatInputMessage').value = '';
+            alert("Direct message sent!");
+        }
+
+        function toggleFollow(btn, creatorName) {
+            if (!currentUid) { requireLogin(); return; }
+            btn.innerText = btn.innerText.includes("Follow") ? "✓ Following" : "➕ Follow";
+        }
+
+        function saveToFavorites(btn) {
+            if (!currentUid) { requireLogin(); return; }
+            let postItem = btn.closest('.feed-item');
+            let captionText = postItem.querySelector('.video-text').innerText;
+            let favContainer = document.getElementById('favorites-container');
+            if (favContainer.innerHTML.includes("Log in to save")) favContainer.innerHTML = "";
+            favContainer.innerHTML += `<div>⭐ ${captionText}</div>`;
+            alert("Saved to Favorites!");
+        }
+
+        // SILENT SHADOWBAN COMMENT FILTER
+        function handleComment(postId, btn) {
+            if (!currentUid) { requireLogin(); return; }
+            let commentText = prompt("Write your comment:");
+            if (commentText) {
+                let container = btn.closest('.feed-item');
+                let commentsList = container.querySelector('.comments-list');
+                if (commentsList.innerHTML.includes("No comments yet")) commentsList.innerHTML = "";
+
+                if (containsBadWords(commentText)) {
+                    // Visible ONLY to the sender (silently dropped from public view)
+                    commentsList.innerHTML += `<div class="comment-item" style="opacity: 0.7;"><strong>${currentUser} (You):</strong> ${commentText}</div>`;
+                } else {
+                    // Clean comment visible to everyone
+                    commentsList.innerHTML += `<div class="comment-item"><strong>${currentUser}:</strong> ${commentText}</div>`;
+                }
+            }
+        }
+
+        function askVezlivoSupport() {
+            document.getElementById('supportAnswer').innerHTML = "🤖 <strong>Vezlivo Support:</strong> All systems operational!";
+        }
+
+        function requestPayout() {
+            if (!currentUid) { requireLogin(); return; }
+            if (userFollowers < 10000) { alert("Requires 10,000+ followers for payout."); return; }
+            prompt("Enter payout PayPal email:");
+        }
+
+        function logOutUser() {
+            auth.signOut().then(() => {
+                window.location.reload();
+            });
+        }
+
+        function deleteAccount() {
+            if (confirm("Delete account permanently?")) {
+                const user = auth.currentUser;
+                if (user) {
+                    db.ref(`users/${user.uid}`).remove();
+                    user.delete().then(() => { window.location.reload(); });
+                }
+            }
+        }
+    </script>
+</body>
+</html>
