@@ -359,8 +359,8 @@
     <script>
 const firebaseConfig = {
   apiKey: "AIzaSyCYNooK8PK4uDP0nIy5r3ngPtE5Dk4i50k",
-  authDomain: "vezlivo-1.vercel.app",
-  projectId: "vezlivo-fresh",
+  authDomain: "vezlivo-fresh.firebaseapp.com",
+projectId: "vezlivo-fresh",
   storageBucket: "vezlivo-fresh.firebasestorage.app",
   messagingSenderId: "496406406453",
   appId: "1:496406406453:web:259bf4df01c7c37fe6587c",
@@ -829,6 +829,18 @@ const firebaseConfig = {
                     addNotification("Liked a video!");
                 }
             });
+        }
+
+        function repostVideo(btn) {
+            if (!currentUid) { requireLogin(); return; }
+            let item = btn.closest('.feed-item');
+            let counter = item.querySelector('.repost-counter');
+            if (counter) {
+                let currentVal = parseInt(counter.innerText) || 0;
+                counter.innerText = currentVal + 1;
+            }
+            addNotification("Reposted a video to your feed!");
+            alert("🔁 Video reposted successfully!");
         }
 
         function reportPost(postId) {
