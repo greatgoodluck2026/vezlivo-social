@@ -1,0 +1,275 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body,
+#root {
+  width: 100%;
+  min-height: 100%;
+}
+
+html {
+  background: #121212;
+}
+
+body {
+  min-height: 100vh;
+  background: #121212;
+  color: #ffffff;
+  font-family:
+    Inter,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+/* =========================================
+   VEZLIVO APP
+   ========================================= */
+
+.app {
+  min-height: 100vh;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+
+  background:
+    radial-gradient(
+      circle at top,
+      rgba(139, 92, 246, 0.16),
+      transparent 40%
+    ),
+    #121212;
+}
+
+/* =========================================
+   TWO-SECOND SPLASH SCREEN
+   ========================================= */
+
+.splash-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+
+  width: 100%;
+  height: 100vh;
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+
+  background: #121212;
+}
+
+.splash-logo {
+  display: block;
+
+  width: 180px;
+  height: 180px;
+
+  object-fit: contain;
+
+  animation: splashLogoAppear 0.6s ease-out;
+}
+
+.splash-name {
+  margin-top: 18px;
+
+  font-size: 30px;
+  font-weight: 900;
+  letter-spacing: 0.3px;
+
+  background: linear-gradient(
+    90deg,
+    #a78bfa,
+    #f472b6
+  );
+
+  -webkit-background-clip: text;
+  background-clip: text;
+
+  color: transparent;
+
+  animation: splashTextAppear 0.8s ease-out;
+}
+
+@keyframes splashLogoAppear {
+  from {
+    opacity: 0;
+    transform: scale(0.85);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes splashTextAppear {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* =========================================
+   WELCOME CARD
+   ========================================= */
+
+.welcome-card {
+  width: min(100%, 420px);
+
+  padding: 36px 28px;
+
+  text-align: center;
+
+  border: 1px solid rgba(255, 255, 255, 0.1);
+
+  border-radius: 24px;
+
+  background: rgba(30, 30, 36, 0.96);
+
+  box-shadow:
+    0 24px 70px rgba(0, 0, 0, 0.45),
+    0 0 40px rgba(139, 92, 246, 0.08);
+}
+
+.vezlivo-logo {
+  display: block;
+
+  width: 150px;
+  height: 150px;
+
+  object-fit: contain;
+
+  margin: 0 auto 20px;
+}
+
+.welcome-card h1 {
+  font-size: 34px;
+  line-height: 1.1;
+  font-weight: 900;
+
+  background: linear-gradient(
+    90deg,
+    #a78bfa,
+    #f472b6
+  );
+
+  -webkit-background-clip: text;
+  background-clip: text;
+
+  color: transparent;
+}
+
+.welcome-card p {
+  margin-top: 10px;
+
+  color: #a1a1aa;
+
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.welcome-card button {
+  width: 100%;
+
+  margin-top: 26px;
+
+  padding: 13px 18px;
+
+  border: 0;
+  border-radius: 14px;
+
+  background: linear-gradient(
+    90deg,
+    #7c3aed,
+    #db2777
+  );
+
+  color: #ffffff;
+
+  font-size: 14px;
+  font-weight: 800;
+
+  box-shadow:
+    0 10px 25px rgba(124, 58, 237, 0.25);
+
+  transition:
+    transform 0.2s ease,
+    opacity 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.welcome-card button:hover {
+  transform: translateY(-1px);
+
+  box-shadow:
+    0 14px 30px rgba(124, 58, 237, 0.35);
+}
+
+.welcome-card button:active {
+  transform: translateY(0);
+}
+
+.welcome-card button:focus-visible {
+  outline: 2px solid #ffffff;
+  outline-offset: 3px;
+}
+
+/* =========================================
+   MOBILE
+   ========================================= */
+
+@media (max-width: 480px) {
+  .app {
+    padding: 16px;
+  }
+
+  .splash-logo {
+    width: 150px;
+    height: 150px;
+  }
+
+  .splash-name {
+    font-size: 26px;
+  }
+
+  .welcome-card {
+    padding: 30px 20px;
+    border-radius: 20px;
+  }
+
+  .vezlivo-logo {
+    width: 130px;
+    height: 130px;
+  }
+
+  .welcome-card h1 {
+    font-size: 30px;
+  }
+}
