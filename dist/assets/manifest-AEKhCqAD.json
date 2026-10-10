@@ -1,0 +1,19 @@
+{
+  "name": "Vezlivo",
+  "short_name": "Vezlivo",
+  "description": "Vezlivo - Connect, Stream, and Grow Together.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#121212",
+  "theme_color": "#121212",
+  "icons": [
+    {
+      "src": "/Logo.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

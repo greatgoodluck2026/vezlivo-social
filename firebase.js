@@ -1,8 +1,9 @@
 // firebase.js
-// Vezlivo Fresh - Firebase setup
+// Vezlivo Firebase setup
+// Migration bridge: Firebase Auth remains active while
+// Database and Storage are migrated to the new backend.
 
 import { initializeApp } from "firebase/app";
-import { getAnalytics } from "firebase/analytics";
 import { getAuth } from "firebase/auth";
 import { getDatabase } from "firebase/database";
 import { getStorage } from "firebase/storage";
@@ -12,25 +13,20 @@ const firebaseConfig = {
   authDomain: "vezlivo-fresh.firebaseapp.com",
   databaseURL:
     "https://vezlivo-fresh-default-rtdb.europe-west1.firebasedatabase.app",
-  projectId: "avezlivo-fresh",
+  projectId: "vezlivo-fresh",
   storageBucket: "vezlivo-fresh.firebasestorage.app",
   messagingSenderId: "496406406453",
   appId: "1:496406406453:web:259bf4df01c7c37fe6587c",
-  measurementId: "G-Y7JRTGCT6H",
 };
 
-// Initialize Firebase
 const app = initializeApp(firebaseConfig);
 
-// Firebase services
-const analytics = getAnalytics(app);
 const auth = getAuth(app);
 const database = getDatabase(app);
 const storage = getStorage(app);
 
 export {
   app,
-  analytics,
   auth,
   database,
   storage,
