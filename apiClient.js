@@ -1,15 +1,10 @@
-// apiClient.js
-// Vezlivo API client
-// Connects the app to the Cloudflare Worker backend.
-
 import { auth } from "./firebase.js";
 
 const API_BASE_URL =
-  "https://vezlivo-api.vezlivo-api.workers.dev";
+  import.meta.env.VITE_API_URL || "https://vezlivo-api.vezlivo-api.workers.dev";
 
 async function apiRequest(path, options = {}) {
   const user = auth.currentUser;
-
   let token = null;
 
   if (user) {
@@ -25,16 +20,20 @@ async function apiRequest(path, options = {}) {
     headers.Authorization = `Bearer ${token}`;
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...options,
-    headers,
-  });
+  const response = await fetch(
+    `${API_BASE_URL}${path}`,
+    {
+      ...options,
+      headers,
+    }
+  );
 
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
     throw new Error(
-      data?.error || `API request failed: ${response.status}`
+      data?.error ||
+      `API request failed: ${response.status}`
     );
   }
 
@@ -65,6 +64,36 @@ export async function apiDelete(path) {
   return apiRequest(path, {
     method: "DELETE",
   });
+}
+
+export async function apiUpload(path, formData) {
+  const user = auth.currentUser;
+  const headers = {};
+
+  if (user) {
+    headers.Authorization = await user.getIdToken()
+      .then((token) => `Bearer ${token}`);
+  }
+
+  const response = await fetch(
+    `${API_BASE_URL}${path}`,
+    {
+      method: "POST",
+      headers,
+      body: formData,
+    }
+  );
+
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(
+      data?.error ||
+      `API upload failed: ${response.status}`
+    );
+  }
+
+  return data;
 }
 
 export { API_BASE_URL };

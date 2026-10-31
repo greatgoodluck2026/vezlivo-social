@@ -4,7 +4,7 @@ import React, {
   useState,
 } from "react";
 
-import { apiPost } from "./apiClient.js";
+import { apiGet, apiPost, apiUpload } from "./apiClient.js";
 
 import {
   onAuthStateChanged,
@@ -421,23 +421,20 @@ function Create({ draftId = "" } = {}) {
   }, []);
 
   useEffect(() => {
-    const soundsRef = ref(database, "soundLibrary");
-    const unsubscribe = onValue(
-      soundsRef,
-      (snapshot) => {
-        const value = snapshot.val() || {};
-        const list = Object.entries(value)
-          .map(([id, sound]) => ({ id, ...sound }))
-          .filter((sound) => sound.audioURL || sound.audioUrl || sound.url)
-          .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+    let active = true;
+    apiGet("/sounds")
+      .then((result) => {
+        if (!active) return;
+        const list = (result.sounds || [])
+          .map((sound) => ({ ...sound, audioURL: sound.audioURL || sound.audioUrl || sound.url || "" }))
+          .filter((sound) => sound.audioURL);
         setSoundLibrary(list);
-      },
-      (error) => {
+      })
+      .catch((error) => {
         console.error("Vezlivo sound library error:", error);
-        setSoundLibrary([]);
-      }
-    );
-    return () => unsubscribe();
+        if (active) setSoundLibrary([]);
+      });
+    return () => { active = false; };
   }, []);
 
   useEffect(() => {
@@ -1579,15 +1576,7 @@ function Create({ draftId = "" } = {}) {
         setUploading(true);
         setUploadProgress(0);
 
-        const postId =
-          push(
-            ref(
-              database,
-              contentType === "story"
-                ? "stories"
-                : "posts"
-            )
-          ).key;
+        const postId = crypto.randomUUID();
 
         if (!postId) {
           throw new Error(
@@ -1608,12 +1597,6 @@ function Create({ draftId = "" } = {}) {
         const storagePath =
           `${contentType === "story" ? "stories" : "posts"}/${user.uid}/${postId}.${extension}`;
 
-        const fileReference =
-          storageRef(
-            storage,
-            storagePath
-          );
-
         setMessage(
           contentType === "story"
             ? "Uploading your Vezlivo story..."
@@ -1622,105 +1605,81 @@ function Create({ draftId = "" } = {}) {
             : "Uploading your Vezlivo post..."
         );
 
-        const uploadFile = (file, path, onProgress) => {
-          const fileReference = storageRef(storage, path);
-          const task = uploadBytesResumable(fileReference, file, {
-            contentType: file.type || "application/octet-stream",
-          });
-
-          return new Promise((resolve, reject) => {
-            task.on(
-              "state_changed",
-              (snapshot) => {
-                if (onProgress) {
-                  onProgress(snapshot.bytesTransferred, snapshot.totalBytes);
-                }
-              },
-              reject,
-              async () => {
-                try {
-                  resolve(await getDownloadURL(task.snapshot.ref));
-                } catch (urlError) {
-                  reject(urlError);
-                }
-              }
-            );
-          });
+        const uploadFile = async (file, path, onProgress) => {
+          if (file === mediaFile && mediaType === "video") {
+            const created = await apiPost("/mux/uploads", { postId });
+            const muxResponse = await fetch(created.uploadUrl, {
+              method: "PUT",
+              headers: { "Content-Type": file.type || "application/octet-stream" },
+              body: file,
+            });
+            if (!muxResponse.ok) throw new Error("Mux video upload failed.");
+            if (onProgress) onProgress(file.size, file.size);
+            let completed = null;
+            for (let attempt = 0; attempt < 30; attempt++) {
+              completed = await apiPost(
+                `/mux/uploads/${encodeURIComponent(created.uploadId)}/complete`,
+                {}
+              );
+              if (!completed.processing && completed.playbackId) break;
+              await new Promise((resolve) => setTimeout(resolve, 2000));
+            }
+            if (!completed || completed.processing || !completed.playbackId) {
+              throw new Error("Mux is still processing your video. Please try publishing again shortly.");
+            }
+            return { url: completed.url, key: "", playbackId: completed.playbackId, assetId: completed.assetId };
+          }
+          const form = new FormData();
+          form.append("file", file);
+          form.append("path", path);
+          const uploaded = await apiUpload("/media/upload", form);
+          if (onProgress) onProgress(file.size, file.size);
+          return { url: uploaded.url, key: uploaded.key };
         };
 
         let mediaTransferred = 0;
         let musicTransferred = 0;
         let coverTransferred = 0;
-
         const updateCombinedProgress = () => {
-          const total =
-            mediaFile.size +
-            (musicFile?.size || 0) +
-            (coverFile?.size || 0);
-          const transferred =
-            mediaTransferred +
-            musicTransferred +
-            coverTransferred;
+          const total = mediaFile.size + (musicFile?.size || 0) + (coverFile?.size || 0);
+          const transferred = mediaTransferred + musicTransferred + coverTransferred;
           setUploadProgress(total > 0 ? Math.min(99, Math.round((transferred / total) * 100)) : 0);
         };
 
         const musicExtension = musicFile
           ? (musicFile.name.includes(".") ? musicFile.name.split(".").pop().toLowerCase() : "mp3")
           : "";
-
-        // A Reel cover is optional. Vezlivo never silently chooses a frame for the creator.
-        // The creator can scrub to any frame and press "Use this frame", or choose a photo.
         const selectedCoverFile = coverFile;
-
         const coverStoragePath =
           contentType === "reel" && mediaType === "video" && selectedCoverFile
             ? `covers/${user.uid}/${postId}.jpg`
             : "";
 
         const uploadJobs = [
-          uploadFile(
-            mediaFile,
-            storagePath,
-            (transferred) => {
-              mediaTransferred = transferred;
-              updateCombinedProgress();
-            }
-          ),
+          uploadFile(mediaFile, storagePath, (transferred) => {
+            mediaTransferred = transferred;
+            updateCombinedProgress();
+          }),
         ];
-
         if (musicFile) {
-          uploadJobs.push(
-            uploadFile(
-              musicFile,
-              `sounds/${user.uid}/${postId}.${musicExtension}`,
-              (transferred) => {
-                musicTransferred = transferred;
-                updateCombinedProgress();
-              }
-            )
-          );
+          uploadJobs.push(uploadFile(musicFile, `sounds/${user.uid}/${postId}.${musicExtension}`, (transferred) => {
+            musicTransferred = transferred;
+            updateCombinedProgress();
+          }));
         }
-
         if (selectedCoverFile) {
-          uploadJobs.push(
-            uploadFile(
-              selectedCoverFile,
-              coverStoragePath,
-              (transferred) => {
-                coverTransferred = transferred;
-                updateCombinedProgress();
-              }
-            )
-          );
+          uploadJobs.push(uploadFile(selectedCoverFile, coverStoragePath, (transferred) => {
+            coverTransferred = transferred;
+            updateCombinedProgress();
+          }));
         }
 
         const uploadedUrls = await Promise.all(uploadJobs);
-        const mediaURL = uploadedUrls[0];
-        const musicURL = musicFile
-          ? uploadedUrls[1]
-          : (musicUrl || "");
+        const mediaUpload = uploadedUrls[0];
+        const mediaURL = mediaUpload.url;
+        const musicURL = musicFile ? uploadedUrls[1].url : (musicUrl || "");
         const coverURL = selectedCoverFile
-          ? uploadedUrls[musicFile ? 2 : 1]
+          ? uploadedUrls[musicFile ? 2 : 1].url
           : "";
 
         setUploadProgress(99);
@@ -1762,7 +1721,9 @@ function Create({ draftId = "" } = {}) {
 
           mediaURL,
 
-          storagePath,
+          storagePath: mediaUpload.key || "",
+          muxPlaybackId: mediaUpload.playbackId || "",
+          muxAssetId: mediaUpload.assetId || "",
 
           caption:
             caption.trim(),
@@ -1840,26 +1801,14 @@ function Create({ draftId = "" } = {}) {
               60 *
               1000;
 
-          await set(
-            ref(
-              database,
-              `stories/${postId}`
-            ),
-            {
-              ...baseData,
-
-              type: "story",
-
-              expiresAt,
-
-              status:
-                "published",
-
-              views: 0,
-
-              replies: 0,
-            }
-          );
+          await apiPost("/stories", {
+            ...baseData,
+            type: "story",
+            expiresAt,
+            status: "published",
+            views: 0,
+            replies: 0,
+          });
 
           setUploadProgress(100);
 
@@ -1901,66 +1850,10 @@ function Create({ draftId = "" } = {}) {
               "published",
           };
 
-          await set(
-            ref(
-              database,
-              `posts/${user.uid}/${postId}`
-            ),
-            postData
-          );
-
-          if (
-            mediaType === "video"
-          ) {
-            await set(
-              ref(
-                database,
-                `videos/${user.uid}/${postId}`
-              ),
-              {
-                ...postData,
-
-                // Backward-compatible alias for older video consumers.
-                videoURL: mediaURL,
-              }
-            );
-          }
-
-          if (contentType === "reel" && shareToStory) {
-            const storyId = push(ref(database, "stories")).key;
-            if (storyId) {
-              const expiresAt = now + 24 * 60 * 60 * 1000;
-              await set(ref(database, `stories/${storyId}`), {
-                id: storyId,
-                uid: user.uid,
-                username,
-                userEmail: user.email || "",
-                userPhotoURL: user.photoURL || "",
-                type: "story",
-                storyType: "reelShare",
-                sharedPostId: postId,
-                mediaType: "video",
-                mediaURL,
-                coverURL,
-                caption: caption.trim(),
-                createdAt: now,
-                expiresAt,
-                status: "published",
-                views: 0,
-                replies: 0,
-              });
-            }
-          }
-
-          await Promise.all(
-            detectedHashtags.map((hashtag) => {
-              const cleanTag = hashtag.replace(/^#/, "").toLowerCase();
-              return set(
-                ref(database, `hashtagsUsage/${cleanTag}`),
-                { hashtag, lastUsedAt: now }
-              );
-            })
-          );
+          await apiPost("/posts", {
+            ...postData,
+            shareToStory: contentType === "reel" && shareToStory,
+          });
 
           setUploadProgress(100);
 

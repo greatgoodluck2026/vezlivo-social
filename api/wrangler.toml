@@ -4,3 +4,9 @@ compatibility_date = "2026-10-04"
 
 [vars]
 APP_NAME = "Vezlivo"
+APP_ORIGIN = "*"
+
+# Create an R2 bucket in Cloudflare, then uncomment and replace the bucket name:
+# [[r2_buckets]]
+# binding = "R2"
+# bucket_name = "REPLACE_WITH_YOUR_R2_BUCKET_NAME"
