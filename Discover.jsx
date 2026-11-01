@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { onValue, ref, update } from "firebase/database";
 import { auth, database as db } from "./firebase.js";
+import { apiGet } from "./apiClient.js";
+
 export default function Discover({ onBack }) {
   const [users, setUsers] = useState([]);
   const [videos, setVideos] = useState([]);
@@ -8,22 +10,32 @@ export default function Discover({ onBack }) {
   const [activeTab, setActiveTab] = useState("trending");
   const [loading, setLoading] = useState(true);
 
+  // Fetch users from Cloudflare Worker + Neon DB search endpoint
   useEffect(() => {
-    const usersRef = ref(db, "usersPublic");
+    const fetchUsers = async () => {
+      try {
+        const response = await apiGet(`/search/users?q=${encodeURIComponent(search)}`);
+        if (response && response.success) {
+          // Map snake_case database columns to frontend camelCase properties
+          const mappedUsers = (response.users || []).map((u) => ({
+            uid: u.uid,
+            displayName: u.display_name,
+            username: u.username,
+            photoURL: u.profile_url,
+          }));
+          setUsers(mappedUsers);
+        }
+      } catch (error) {
+        console.error("Worker user search error:", error);
+      }
+    };
 
-    const unsubscribeUsers = onValue(usersRef, (snapshot) => {
-      const data = snapshot.val() || {};
+    const timer = setTimeout(() => {
+      fetchUsers();
+    }, 300); // Debounce search request
 
-      const userList = Object.entries(data).map(([uid, user]) => ({
-        uid,
-        ...user,
-      }));
-
-      setUsers(userList);
-    });
-
-    return () => unsubscribeUsers();
-  }, []);
+    return () => clearTimeout(timer);
+  }, [search]);
 
   useEffect(() => {
     const postsRef = ref(db, "posts");
@@ -68,19 +80,7 @@ export default function Discover({ onBack }) {
 
   const normalizedSearch = search.trim().toLowerCase();
 
-  const filteredUsers = users.filter((user) => {
-    if (!normalizedSearch) {
-      return true;
-    }
-
-    const name = String(user.displayName || "").toLowerCase();
-    const username = String(user.username || "").toLowerCase();
-
-    return (
-      name.includes(normalizedSearch) ||
-      username.includes(normalizedSearch)
-    );
-  });
+  const filteredUsers = users; // Already filtered by the backend worker query!
 
   const filteredVideos = videos.filter((video) => {
     if (!normalizedSearch) {
@@ -88,9 +88,7 @@ export default function Discover({ onBack }) {
     }
 
     const caption = String(video.caption || "").toLowerCase();
-
     const name = String(video.displayName || "").toLowerCase();
-
     const username = String(video.username || "").toLowerCase();
 
     return (
@@ -380,26 +378,22 @@ const styles = {
     fontFamily: "Arial, sans-serif",
     color: "#17171c",
   },
-
   header: {
     display: "flex",
     justifyContent: "space-between",
     alignItems: "center",
     marginBottom: "18px",
   },
-
   title: {
     margin: 0,
     fontSize: "30px",
     fontWeight: "800",
   },
-
   subtitle: {
     margin: "6px 0 0",
     color: "#777",
     fontSize: "14px",
   },
-
   searchBox: {
     width: "100%",
     display: "flex",
@@ -411,13 +405,11 @@ const styles = {
     boxSizing: "border-box",
     marginBottom: "18px",
   },
-
   searchIcon: {
     fontSize: "24px",
     color: "#777",
     marginRight: "8px",
   },
-
   searchInput: {
     width: "100%",
     height: "48px",
@@ -426,13 +418,11 @@ const styles = {
     background: "transparent",
     fontSize: "15px",
   },
-
   tabs: {
     display: "flex",
     gap: "8px",
     marginBottom: "22px",
   },
-
   tabButton: {
     border: "none",
     background: "#ffffff",
@@ -442,29 +432,24 @@ const styles = {
     fontWeight: "700",
     cursor: "pointer",
   },
-
   activeTab: {
     background: "#6c35ff",
     color: "#ffffff",
   },
-
   section: {
     marginBottom: "28px",
   },
-
   sectionHeader: {
     display: "flex",
     alignItems: "center",
     gap: "8px",
     marginBottom: "12px",
   },
-
   sectionTitle: {
     margin: 0,
     fontSize: "20px",
     fontWeight: "800",
   },
-
   count: {
     background: "#e9e4ff",
     color: "#6c35ff",
@@ -473,13 +458,11 @@ const styles = {
     fontSize: "12px",
     fontWeight: "700",
   },
-
   peopleList: {
     display: "flex",
     flexDirection: "column",
     gap: "10px",
   },
-
   personCard: {
     display: "flex",
     alignItems: "center",
@@ -488,7 +471,6 @@ const styles = {
     padding: "12px",
     border: "1px solid #e7e7eb",
   },
-
   personPhoto: {
     width: "52px",
     height: "52px",
@@ -496,24 +478,20 @@ const styles = {
     objectFit: "cover",
     marginRight: "12px",
   },
-
   personInfo: {
     flex: 1,
     minWidth: 0,
   },
-
   personName: {
     display: "block",
     fontSize: "15px",
     marginBottom: "4px",
   },
-
   personUsername: {
     display: "block",
     fontSize: "13px",
     color: "#777",
   },
-
   followButton: {
     border: "none",
     background: "#6c35ff",
@@ -523,20 +501,17 @@ const styles = {
     fontWeight: "700",
     cursor: "pointer",
   },
-
   videoGrid: {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))",
     gap: "14px",
   },
-
   videoCard: {
     background: "#ffffff",
     borderRadius: "16px",
     overflow: "hidden",
     border: "1px solid #e7e7eb",
   },
-
   video: {
     width: "100%",
     aspectRatio: "9 / 14",
@@ -544,17 +519,14 @@ const styles = {
     display: "block",
     background: "#111",
   },
-
   videoInfo: {
     padding: "12px",
   },
-
   videoUser: {
     display: "flex",
     alignItems: "center",
     marginBottom: "9px",
   },
-
   videoAvatar: {
     width: "38px",
     height: "38px",
@@ -562,19 +534,16 @@ const styles = {
     objectFit: "cover",
     marginRight: "9px",
   },
-
   videoUserName: {
     display: "block",
     fontSize: "13px",
     marginBottom: "3px",
   },
-
   videoUsername: {
     display: "block",
     fontSize: "12px",
     color: "#777",
   },
-
   caption: {
     margin: "8px 0",
     fontSize: "13px",
@@ -582,14 +551,12 @@ const styles = {
     color: "#333",
     wordBreak: "break-word",
   },
-
   videoStats: {
     display: "flex",
     gap: "10px",
     color: "#777",
     fontSize: "12px",
   },
-
   emptyBox: {
     background: "#ffffff",
     border: "1px solid #e7e7eb",
@@ -597,23 +564,19 @@ const styles = {
     padding: "35px 20px",
     textAlign: "center",
   },
-
   emptyIcon: {
     fontSize: "40px",
     marginBottom: "10px",
   },
-
   emptyTitle: {
     margin: "0 0 7px",
     fontSize: "18px",
   },
-
   emptyText: {
     margin: 0,
     color: "#777",
     fontSize: "14px",
   },
-
   spinner: {
     color: "#6c35ff",
     fontWeight: "700",

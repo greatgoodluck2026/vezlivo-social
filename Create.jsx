@@ -1543,7 +1543,7 @@ function Create({ draftId = "" } = {}) {
      PUBLISH
   ===================================================== */
 
-  const publishPost =
+ const publishPost =
     async () => {
       setMessage("");
       setError("");
@@ -1850,9 +1850,20 @@ function Create({ draftId = "" } = {}) {
               "published",
           };
 
+          // 1. Save to original endpoints/JSON storage
           await apiPost("/posts", {
             ...postData,
             shareToStory: contentType === "reel" && shareToStory,
+          });
+
+          // 2. Explicitly persist to Neon PostgreSQL Database via our Cloudflare Worker endpoint
+          await apiPost("/posts/create", {
+            userId: user.uid,
+            caption: caption.trim(),
+            muxAssetId: mediaUpload.assetId || "",
+            muxPlaybackId: mediaUpload.playbackId || "",
+            thumbnailUrl: coverURL || "",
+            videoUrl: mediaURL || ""
           });
 
           setUploadProgress(100);
@@ -1889,8 +1900,6 @@ function Create({ draftId = "" } = {}) {
         setUploading(false);
       }
     };
-
-
   /* =====================================================
      LOGIN
   ===================================================== */
