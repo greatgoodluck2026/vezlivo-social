@@ -335,7 +335,7 @@ export default {
         if (!env.MUX_TOKEN_ID || !env.MUX_TOKEN_SECRET) {
           return json({
             success: false,
-            error: "Mux credentials are not configured",
+            error: "Mux credentials are not configured in Cloudflare environment variables.",
           }, 500);
         }
 
@@ -347,7 +347,7 @@ export default {
               "Content-Type": "application/json",
               Authorization:
                 "Basic " +
-                btoa(`${env.MUX_TOKEN_ID}:${env.MUX_TOKEN_SECRET}`),
+                btoa(`${env.MUX_TOKEN_ID.trim()}:${env.MUX_TOKEN_SECRET.trim()}`),
             },
             body: JSON.stringify({
               cors_origin: "*",
@@ -365,7 +365,7 @@ export default {
             success: false,
             error:
               muxData.error?.message ||
-              "Failed to create Mux upload",
+              "Failed to create Mux upload slot. Check Mux token permissions.",
           }, 502);
         }
 
@@ -374,56 +374,6 @@ export default {
           uploadId: muxData.data.id,
           uploadUrl: muxData.data.url,
         }, 201);
-      } catch (err) {
-        return json({ success: false, error: err.message }, 500);
-      }
-    }
-
-    // OPTIONAL MUX UPLOAD PROXY
-    if (
-      url.pathname === "/mux/proxy-upload" &&
-      request.method === "PUT"
-    ) {
-      try {
-        const target = url.searchParams.get("target");
-
-        if (!target) {
-          return json({
-            success: false,
-            error: "Missing target upload URL",
-          }, 400);
-        }
-
-        const targetUrl = new URL(target);
-
-        if (
-          targetUrl.protocol !== "https:" ||
-          (!targetUrl.hostname.endsWith("mux.com") && !targetUrl.hostname.endsWith("googleapis.com"))
-        ) {
-          return json({
-            success: false,
-            error: "Invalid Mux upload destination",
-          }, 400);
-        }
-
-        const result = await fetch(targetUrl.toString(), {
-          method: "PUT",
-          headers: {
-            "Content-Type":
-              request.headers.get("Content-Type") ||
-              "application/octet-stream",
-          },
-          body: request.body,
-        });
-
-        if (!result.ok) {
-          return json({
-            success: false,
-            error: `Upload failed with status ${result.status}`,
-          }, 502);
-        }
-
-        return json({ success: true });
       } catch (err) {
         return json({ success: false, error: err.message }, 500);
       }
@@ -451,7 +401,7 @@ export default {
             headers: {
               Authorization:
                 "Basic " +
-                btoa(`${env.MUX_TOKEN_ID}:${env.MUX_TOKEN_SECRET}`),
+                btoa(`${env.MUX_TOKEN_ID.trim()}:${env.MUX_TOKEN_SECRET.trim()}`),
             },
           }
         );
@@ -476,7 +426,7 @@ export default {
               headers: {
                 Authorization:
                   "Basic " +
-                  btoa(`${env.MUX_TOKEN_ID}:${env.MUX_TOKEN_SECRET}`),
+                  btoa(`${env.MUX_TOKEN_ID.trim()}:${env.MUX_TOKEN_SECRET.trim()}`),
               },
             }
           );
@@ -524,17 +474,6 @@ export default {
         success: true,
         storyId: Date.now().toString(),
       });
-    }
-
-    // MEDIA UPLOAD PLACEHOLDER
-    if (
-      ["/media/upload", "/api/media/upload"].includes(url.pathname) &&
-      request.method === "POST"
-    ) {
-      return json({
-        success: false,
-        error: "Media upload endpoint is not implemented",
-      }, 501);
     }
 
     return json({

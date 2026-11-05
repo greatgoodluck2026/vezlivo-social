@@ -1,0 +1,6 @@
+name = "vezlivo-api"
+main = "workers/worker.js"
+compatibility_date = "2026-10-04"
+
+[vars]
+APP_NAME = "Vezlivo"

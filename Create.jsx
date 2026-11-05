@@ -1641,206 +1641,296 @@ function Create({ draftId = "" } = {}) {
           : "Uploading your Vezlivo post..."
       );
 
-       const uploadFile = async (file, path, onProgress) => {
-          if (file === mediaFile && mediaType === "video") {
-            // 1. Create upload slot on Mux via your Cloudflare Worker backend
-            const created = await apiPost("/mux/uploads", { postId });
-            if (!created.success || !created.uploadUrl) {
-              throw new Error(created.error || "Failed to create Mux upload slot.");
-            }
+       /* =====================================================
+     PUBLISH
+  ===================================================== */
+  const publishPost = async () => {
+    // 🛡️ PREVENT DOUBLE SUBMISSION / MULTI-CLICK GUARD
+    if (uploading) {
+      return;
+    }
 
-            if (onProgress) onProgress(10, file.size);
+    setMessage("");
+    setError("");
 
-            // 2. Upload video file via Cloudflare Worker proxy to bypass mobile network blocks
-           const workerProxyUrl = `https://vezlivo-api.vezlivo-api.workers.dev/mux/proxy-upload?target=${encodeURIComponent(created.uploadUrl)}`;
+    if (!user) {
+      setError("Please log in before publishing.");
+      return;
+    }
 
-            const proxyRes = await fetch(workerProxyUrl, {
-              method: "PUT",
-              headers: {
-                "Content-Type": file.type || "application/octet-stream",
-              },
-              body: file,
-            });
+    if (!mediaFile) {
+      setError("Please select or record something first.");
+      return;
+    }
 
-            if (!proxyRes.ok) {
-              const errText = await proxyRes.text().catch(() => "");
-              throw new Error(`Video upload via proxy failed (Status ${proxyRes.status}): ${errText}`);
-            }
+    if (caption.length > MAX_CAPTION) {
+      setError("Your caption is too long.");
+      return;
+    }
 
-            if (onProgress) onProgress(file.size, file.size);
-            setMessage("Processing video with Mux...");
+    // 🔑 GENERATE POST ID FIRST SO UPLOADS HAVE IT READY
+    const postId = crypto.randomUUID();
+    if (!postId) {
+      setError("Could not create the post identifier.");
+      return;
+    }
 
-            // 3. Poll Mux/Worker for processing completion
-            let completed = null;
-            for (let attempt = 0; attempt < 30; attempt++) {
-              completed = await apiPost(
-                `/mux/uploads/${encodeURIComponent(created.uploadId)}/complete`,
-                {}
-              );
-              if (completed && !completed.processing && completed.playbackId) break;
-              await new Promise((resolve) => setTimeout(resolve, 2000));
-            }
-            if (!completed || completed.processing || !completed.playbackId) {
-              throw new Error("Mux is still processing your video. Please try publishing again shortly.");
-            }
-            return { url: completed.url, key: "", playbackId: completed.playbackId, assetId: completed.assetId };
+    try {
+      setUploading(true);
+      setUploadProgress(0);
+
+      const extension =
+        mediaFile.name.includes(".")
+          ? mediaFile.name.split(".").pop().toLowerCase()
+          : mediaType === "video"
+          ? "webm"
+          : "jpg";
+
+      const storagePath = `${contentType === "story" ? "stories" : "posts"}/${user.uid}/${postId}.${extension}`;
+
+      setMessage(
+        contentType === "story"
+          ? "Uploading your Vezlivo story..."
+          : contentType === "reel"
+          ? "Uploading your Vezlivo Reel..."
+          : "Uploading your Vezlivo post..."
+      );
+
+      const uploadFile = async (file, path, onProgress) => {
+        if (file === mediaFile && mediaType === "video") {
+          // 1. Create upload slot on Mux via your Cloudflare Worker backend using the generated postId
+          const created = await apiPost("/mux/uploads", { postId });
+          if (!created.success || !created.uploadUrl) {
+            throw new Error(created.error || "Failed to create Mux upload slot.");
           }
-          const form = new FormData();
-          form.append("file", file);
-          form.append("path", path);
-          const uploaded = await apiUpload("/media/upload", form);
+
+          if (onProgress) onProgress(10, file.size);
+
+          // 2. Upload video file via Cloudflare Worker proxy using dynamic API URL
+          const apiUrl = import.meta.env.VITE_API_URL || "";
+          const workerProxyUrl = `${apiUrl}/mux/proxy-upload?target=${encodeURIComponent(created.uploadUrl)}`;
+
+          const proxyRes = await fetch(workerProxyUrl, {
+            method: "PUT",
+            headers: {
+              "Content-Type": file.type || "application/octet-stream",
+            },
+            body: file,
+          });
+
+          if (!proxyRes.ok) {
+            const errText = await proxyRes.text().catch(() => "");
+            throw new Error(`Video upload via proxy failed (Status ${proxyRes.status}): ${errText}`);
+          }
+
           if (onProgress) onProgress(file.size, file.size);
-          return { url: uploaded.url, key: uploaded.key };
-        };
+          setMessage("Processing video with Mux...");
 
-        let mediaTransferred = 0;
-        let musicTransferred = 0;
-        let coverTransferred = 0;
-        const updateCombinedProgress = () => {
-          const total = mediaFile.size + (musicFile?.size || 0) + (coverFile?.size || 0);
-          const transferred = mediaTransferred + musicTransferred + coverTransferred;
-          setUploadProgress(total > 0 ? Math.min(99, Math.round((transferred / total) * 100)) : 0);
-        };
-
-        const musicExtension = musicFile
-          ? (musicFile.name.includes(".") ? musicFile.name.split(".").pop().toLowerCase() : "mp3")
-          : "";
-        const selectedCoverFile = coverFile;
-        const coverStoragePath =
-          contentType === "reel" && mediaType === "video" && selectedCoverFile
-            ? `covers/${user.uid}/${postId}.jpg`
-            : "";
-
-        const uploadJobs = [
-          uploadFile(mediaFile, storagePath, (transferred) => {
-            mediaTransferred = transferred;
-            updateCombinedProgress();
-          }),
-        ];
-        if (musicFile) {
-          uploadJobs.push(uploadFile(musicFile, `sounds/${user.uid}/${postId}.${musicExtension}`, (transferred) => {
-            musicTransferred = transferred;
-            updateCombinedProgress();
-          }));
+          // 3. Poll Mux/Worker for processing completion
+          let completed = null;
+          for (let attempt = 0; attempt < 30; attempt++) {
+            completed = await apiPost(
+              `/mux/uploads/${encodeURIComponent(created.uploadId)}/complete`,
+              {}
+            );
+            if (completed && !completed.processing && completed.playbackId) break;
+            await new Promise((resolve) => setTimeout(resolve, 2000));
+          }
+          if (!completed || completed.processing || !completed.playbackId) {
+            throw new Error("Mux is still processing your video. Please try publishing again shortly.");
+          }
+          return { url: completed.url, key: "", playbackId: completed.playbackId, assetId: completed.assetId };
         }
-        if (selectedCoverFile) {
-          uploadJobs.push(uploadFile(selectedCoverFile, coverStoragePath, (transferred) => {
-            coverTransferred = transferred;
-            updateCombinedProgress();
-          }));
-        }
+        const form = new FormData();
+        form.append("file", file);
+        form.append("path", path);
+        const uploaded = await apiUpload("/media/upload", form);
+        if (onProgress) onProgress(file.size, file.size);
+        return { url: uploaded.url, key: uploaded.key };
+      };
 
-        const uploadedUrls = await Promise.all(uploadJobs);
-        const mediaUpload = uploadedUrls[0];
-        const mediaURL = mediaUpload.url;
-        const musicURL = musicFile ? uploadedUrls[1].url : (musicUrl || "");
-        const coverURL = selectedCoverFile
-          ? uploadedUrls[musicFile ? 2 : 1].url
+      let mediaTransferred = 0;
+      let musicTransferred = 0;
+      let coverTransferred = 0;
+      const updateCombinedProgress = () => {
+        const total = mediaFile.size + (musicFile?.size || 0) + (coverFile?.size || 0);
+        const transferred = mediaTransferred + musicTransferred + coverTransferred;
+        setUploadProgress(total > 0 ? Math.min(99, Math.round((transferred / total) * 100)) : 0);
+      };
+
+      const musicExtension = musicFile
+        ? (musicFile.name.includes(".") ? musicFile.name.split(".").pop().toLowerCase() : "mp3")
+        : "";
+      const selectedCoverFile = coverFile;
+      const coverStoragePath =
+        contentType === "reel" && mediaType === "video" && selectedCoverFile
+          ? `covers/${user.uid}/${postId}.jpg`
           : "";
 
-        setUploadProgress(99);
+      const uploadJobs = [
+        uploadFile(mediaFile, storagePath, (transferred) => {
+          mediaTransferred = transferred;
+          updateCombinedProgress();
+        }),
+      ];
+      if (musicFile) {
+        uploadJobs.push(uploadFile(musicFile, `sounds/${user.uid}/${postId}.${musicExtension}`, (transferred) => {
+          musicTransferred = transferred;
+          updateCombinedProgress();
+        }));
+      }
+      if (selectedCoverFile) {
+        uploadJobs.push(uploadFile(selectedCoverFile, coverStoragePath, (transferred) => {
+          coverTransferred = transferred;
+          updateCombinedProgress();
+        }));
+      }
 
-        const detectedHashtags = [
+      const uploadedUrls = await Promise.all(uploadJobs);
+      const mediaUpload = uploadedUrls[0];
+      const mediaURL = mediaUpload.url;
+      const musicURL = musicFile ? uploadedUrls[1].url : (musicUrl || "");
+      const coverURL = selectedCoverFile
+        ? uploadedUrls[musicFile ? 2 : 1].url
+        : "";
+
+      setUploadProgress(99);
+
+      const detectedHashtags = [
+        ...new Set([
+          ...extractHashtags(caption),
+          ...selectedHashtags,
+        ]),
+      ].slice(0, 30);
+
+      const mentions = extractMentions(caption);
+
+      const username =
+        user.displayName ||
+        user.email?.split("@")[0] ||
+        "Vezlivo user";
+
+      const now = Date.now();
+
+      const baseData = {
+        id: postId,
+        uid: user.uid,
+        username,
+        userEmail: user.email || "",
+        userPhotoURL: user.photoURL || "",
+        mediaType,
+        mediaURL,
+        storagePath: mediaUpload.key || "",
+        muxPlaybackId: mediaUpload.playbackId || "",
+        muxAssetId: mediaUpload.assetId || "",
+        caption: caption.trim(),
+        hashtags: detectedHashtags,
+        mentions: [
           ...new Set([
-            ...extractHashtags(caption),
-            ...selectedHashtags,
+            ...mentions,
+            ...taggedFriends,
           ]),
-        ].slice(0, 30);
+        ],
+        taggedFriends,
+        audience,
+        commentsEnabled,
+        originalAudio,
+        selectedSound,
+        musicName,
+        musicURL,
+        musicVolume,
+        background: backgroundFile?.name || selectedBackground,
+        filter: selectedFilter,
+        speed,
+        muted,
+        overlayText: overlayText.trim(),
+        createdAt: now,
+        updatedAt: now,
+        location: locationText.trim(),
+        allowSharing,
+        allowDownloads,
+        brandedContent,
+        brandName: brandName.trim(),
+        coverURL,
+        coverStoragePath,
+        coverSource,
+        coverFrameTime: Number(coverFrameTime || 0),
+        coverFit,
+        coverPositionX,
+        coverPositionY,
+        coverZoom,
+      };
 
-        const mentions =
-          extractMentions(
-            caption
-          );
+      if (contentType === "story") {
+        const expiresAt = now + 24 * 60 * 60 * 1000;
+        await apiPost("/stories", {
+          ...baseData,
+          type: "story",
+          expiresAt,
+          status: "published",
+          views: 0,
+          replies: 0,
+        });
 
-        const username =
-          user.displayName ||
-          user.email?.split("@")[0] ||
-          "Vezlivo user";
-
-        const now =
-          Date.now();
-
-        const baseData = {
-          id: postId,
-
-          uid: user.uid,
-
-          username,
-
-          userEmail:
-            user.email || "",
-
-          userPhotoURL:
-            user.photoURL || "",
-
-          mediaType,
-
-          mediaURL,
-
-          storagePath: mediaUpload.key || "",
-          muxPlaybackId: mediaUpload.playbackId || "",
-          muxAssetId: mediaUpload.assetId || "",
-
-          caption:
-            caption.trim(),
-
-          hashtags:
-            detectedHashtags,
-
-          mentions: [
-            ...new Set([
-              ...mentions,
-              ...taggedFriends,
-            ]),
-          ],
-
-          taggedFriends,
-
-          audience,
-
-          commentsEnabled,
-
-          originalAudio,
-
-          selectedSound,
-
-          musicName,
-
-          musicURL,
-
-          musicVolume,
-
-          background:
-            backgroundFile?.name ||
-            selectedBackground,
-
-          filter:
-            selectedFilter,
-
-          speed,
-
-          muted,
-
-          overlayText:
-            overlayText.trim(),
-
-          createdAt: now,
-
-          updatedAt: now,
-          location: locationText.trim(),
-          allowSharing,
-          allowDownloads,
-          brandedContent,
-          brandName: brandName.trim(),
-          coverURL,
-          coverStoragePath,
-          coverSource,
-          coverFrameTime: Number(coverFrameTime || 0),
-          coverFit,
-          coverPositionX,
-          coverPositionY,
-          coverZoom,
+        setUploadProgress(100);
+        setMessage("Your story is now live on Vezlivo for 24 hours.");
+      } else {
+        const postData = {
+          ...baseData,
+          postType: contentType === "reel" ? "reel" : "post",
+          likes: 0,
+          likesCount: 0,
+          comments: 0,
+          commentsCount: 0,
+          shares: 0,
+          reposts: 0,
+          saves: 0,
+          views: 0,
+          viewsCount: 0,
+          status: "published",
         };
+
+        await apiPost("/posts", {
+          ...postData,
+          shareToStory: contentType === "reel" && shareToStory,
+        });
+
+        await apiPost("/posts/create", {
+          userId: user.uid,
+          caption: caption.trim(),
+          muxAssetId: mediaUpload.assetId || "",
+          muxPlaybackId: mediaUpload.playbackId || "",
+          thumbnailUrl: coverURL || "",
+          videoUrl: mediaURL || ""
+        });
+
+        setUploadProgress(100);
+        setMessage(
+          contentType === "reel"
+            ? "Your Reel is live on Vezlivo."
+            : "Your post is live on Vezlivo."
+        );
+      }
+
+      setTimeout(() => {
+        removeMedia();
+      }, 1200);
+
+      if (currentDraftId) {
+        try { await deleteVezlivoDraft(currentDraftId); }
+        catch (draftDeleteError) { console.warn("Vezlivo draft cleanup failed:", draftDeleteError); }
+      }
+
+    } catch (publishError) {
+      console.error("Vezlivo publish error:", publishError);
+      setError(
+        publishError?.message ||
+          "Something went wrong while publishing your content."
+      );
+    } finally {
+      setUploading(false);
+    }
+  };
         /* ===============================================
             STORY
         =============================================== */
