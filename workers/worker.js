@@ -8,13 +8,26 @@ export default {
       });
     }
 
-    if (url.pathname === "/") {
-      return json({
-        ok: true,
-        service: "Vezlivo API",
-      });
+    // ROOT / DATABASE TEST
+    if (url.pathname === "/" || url.pathname === "/db-test") {
+      try {
+        const { neon } = await import("@neondatabase/serverless");
+        const sql = neon(env.DATABASE_URL);
+        const result = await sql`
+          SELECT NOW() AS current_time, version() AS db_version
+        `;
+
+        return json({
+          success: true,
+          message: "Successfully connected to Neon PostgreSQL!",
+          data: result[0],
+        });
+      } catch (err) {
+        return json({ success: false, error: err.message }, 500);
+      }
     }
 
+    // HEALTH CHECK
     if (url.pathname === "/health") {
       return json({
         ok: true,
@@ -23,72 +36,525 @@ export default {
       });
     }
 
-    // Handle Post Creation
-    if (url.pathname === "/api/posts" && request.method === "POST") {
-      try {
-        const body = await request.json();
-        const {
-          id, uid, username, userEmail, userPhotoURL, mediaType,
-          mediaURL, storagePath, caption, hashtags, mentions,
-          taggedFriends, audience, commentsEnabled, originalAudio,
-          selectedSound, musicName, musicURL, musicVolume, background,
-          filter, speed, muted, overlayText, createdAt, location,
-          allowSharing, allowDownloads, brandedContent, brandName,
-          coverURL, coverStoragePath, coverSource, coverFrameTime,
-          coverFit, coverPositionX, coverPositionY, coverZoom, postType
-        } = body;
+    // SERVE MEDIA FROM R2
+    if (url.pathname.startsWith("/media/")) {
+      const filename = url.pathname.slice("/media/".length);
 
-        if (!uid || !mediaURL) {
-          return json({ ok: false, error: "Missing required fields (uid or mediaURL)" }, 400);
+      if (!filename) {
+        return new Response("Not found", { status: 404 });
+      }
+
+      try {
+        const object = await env.R2.get(filename);
+
+        if (!object) {
+          return new Response("Media not found", { status: 404 });
         }
 
-        // Insert post into Neon PostgreSQL database
-        await env.DATABASE.query(
-          `INSERT INTO posts (
-            id, uid, username, user_email, user_photo_url, media_type,
-            media_url, storage_path, caption, hashtags, mentions,
-            tagged_friends, audience, comments_enabled, original_audio,
-            selected_sound, music_name, music_url, music_volume, background,
-            filter_style, speed, muted, overlay_text, created_at, location,
-            allow_sharing, allow_downloads, branded_content, brand_name,
-            cover_url, cover_storage_path, cover_source, cover_frame_time,
-            cover_fit, cover_position_x, cover_position_y, cover_zoom, post_type
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39)
-          ON CONFLICT (id) DO NOTHING;`,
-          [
-            id, uid, username, userEmail, userPhotoURL, mediaType,
-            mediaURL, storagePath, caption, JSON.stringify(hashtags || []), JSON.stringify(mentions || []),
-            JSON.stringify(taggedFriends || []), audience, commentsEnabled, originalAudio,
-            selectedSound, musicName, musicURL, musicVolume, background,
-            filter, speed, muted, overlayText, createdAt, location,
-            allowSharing, allowDownloads, brandedContent, brandName,
-            coverURL, coverStoragePath, coverSource, coverFrameTime,
-            coverFit, coverPositionX, coverPositionY, coverZoom, postType || 'post'
-          ]
-        );
+        const headers = new Headers(corsHeaders());
+        object.writeHttpMetadata(headers);
+        headers.set("ETag", object.httpEtag);
 
-        return json({ ok: true, postId: id });
+        return new Response(object.body, { headers });
       } catch (err) {
-        console.error("Post creation error:", err);
-        return json({ ok: false, error: err.message }, 500);
+        return json({ success: false, error: err.message }, 500);
       }
     }
 
-    return json(
-      {
-        ok: false,
-        error: "Route not found",
-      },
-      404
+    // SYNC USER PROFILE
+    if (url.pathname === "/users/sync" && request.method === "POST") {
+      try {
+        const body = await request.json();
+
+        const {
+          uid,
+          displayName,
+          username,
+          birthMonth,
+          birthDay,
+          birthYear,
+          dateOfBirth,
+          age,
+          isMinor,
+          accountAgeGroup,
+          canAccessMatureContent,
+          profileURL,
+          profileImageBase64,
+          profileImageName,
+          onboardingComplete,
+          onboardingCompletedAt,
+        } = body;
+
+        if (!uid) {
+          return json({ success: false, error: "Missing user UID" }, 400);
+        }
+
+        let finalProfileURL = profileURL || "";
+
+        if (profileImageBase64 && env.R2) {
+          try {
+            const base64Data = profileImageBase64.includes(",")
+              ? profileImageBase64.split(",")[1]
+              : profileImageBase64;
+
+            const binary = atob(base64Data);
+            const bytes = new Uint8Array(binary.length);
+
+            for (let i = 0; i < binary.length; i++) {
+              bytes[i] = binary.charCodeAt(i);
+            }
+
+            const filename =
+              profileImageName || `profile-${uid}-${Date.now()}.jpg`;
+
+            await env.R2.put(filename, bytes, {
+              httpMetadata: { contentType: "image/jpeg" },
+            });
+
+            finalProfileURL = `${url.origin}/media/${filename}`;
+          } catch (err) {
+            console.error("R2 upload failed:", err);
+          }
+        }
+
+        const { neon } = await import("@neondatabase/serverless");
+        const sql = neon(env.DATABASE_URL);
+
+        await sql`
+          CREATE TABLE IF NOT EXISTS users (
+            uid TEXT PRIMARY KEY,
+            display_name TEXT,
+            username TEXT,
+            birth_month INT,
+            birth_day INT,
+            birth_year INT,
+            date_of_birth TEXT,
+            age INT,
+            is_minor BOOLEAN,
+            account_age_group TEXT,
+            can_access_mature_content BOOLEAN,
+            profile_url TEXT,
+            onboarding_complete BOOLEAN,
+            onboarding_completed_at BIGINT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          )
+        `;
+
+        await sql`
+          INSERT INTO users (
+            uid, display_name, username, birth_month, birth_day,
+            birth_year, date_of_birth, age, is_minor, account_age_group,
+            can_access_mature_content, profile_url,
+            onboarding_complete, onboarding_completed_at
+          )
+          VALUES (
+            ${uid}, ${displayName}, ${username}, ${birthMonth},
+            ${birthDay}, ${birthYear}, ${dateOfBirth}, ${age},
+            ${isMinor}, ${accountAgeGroup}, ${canAccessMatureContent},
+            ${finalProfileURL}, ${onboardingComplete}, ${onboardingCompletedAt}
+          )
+          ON CONFLICT (uid) DO UPDATE SET
+            display_name = EXCLUDED.display_name,
+            username = EXCLUDED.username,
+            birth_month = EXCLUDED.birth_month,
+            birth_day = EXCLUDED.birth_day,
+            birth_year = EXCLUDED.birth_year,
+            date_of_birth = EXCLUDED.date_of_birth,
+            age = EXCLUDED.age,
+            is_minor = EXCLUDED.is_minor,
+            account_age_group = EXCLUDED.account_age_group,
+            can_access_mature_content = EXCLUDED.can_access_mature_content,
+            profile_url = EXCLUDED.profile_url,
+            onboarding_complete = EXCLUDED.onboarding_complete,
+            onboarding_completed_at = EXCLUDED.onboarding_completed_at
+        `;
+
+        return json({
+          success: true,
+          message: "User profile synchronized successfully",
+          profileURL: finalProfileURL,
+        });
+      } catch (err) {
+        return json({ success: false, error: err.message }, 500);
+      }
+    }
+
+    // SEARCH USERS
+    if (
+      (url.pathname === "/search/users" ||
+        url.pathname === "/api/search/users") &&
+      request.method === "GET"
+    ) {
+      try {
+        const query = url.searchParams.get("q") || "";
+        const { neon } = await import("@neondatabase/serverless");
+        const sql = neon(env.DATABASE_URL);
+
+        const users = await sql`
+          SELECT uid, display_name, username, profile_url
+          FROM users
+          WHERE username ILIKE ${"%" + query + "%"}
+             OR display_name ILIKE ${"%" + query + "%"}
+          LIMIT 20
+        `;
+
+        return json({ success: true, users });
+      } catch (err) {
+        return json({ success: false, error: err.message }, 500);
+      }
+    }
+
+    // GET POSTS AND REELS (HOME FEED & PROFILE)
+    if (
+      [
+        "/posts",
+        "/api/posts",
+        "/reels",
+        "/api/reels",
+      ].includes(url.pathname) &&
+      request.method === "GET"
+    ) {
+      try {
+        const { neon } = await import("@neondatabase/serverless");
+        const sql = neon(env.DATABASE_URL);
+
+        const userId = url.searchParams.get("userId") || url.searchParams.get("uid");
+
+        let posts;
+        if (userId) {
+          posts = await sql`
+            SELECT * FROM posts 
+            WHERE user_id = ${userId} 
+            ORDER BY created_at DESC 
+            LIMIT 50
+          `;
+        } else {
+          posts = await sql`
+            SELECT * FROM posts 
+            ORDER BY created_at DESC 
+            LIMIT 50
+          `;
+        }
+
+        return json({
+          success: true,
+          posts,
+        });
+      } catch (err) {
+        return json({ success: false, error: err.message }, 500);
+      }
+    }
+
+    // CREATE POSTS AND REELS
+    if (
+      [
+        "/posts",
+        "/api/posts",
+        "/posts/create",
+        "/reels",
+        "/api/reels",
+        "/reels/create",
+      ].includes(url.pathname) &&
+      request.method === "POST"
+    ) {
+      try {
+        const body = await request.json();
+
+        const {
+          userId,
+          uid,
+          caption,
+          muxAssetId,
+          muxPlaybackId,
+          thumbnailUrl,
+          coverURL,
+          videoUrl,
+          mediaURL,
+        } = body;
+
+        const effectiveUserId = userId || uid;
+
+        if (!effectiveUserId) {
+          return json({
+            success: false,
+            error: "Missing userId or uid",
+          }, 400);
+        }
+
+        const { neon } = await import("@neondatabase/serverless");
+        const sql = neon(env.DATABASE_URL);
+
+        await sql`
+          CREATE TABLE IF NOT EXISTS posts (
+            id SERIAL PRIMARY KEY,
+            user_id TEXT,
+            caption TEXT,
+            video_url TEXT,
+            mux_asset_id TEXT,
+            mux_playback_id TEXT,
+            thumbnail_url TEXT,
+            likes_count INT DEFAULT 0,
+            comments_count INT DEFAULT 0,
+            shares_count INT DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          )
+        `;
+
+        const result = await sql`
+          INSERT INTO posts (
+            user_id, caption, video_url, mux_asset_id,
+            mux_playback_id, thumbnail_url
+          )
+          VALUES (
+            ${effectiveUserId},
+            ${caption || ""},
+            ${videoUrl || mediaURL || ""},
+            ${muxAssetId || ""},
+            ${muxPlaybackId || ""},
+            ${thumbnailUrl || coverURL || ""}
+          )
+          RETURNING *
+        `;
+
+        return json({
+          success: true,
+          message: "Post created successfully",
+          post: result[0],
+        });
+      } catch (err) {
+        return json({ success: false, error: err.message }, 500);
+      }
+    }
+
+    // CREATE MUX DIRECT UPLOAD
+    if (
+      ["/mux/uploads", "/api/mux/uploads"].includes(url.pathname) &&
+      request.method === "POST"
+    ) {
+      try {
+        if (!env.MUX_TOKEN_ID || !env.MUX_TOKEN_SECRET) {
+          return json({
+            success: false,
+            error: "Mux credentials are not configured",
+          }, 500);
+        }
+
+        const muxResponse = await fetch(
+          "https://api.mux.com/video/v1/uploads",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization:
+                "Basic " +
+                btoa(`${env.MUX_TOKEN_ID}:${env.MUX_TOKEN_SECRET}`),
+            },
+            body: JSON.stringify({
+              cors_origin: "*",
+              new_asset_settings: {
+                playback_policies: ["public"],
+              },
+            }),
+          }
+        );
+
+        const muxData = await muxResponse.json();
+
+        if (!muxResponse.ok || !muxData.data?.url) {
+          return json({
+            success: false,
+            error:
+              muxData.error?.message ||
+              "Failed to create Mux upload",
+          }, 502);
+        }
+
+        return json({
+          success: true,
+          uploadId: muxData.data.id,
+          uploadUrl: muxData.data.url,
+        }, 201);
+      } catch (err) {
+        return json({ success: false, error: err.message }, 500);
+      }
+    }
+
+    // OPTIONAL MUX UPLOAD PROXY
+    if (
+      url.pathname === "/mux/proxy-upload" &&
+      request.method === "PUT"
+    ) {
+      try {
+        const target = url.searchParams.get("target");
+
+        if (!target) {
+          return json({
+            success: false,
+            error: "Missing target upload URL",
+          }, 400);
+        }
+
+        const targetUrl = new URL(target);
+
+        if (
+          targetUrl.protocol !== "https:" ||
+          (!targetUrl.hostname.endsWith("mux.com") && !targetUrl.hostname.endsWith("googleapis.com"))
+        ) {
+          return json({
+            success: false,
+            error: "Invalid Mux upload destination",
+          }, 400);
+        }
+
+        const result = await fetch(targetUrl.toString(), {
+          method: "PUT",
+          headers: {
+            "Content-Type":
+              request.headers.get("Content-Type") ||
+              "application/octet-stream",
+          },
+          body: request.body,
+        });
+
+        if (!result.ok) {
+          return json({
+            success: false,
+            error: `Upload failed with status ${result.status}`,
+          }, 502);
+        }
+
+        return json({ success: true });
+      } catch (err) {
+        return json({ success: false, error: err.message }, 500);
+      }
+    }
+
+    // CHECK MUX UPLOAD STATUS
+    const completeMatch = url.pathname.match(
+      /^\/mux\/uploads\/([^/]+)\/complete$/
     );
+
+    if (completeMatch && request.method === "POST") {
+      try {
+        if (!env.MUX_TOKEN_ID || !env.MUX_TOKEN_SECRET) {
+          return json({
+            success: false,
+            error: "Mux credentials are not configured",
+          }, 500);
+        }
+
+        const uploadId = decodeURIComponent(completeMatch[1]);
+
+        const muxResponse = await fetch(
+          `https://api.mux.com/video/v1/uploads/${encodeURIComponent(uploadId)}`,
+          {
+            headers: {
+              Authorization:
+                "Basic " +
+                btoa(`${env.MUX_TOKEN_ID}:${env.MUX_TOKEN_SECRET}`),
+            },
+          }
+        );
+
+        const muxData = await muxResponse.json();
+
+        if (!muxResponse.ok || !muxData.data) {
+          return json({
+            success: false,
+            error: "Failed to check Mux upload status",
+          }, 502);
+        }
+
+        const upload = muxData.data;
+        let playbackId = "";
+        let assetStatus = "processing";
+
+        if (upload.asset_id) {
+          const assetResponse = await fetch(
+            `https://api.mux.com/video/v1/assets/${encodeURIComponent(upload.asset_id)}`,
+            {
+              headers: {
+                Authorization:
+                  "Basic " +
+                  btoa(`${env.MUX_TOKEN_ID}:${env.MUX_TOKEN_SECRET}`),
+              },
+            }
+          );
+
+          const assetData = await assetResponse.json();
+
+          if (assetResponse.ok && assetData.data) {
+            playbackId =
+              assetData.data.playback_ids?.[0]?.id || "";
+            assetStatus = assetData.data.status || "processing";
+          }
+        }
+
+        if (upload.status === "errored") {
+          return json({
+            success: false,
+            status: upload.status,
+            error: "Mux reports that the upload failed",
+          }, 502);
+        }
+
+        return json({
+          success: true,
+          uploadId: upload.id,
+          status: upload.status,
+          assetId: upload.asset_id || null,
+          playbackId,
+          assetStatus,
+          processing: assetStatus !== "ready",
+          url: playbackId
+            ? `https://stream.mux.com/${playbackId}.m3u8`
+            : "",
+        });
+      } catch (err) {
+        return json({ success: false, error: err.message }, 500);
+      }
+    }
+
+    // STORIES
+    if (
+      ["/stories", "/api/stories"].includes(url.pathname) &&
+      request.method === "POST"
+    ) {
+      return json({
+        success: true,
+        storyId: Date.now().toString(),
+      });
+    }
+
+    // MEDIA UPLOAD PLACEHOLDER
+    if (
+      ["/media/upload", "/api/media/upload"].includes(url.pathname) &&
+      request.method === "POST"
+    ) {
+      return json({
+        success: false,
+        error: "Media upload endpoint is not implemented",
+      }, 501);
+    }
+
+    return json({
+      ok: false,
+      error: "Route not found",
+      path: url.pathname,
+      method: request.method,
+    }, 404);
   },
 };
 
 function corsHeaders() {
   return {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Allow-Methods":
+      "GET, POST, PUT, PATCH, DELETE, OPTIONS",
+    "Access-Control-Allow-Headers":
+      "Content-Type, Authorization, Upload-Length, Upload-Metadata, Tus-Resumable, Upload-Offset, X-HTTP-Method-Override",
+    "Access-Control-Expose-Headers":
+      "Location, Upload-Offset, Upload-Length, Tus-Resumable, Upload-Metadata",
   };
 }
 
@@ -96,7 +562,7 @@ function json(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
     headers: {
-      "Content-Type": "application/json",
+      "Content-Type": "application/json; charset=utf-8",
       ...corsHeaders(),
     },
   });

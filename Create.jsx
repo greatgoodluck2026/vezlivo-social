@@ -13,6 +13,9 @@ import {
 import {
   auth,
 } from "./firebase.js";
+
+import * as tus from "tus-js-client";
+
 const MAX_VIDEO_SIZE =
   500 * 1024 * 1024;
 
@@ -49,7 +52,6 @@ const VISUAL_BACKGROUNDS = [
   { name: "Clean", value: "clean", css: "#f4f4f5" },
 ];
 
-
 const VEZLIVO_HASHTAG_SUGGESTIONS = [
   "#Vezlivo",
   "#VezlivoReels",
@@ -85,7 +87,6 @@ function normalizeHashtag(value) {
     : "";
 }
 
-
 function extractHashtags(text) {
   const matches =
     String(text || "").match(
@@ -99,7 +100,6 @@ function extractHashtags(text) {
   ];
 }
 
-
 function extractMentions(text) {
   const matches =
     String(text || "").match(
@@ -111,6 +111,39 @@ function extractMentions(text) {
   ];
 }
 
+// Function to handle video upload to Mux using resumable chunking (bypasses MTN/Glo mobile restrictions)
+const uploadVideoResumable = async (file, onProgress) => {
+  const response = await fetch(`${import.meta.env.VITE_API_URL}/mux/uploads`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" }
+  });
+  const data = await response.json();
+
+  if (!data.success || !data.uploadUrl) {
+    throw new Error(data.error || "Failed to create Mux upload session.");
+  }
+
+  return new Promise((resolve, reject) => {
+    const upload = new tus.Upload(file, {
+      endpoint: data.uploadUrl,
+      uploadUrl: data.uploadUrl,
+      retryDelays: [0, 1000, 3000, 5000],
+      chunkSize: 2 * 1024 * 1024, // 2MB chunks for smooth mobile uploading
+      metadata: {
+        filename: file.name,
+        filetype: file.type
+      },
+      onError: (error) => reject(error),
+      onProgress: (bytesUploaded, bytesTotal) => {
+        const percentage = Math.round((bytesUploaded / bytesTotal) * 100);
+        if (onProgress) onProgress(percentage);
+      },
+      onSuccess: () => resolve({ uploadId: data.uploadId })
+    });
+
+    upload.start();
+  });
+};
 
 /* =========================================================
    VEZLIVO PERSISTENT DRAFT STORAGE
@@ -1539,89 +1572,112 @@ function Create({ draftId = "" } = {}) {
     transform: `scale(${coverZoom})`,
   };
 
-  /* =====================================================
+ /* =====================================================
      PUBLISH
   ===================================================== */
+  const publishPost = async () => {
+    // 🛡️ PREVENT DOUBLE SUBMISSION / MULTI-CLICK GUARD
+    if (uploading) {
+      return;
+    }
 
- const publishPost =
-    async () => {
-      setMessage("");
-      setError("");
+    setMessage("");
+    setError("");
 
-      if (!user) {
-        setError(
-          "Please log in before publishing."
+    if (!user) {
+      setError(
+        "Please log in before publishing."
+      );
+      return;
+    }
+
+    if (!mediaFile) {
+      setError(
+        "Please select or record something first."
+      );
+      return;
+    }
+
+    if (
+      caption.length >
+      MAX_CAPTION
+    ) {
+      setError(
+        "Your caption is too long."
+      );
+      return;
+    }
+
+    try {
+      setUploading(true);
+      setUploadProgress(0);
+
+      const postId = crypto.randomUUID();
+
+      if (!postId) {
+        throw new Error(
+          "Could not create the post."
         );
-        return;
       }
 
-      if (!mediaFile) {
-        setError(
-          "Please select or record something first."
-        );
-        return;
-      }
+      const extension =
+        mediaFile.name.includes(".")
+          ? mediaFile.name
+              .split(".")
+              .pop()
+              .toLowerCase()
+          : mediaType === "video"
+          ? "webm"
+          : "jpg";
 
-      if (
-        caption.length >
-        MAX_CAPTION
-      ) {
-        setError(
-          "Your caption is too long."
-        );
-        return;
-      }
+      const storagePath =
+        `${contentType === "story" ? "stories" : "posts"}/${user.uid}/${postId}.${extension}`;
 
-      try {
-        setUploading(true);
-        setUploadProgress(0);
+      setMessage(
+        contentType === "story"
+          ? "Uploading your Vezlivo story..."
+          : contentType === "reel"
+          ? "Uploading your Vezlivo Reel..."
+          : "Uploading your Vezlivo post..."
+      );
 
-        const postId = crypto.randomUUID();
-
-        if (!postId) {
-          throw new Error(
-            "Could not create the post."
-          );
-        }
-
-        const extension =
-          mediaFile.name.includes(".")
-            ? mediaFile.name
-                .split(".")
-                .pop()
-                .toLowerCase()
-            : mediaType === "video"
-            ? "webm"
-            : "jpg";
-
-        const storagePath =
-          `${contentType === "story" ? "stories" : "posts"}/${user.uid}/${postId}.${extension}`;
-
-        setMessage(
-          contentType === "story"
-            ? "Uploading your Vezlivo story..."
-            : contentType === "reel"
-            ? "Uploading your Vezlivo Reel..."
-            : "Uploading your Vezlivo post..."
-        );
-
-        const uploadFile = async (file, path, onProgress) => {
+       const uploadFile = async (file, path, onProgress) => {
           if (file === mediaFile && mediaType === "video") {
+            // 1. Create upload slot on Mux via your Cloudflare Worker backend
             const created = await apiPost("/mux/uploads", { postId });
-            const muxResponse = await fetch(created.uploadUrl, {
+            if (!created.success || !created.uploadUrl) {
+              throw new Error(created.error || "Failed to create Mux upload slot.");
+            }
+
+            if (onProgress) onProgress(10, file.size);
+
+            // 2. Upload video file via Cloudflare Worker proxy to bypass mobile network blocks
+           const workerProxyUrl = `https://vezlivo-api.vezlivo-api.workers.dev/mux/proxy-upload?target=${encodeURIComponent(created.uploadUrl)}`;
+
+            const proxyRes = await fetch(workerProxyUrl, {
               method: "PUT",
-              headers: { "Content-Type": file.type || "application/octet-stream" },
+              headers: {
+                "Content-Type": file.type || "application/octet-stream",
+              },
               body: file,
             });
-            if (!muxResponse.ok) throw new Error("Mux video upload failed.");
+
+            if (!proxyRes.ok) {
+              const errText = await proxyRes.text().catch(() => "");
+              throw new Error(`Video upload via proxy failed (Status ${proxyRes.status}): ${errText}`);
+            }
+
             if (onProgress) onProgress(file.size, file.size);
+            setMessage("Processing video with Mux...");
+
+            // 3. Poll Mux/Worker for processing completion
             let completed = null;
             for (let attempt = 0; attempt < 30; attempt++) {
               completed = await apiPost(
                 `/mux/uploads/${encodeURIComponent(created.uploadId)}/complete`,
                 {}
               );
-              if (!completed.processing && completed.playbackId) break;
+              if (completed && !completed.processing && completed.playbackId) break;
               await new Promise((resolve) => setTimeout(resolve, 2000));
             }
             if (!completed || completed.processing || !completed.playbackId) {
@@ -1785,10 +1841,8 @@ function Create({ draftId = "" } = {}) {
           coverPositionY,
           coverZoom,
         };
-
-
         /* ===============================================
-           STORY
+            STORY
         =============================================== */
 
         if (
@@ -1817,7 +1871,7 @@ function Create({ draftId = "" } = {}) {
           );
         } else {
           /* =============================================
-             POST / REEL
+              POST / REEL
           ============================================= */
 
           const postData = {
@@ -1900,6 +1954,7 @@ function Create({ draftId = "" } = {}) {
         setUploading(false);
       }
     };
+ 
   /* =====================================================
      LOGIN
   ===================================================== */

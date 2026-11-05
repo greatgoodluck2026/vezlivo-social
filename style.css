@@ -12,11 +12,15 @@ body,
 }
 
 html {
+  color-scheme: dark;
   background: #121212;
 }
 
 body {
+  margin: 0;
+  padding: 0;
   min-height: 100vh;
+  min-height: 100dvh;
   background: #121212;
   color: #ffffff;
   font-family:
@@ -221,7 +225,6 @@ button {
 
   margin: 0 auto 22px;
 }
-
 .empty-feed h1 {
   font-size: 28px;
   font-weight: 900;

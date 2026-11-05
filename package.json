@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@mux/mux-video": "^0.31.6",
     "@neondatabase/serverless": "^1.2.0",
     "@opensearch-project/opensearch": "^3.9.0",
     "@upstash/redis": "^1.40.0",
@@ -16,7 +17,8 @@
     "openai": "^7.20.0",
     "postgres": "^4.0.0",
     "react": "^19.1.1",
-    "react-dom": "^19.1.1"
+    "react-dom": "^19.1.1",
+    "tus-js-client": "^4.3.1"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^5.2.0",

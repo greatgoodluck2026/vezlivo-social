@@ -4,6 +4,8 @@ import { get, onValue, push, ref, runTransaction, set, update } from "firebase/d
 import { auth, database as db } from "./firebase.js";
 import Comments from "./Comments";
 import Report from "./Report.jsx";
+import { apiGet } from "./apiClient.js"; 
+import '@mux/mux-video';
 
 export default function Home({ onNavigate }) {
   const [user, setUser] = useState(null);
@@ -33,43 +35,34 @@ export default function Home({ onNavigate }) {
   }, []);
 
   useEffect(() => {
-    const postsRef = ref(db, "posts");
+    let cancelled = false;
 
-    const unsubscribe = onValue(postsRef, (snapshot) => {
-      const data = snapshot.val();
+    async function loadFeedPosts() {
+      try {
+        const data = await apiGet("/posts");
+        
+        if (cancelled) return;
 
-      if (!data) {
-        setPosts([]);
-        setLoading(false);
-        return;
+        const postList = Array.isArray(data) ? data : (data.posts || []);
+
+        postList.sort(
+          (a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0)
+        );
+
+        setPosts(postList);
+      } catch (error) {
+        console.error("Failed to load feed posts:", error);
+        if (!cancelled) setPosts([]);
+      } finally {
+        if (!cancelled) setLoading(false);
       }
+    }
 
-      const allPosts = [];
+    loadFeedPosts();
 
-      Object.entries(data).forEach(([uid, userPosts]) => {
-        if (!userPosts || typeof userPosts !== "object") return;
-
-        Object.entries(userPosts).forEach(([postId, post]) => {
-          if (!post || typeof post !== "object") return;
-
-          allPosts.push({
-            ...post,
-            uid,
-            postId,
-          });
-        });
-      });
-
-      allPosts.sort(
-        (a, b) =>
-          Number(b.createdAt || 0) - Number(a.createdAt || 0)
-      );
-
-      setPosts(allPosts);
-      setLoading(false);
-    });
-
-    return () => unsubscribe();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -381,43 +374,61 @@ export default function Home({ onNavigate }) {
       return Number(b.createdAt || 0) - Number(a.createdAt || 0);
     });
 
+  // Strict IntersectionObserver for single-video playback with automatic sound and zero multi-playback
+  useEffect(() => {
+    const observerCallback = (entries) => {
+      entries.forEach((entry) => {
+        const videoEl = entry.target.querySelector("video, mux-video");
+        if (!videoEl) return;
+
+        if (entry.isIntersecting) {
+          videoEl.muted = false;
+          videoEl.play().catch(() => {
+            videoEl.muted = true;
+            videoEl.play().catch(() => {});
+          });
+        } else {
+          videoEl.pause();
+          videoEl.currentTime = 0;
+          videoEl.muted = true;
+        }
+      });
+    };
+
+    const observer = new IntersectionObserver(observerCallback, { threshold: 0.75 });
+    const postElements = document.querySelectorAll("article");
+    postElements.forEach((el) => observer.observe(el));
+
+    return () => observer.disconnect();
+  }, [posts, activeTab]);
+
   return (
     <div style={styles.page}>
-      <header style={styles.header}>
-        <div style={styles.brand}>
-          <div style={styles.logo}>V</div>
-          <span style={styles.brandText}>Vezlivo</span>
+      <header style={styles.floatingHeader}>
+        <div style={styles.floatingTabs}>
+          {["For You", "Following", "Trending"].map((tab) => (
+            <button
+              key={tab}
+              type="button"
+              onClick={() => setActiveTab(tab)}
+              style={{
+                ...styles.tab,
+                ...(activeTab === tab ? styles.activeTab : {}),
+              }}
+            >
+              {tab}
+            </button>
+          ))}
         </div>
 
-        <div style={styles.headerButtons}>
-
-          <button
-            type="button"
-            style={styles.iconButton}
-            onClick={() => setShowSearch(!showSearch)}
-            aria-label="Search"
-          >
-            🔍
-          </button>
-
-          <button
-            type="button"
-            style={styles.iconButton}
-            onClick={() => openSection("Inbox")}
-            aria-label="Inbox"
-          >
-            💬
-          </button>
-
-          <button
-            type="button"
-            style={styles.iconButton}
-            onClick={() => openSection("Activity")}
-            aria-label="Notifications"
-          >
-            🔔
-          </button>
-        </div>
+        <button
+          type="button"
+          style={styles.floatingSearchBtn}
+          onClick={() => setShowSearch(!showSearch)}
+          aria-label="Search"
+        >
+          🔍
+        </button>
       </header>
 
       {showSearch && (
@@ -512,22 +523,6 @@ export default function Home({ onNavigate }) {
         </div>
       )}
 
-      <div style={styles.tabs}>
-        {["For You", "Following", "Trending"].map((tab) => (
-          <button
-            key={tab}
-            type="button"
-            onClick={() => setActiveTab(tab)}
-            style={{
-              ...styles.tab,
-              ...(activeTab === tab ? styles.activeTab : {}),
-            }}
-          >
-            {tab}
-          </button>
-        ))}
-      </div>
-
       <main style={styles.feed}>
         {loading ? (
           <div style={styles.centerMessage}>
@@ -536,17 +531,13 @@ export default function Home({ onNavigate }) {
         ) : filteredPosts.length === 0 ? (
           <div style={styles.empty}>
             <div style={styles.emptyIcon}>🎬</div>
-
             <h2 style={styles.emptyTitle}>No videos yet</h2>
-
             <p style={styles.emptyText}>
               Videos posted on Vezlivo will appear here.
             </p>
-
             <p style={styles.emptySmall}>
               Use Create to record or upload your first video.
             </p>
-
             <button
               type="button"
               style={styles.emptyCreateButton}
@@ -557,215 +548,217 @@ export default function Home({ onNavigate }) {
           </div>
         ) : (
           filteredPosts.map((post) => {
-            const videoUrl =
-              post.mediaURL || post.videoURL || post.videoUrl || post.url;
-
-            const profileUrl =
-              post.profileURL || post.photoURL;
+            const media = post.media || post.video || post.asset || {};
+            const muxPlaybackId =
+              post.muxPlaybackId || post.mux_playback_id ||
+              media.playbackId || media.playback_id || "";
+            const rawVideoUrl =
+              (typeof post.mediaURL === "string" && post.mediaURL) ||
+              (typeof post.mediaUrl === "string" && post.mediaUrl) ||
+              (typeof post.videoURL === "string" && post.videoURL) ||
+              (typeof post.videoUrl === "string" && post.videoUrl) ||
+              (typeof post.video_url === "string" && post.video_url) ||
+              (typeof post.url === "string" && post.url) ||
+              (typeof post.secure_url === "string" && post.secure_url) ||
+              (typeof post.fileUrl === "string" && post.fileUrl) ||
+              (typeof post.fileURL === "string" && post.fileURL) ||
+              media.url || media.playbackUrl || media.playback_url || "";
+            const videoUrl = rawVideoUrl || (muxPlaybackId
+              ? `https://stream.mux.com/${muxPlaybackId}/high.mp4`
+              : "");
+            const posterUrl = post.coverURL || post.coverUrl || post.thumbnailURL || post.thumbnail_url || media.poster || "";
+            const profileUrl = post.profileURL || post.photoURL || post.avatarURL || "";
+            const postIdKey = post.postId || videoUrl;
 
             return (
               <article
-                key={`${post.uid}-${post.postId}`}
+                key={`${post.uid || "user"}-${postIdKey}`}
                 style={styles.post}
               >
-                <div style={styles.userRow}>
-                  <div style={styles.avatar}>
-                    {profileUrl ? (
-                      <img
-                        src={profileUrl}
-                        alt=""
-                        style={styles.avatarImage}
-                      />
-                    ) : (
-                      <span>
-                        {(
-                          post.displayName ||
-                          post.username ||
-                          "V"
-                        )
-                          .charAt(0)
-                          .toUpperCase()}
-                      </span>
-                    )}
-                  </div>
+                <div 
+                  style={styles.mediaFrame}
+                  onClick={(e) => {
+                    const videoEl = e.currentTarget.querySelector("video, mux-video");
+                    if (videoEl) {
+                      if (videoEl.paused) {
+                        videoEl.play();
+                      } else {
+                        videoEl.pause();
+                      }
+                    }
+                  }}
+                >
+                  {muxPlaybackId ? (
+                    <mux-video
+                      playback-id={muxPlaybackId}
+                      muted
+                      loop
+                      playsinline
+                      style={styles.video}
+                      onPlay={() => increaseViews(post)}
+                    ></mux-video>
+                  ) : videoUrl ? (
+                    <video
+                      src={videoUrl}
+                      poster={posterUrl || undefined}
+                      muted
+                      loop
+                      playsInline
+                      preload="metadata"
+                      onPlay={() => increaseViews(post)}
+                      style={styles.video}
+                    />
+                  ) : posterUrl ? (
+                    <img src={posterUrl} alt={post.caption || "Vezlivo post"} style={styles.imagePost} />
+                  ) : (
+                    <div style={styles.videoUnavailable}>
+                      <span style={styles.videoIcon}>▶</span>
+                      <span>Media unavailable</span>
+                    </div>
+                  )}
 
-                  <div style={styles.userDetails}>
-                    <strong style={styles.displayName}>
-                      {post.displayName ||
-                        post.username ||
-                        "Vezlivo User"}
-                    </strong>
-
-                    <span style={styles.username}>
-                      @{post.username || post.uid.slice(0, 8)}
-                    </span>
-                  </div>
-
-                  {user && post.uid !== user.uid && (
+                  {/* Vertical Action Stack Overlay */}
+                  <div style={styles.videoRightActions} onClick={(e) => e.stopPropagation()}>
                     <button
                       type="button"
-                      style={{
-                        ...styles.followButton,
-                        ...(followingIds[post.uid] ? styles.followingButton : {}),
-                      }}
-                      onClick={async () => {
-                        const targetUid = post.uid;
-                        if (!user || !targetUid || targetUid === user.uid) return;
-
-                        const isFollowing = Boolean(followingIds[targetUid]);
-                        const now = Date.now();
-
-                        try {
-                          if (isFollowing) {
-                            await update(ref(db), {
-                              [`users/${user.uid}/following/${targetUid}`]: null,
-                              [`users/${targetUid}/followers/${user.uid}`]: null,
-                            });
-
-                            await runTransaction(
-                              ref(db, `users/${targetUid}/followersCount`),
-                              (value) => Math.max(0, Number(value || 0) - 1)
-                            );
-
-                            setFollowingIds((current) => ({
-                              ...current,
-                              [targetUid]: false,
-                            }));
-                          } else {
-                            await update(ref(db), {
-                              [`users/${user.uid}/following/${targetUid}`]: {
-                                uid: targetUid,
-                                username: post.username || "",
-                                displayName: post.displayName || "",
-                                createdAt: now,
-                              },
-                              [`users/${targetUid}/followers/${user.uid}`]: {
-                                uid: user.uid,
-                                username: user.username || "",
-                                displayName: user.displayName || "",
-                                createdAt: now,
-                              },
-                            });
-
-                            await runTransaction(
-                              ref(db, `users/${targetUid}/followersCount`),
-                              (value) => Number(value || 0) + 1
-                            );
-
-                            const activityRef = push(ref(db, `activities/${targetUid}`));
-                            await set(activityRef, {
-                              type: "follow",
-                              actorId: user.uid,
-                              actorName:
-                                user.displayName ||
-                                user.email?.split("@")[0] ||
-                                "Vezlivo User",
-                              actorUsername: user.username || "",
-                              createdAt: now,
-                              read: false,
-                            });
-
-                            setFollowingIds((current) => ({
-                              ...current,
-                              [targetUid]: true,
-                            }));
-                          }
-                        } catch (error) {
-                          console.error("Follow error:", error);
-                        }
-                      }}
+                      style={styles.sideActionButton}
+                      onClick={() => likePost(post)}
                     >
-                      {followingIds[post.uid] ? "Following" : "Follow"}
+                      <span style={{ fontSize: "22px" }}>{likedIds[post.postId] ? "♥" : "♡"}</span>
+                      <span style={styles.sideActionCount}>
+                        {Number(post.likes || post.likesCount || 0)}
+                      </span>
                     </button>
-                  )}
-                </div>
 
-                {videoUrl ? (
-                  <video
-                    src={videoUrl}
-                    controls
-                    playsInline
-                    preload="metadata"
-                    onPlay={() => increaseViews(post)}
-                    style={styles.video}
-                  />
-                ) : (
-                  <div style={styles.videoUnavailable}>
-                    <span style={styles.videoIcon}>🎬</span>
-                    <span>Video unavailable</span>
+                    <button
+                      type="button"
+                      style={styles.sideActionButton}
+                      onClick={() => openComments(post)}
+                    >
+                      <span style={{ fontSize: "20px" }}>💬</span>
+                      <span style={styles.sideActionCount}>
+                        {Number(post.comments || post.commentsCount || 0)}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      style={styles.sideActionButton}
+                      onClick={() => sharePost(post)}
+                    >
+                      <span style={{ fontSize: "20px" }}>↗️</span>
+                      <span style={styles.sideActionCount}>
+                        {Number(post.shares || post.sharesCount || 0)}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      style={styles.sideActionButton}
+                      onClick={() => savePost(post)}
+                      aria-label="Save to favorites"
+                    >
+                      <span style={{ fontSize: "20px" }}>{savedIds[post.postId] ? "★" : "☆"}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      style={styles.sideActionButton}
+                      onClick={() =>
+                        setOpenMenuPostId(
+                          openMenuPostId === post.postId ? null : post.postId
+                        )
+                      }
+                      aria-label="Video options"
+                    >
+                      <span style={{ fontSize: "18px" }}>⋯</span>
+                    </button>
                   </div>
-                )}
 
-                {post.caption && (
-                  <p style={styles.caption}>{post.caption}</p>
-                )}
+                  {/* Bottom-Left Overlay Info */}
+                  <div style={styles.videoLeftInfo} onClick={(e) => e.stopPropagation()}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                      <div style={styles.avatarMini}>
+                        {profileUrl ? (
+                          <img src={profileUrl} alt="" style={styles.avatarImage} />
+                        ) : (
+                          <span>{(post.displayName || post.username || "V").charAt(0).toUpperCase()}</span>
+                        )}
+                      </div>
+                      <strong style={{ fontSize: "15px", color: "#ffffff", textShadow: "0 1px 2px rgba(0,0,0,0.8)" }}>
+                        @{post.username || post.uid?.slice(0, 8) || "user"}
+                      </strong>
 
-                <div style={styles.actions}>
-                  <button
-                    type="button"
-                    style={{
-                      ...styles.actionButton,
-                      ...(likedIds[post.postId] ? styles.actionButtonActive : {}),
-                    }}
-                    onClick={() => likePost(post)}
-                  >
-                    {likedIds[post.postId] ? "♥" : "♡"}{" "}
-                    {Number(post.likes || post.likesCount || 0)}
-                  </button>
+                      {user && post.uid !== user.uid && (
+                        <button
+                          type="button"
+                          style={{
+                            border: "1px solid #ffffff",
+                            backgroundColor: followingIds[post.uid] ? "rgba(255,255,255,0.25)" : "#6366f1",
+                            color: "#ffffff",
+                            borderRadius: "4px",
+                            padding: "3px 10px",
+                            fontSize: "11px",
+                            fontWeight: "600",
+                            cursor: "pointer",
+                          }}
+                          onClick={async () => {
+                            const targetUid = post.uid;
+                            if (!user || !targetUid || targetUid === user.uid) return;
+                            const isFollowing = Boolean(followingIds[targetUid]);
+                            const now = Date.now();
+                            try {
+                              if (isFollowing) {
+                                await update(ref(db), {
+                                  [`users/${user.uid}/following/${targetUid}`]: null,
+                                  [`users/${targetUid}/followers/${user.uid}`]: null,
+                                });
+                                await runTransaction(
+                                  ref(db, `users/${targetUid}/followersCount`),
+                                  (value) => Math.max(0, Number(value || 0) - 1)
+                                );
+                                setFollowingIds((current) => ({ ...current, [targetUid]: false }));
+                              } else {
+                                await update(ref(db), {
+                                  [`users/${user.uid}/following/${targetUid}`]: {
+                                    uid: targetUid,
+                                    username: post.username || "",
+                                    displayName: post.displayName || "",
+                                    createdAt: now,
+                                  },
+                                  [`users/${targetUid}/followers/${user.uid}`]: {
+                                    uid: user.uid,
+                                    username: user.username || "",
+                                    displayName: user.displayName || "",
+                                    createdAt: now,
+                                  },
+                                });
+                                await runTransaction(
+                                  ref(db, `users/${targetUid}/followersCount`),
+                                  (value) => Number(value || 0) + 1
+                                );
+                                setFollowingIds((current) => ({ ...current, [targetUid]: true }));
+                              }
+                            } catch (error) {
+                              console.error("Follow error:", error);
+                            }
+                          }}
+                        >
+                          {followingIds[post.uid] ? "Following" : "Follow"}
+                        </button>
+                      )}
+                    </div>
 
-                  <button
-                    type="button"
-                    style={styles.actionButton}
-                    onClick={() => openComments(post)}
-                  >
-                    💬 {Number(post.comments || post.commentsCount || 0)}
-                  </button>
+                    {post.caption && (
+                      <p style={{ margin: "0", fontSize: "14px", color: "#f4f4f5", textShadow: "0 1px 2px rgba(0,0,0,0.8)", overflowWrap: "anywhere" }}>
+                        {post.caption}
+                      </p>
+                    )}
 
-                  <button
-                    type="button"
-                    style={styles.actionButton}
-                    onClick={() => sharePost(post)}
-                  >
-                    ↗️ {Number(post.shares || post.sharesCount || 0)}
-                  </button>
-
-                  <button
-                    type="button"
-                    style={{
-                      ...styles.actionButton,
-                      ...(savedIds[post.postId] ? styles.actionButtonActive : {}),
-                    }}
-                    onClick={() => savePost(post)}
-                    aria-label={savedIds[post.postId] ? "Remove from favorites" : "Add to favorites"}
-                  >
-                    {savedIds[post.postId] ? "★" : "☆"}
-                  </button>
-
-                  <button
-                    type="button"
-                    style={styles.actionButton}
-                    onClick={() => copyPostLink(post)}
-                    aria-label="Copy video link"
-                  >
-                    📋
-                  </button>
-
-                  <button
-                    type="button"
-                    style={styles.moreButton}
-                    onClick={() =>
-                      setOpenMenuPostId(
-                        openMenuPostId === post.postId ? null : post.postId
-                      )
-                    }
-                    aria-label="Video options"
-                  >
-                    ⋯
-                  </button>
-
-                  <span style={styles.views}>
-                    {Number(post.views || post.viewsCount || 0)} views
-                  </span>
+                    <span style={styles.views}>
+                      {Number(post.views || post.viewsCount || 0)} views
+                    </span>
+                  </div>
                 </div>
 
                 {openMenuPostId === post.postId && (
@@ -807,17 +800,12 @@ export default function Home({ onNavigate }) {
         )}
       </main>
 
-      <nav
-        style={styles.bottomNav}
-        aria-label="Main navigation"
-      >
+      <nav style={styles.bottomNav} aria-label="Main navigation">
         <button
           type="button"
           style={{
             ...styles.navButton,
-            ...(activeSection === "Home"
-              ? styles.navButtonActive
-              : {}),
+            ...(activeSection === "Home" ? styles.navButtonActive : {}),
           }}
           onClick={() => setActiveSection("Home")}
         >
@@ -884,97 +872,97 @@ export default function Home({ onNavigate }) {
 
 const styles = {
   page: {
-    minHeight: "100vh",
-    backgroundColor: "#09090b", // Rich deep zinc/black
+    position: "relative",
+    width: "100vw",
+    height: "100vh",
+    background: "#000000",
     color: "#ffffff",
-    paddingBottom: "88px",
     fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
+    overflow: "hidden",
   },
 
-  header: {
-    height: "62px",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    padding: "0 15px",
-    backgroundColor: "#09090b",
-    borderBottom: "1px solid #27272a",
-    position: "sticky",
-    top: 0,
-    zIndex: 20,
-  },
-
-  brand: {
-    display: "flex",
-    alignItems: "center",
-    gap: "10px",
-  },
-
-  logo: {
-    width: "38px",
-    height: "38px",
-    borderRadius: "10px",
+  floatingHeader: {
+    position: "absolute",
+    top: "12px",
+    left: 0,
+    right: 0,
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    background:
-      "linear-gradient(135deg, #6366f1, #38bdf8)", // Sleek Indigo to Sky Blue
-    fontSize: "22px",
-    fontWeight: "900",
+    zIndex: 25,
+    pointerEvents: "none",
   },
 
-  brandText: {
-    fontSize: "22px",
-    fontWeight: "800",
-    letterSpacing: "-0.5px",
-  },
-
-  headerButtons: {
+  floatingTabs: {
     display: "flex",
     alignItems: "center",
-    gap: "4px",
+    gap: "18px",
+    pointerEvents: "auto",
   },
 
-  iconButton: {
-    width: "40px",
-    height: "40px",
+  tab: {
+    height: "36px",
     border: "none",
     background: "transparent",
-    color: "#a1a1aa",
+    color: "rgba(255, 255, 255, 0.7)",
+    fontSize: "15px",
+    fontWeight: "700",
+    cursor: "pointer",
+    padding: "0 4px",
+    textShadow: "0 1px 4px rgba(0, 0, 0, 0.8)",
+  },
+
+  activeTab: {
+    color: "#ffffff",
+    borderBottom: "2px solid #ffffff",
+  },
+
+  floatingSearchBtn: {
+    position: "absolute",
+    right: "16px",
+    border: "none",
+    background: "transparent",
+    color: "#ffffff",
     fontSize: "18px",
     cursor: "pointer",
-    borderRadius: "50%",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
+    pointerEvents: "auto",
+    textShadow: "0 1px 4px rgba(0, 0, 0, 0.8)",
   },
 
   searchBox: {
-    padding: "12px 16px",
-    backgroundColor: "#121216",
-    borderBottom: "1px solid #27272a",
+    position: "absolute",
+    top: "54px",
+    left: "12px",
+    right: "12px",
+    padding: "12px",
+    backgroundColor: "rgba(24, 24, 27, 0.95)",
+    backdropFilter: "blur(12px)",
+    borderRadius: "16px",
+    border: "1px solid #27272a",
+    zIndex: 35,
+    boxShadow: "0 8px 32px rgba(0,0,0,0.6)",
   },
 
   searchInput: {
     width: "100%",
     boxSizing: "border-box",
-    padding: "12px 16px",
-    borderRadius: "12px",
-    border: "1px solid #27272a",
+    padding: "10px 14px",
+    borderRadius: "10px",
+    border: "1px solid #3f3f46",
     backgroundColor: "#18181b",
     color: "#ffffff",
-    fontSize: "15px",
+    fontSize: "14px",
     outline: "none",
   },
 
   searchStatus: {
-    padding: "10px 4px",
-    color: "#71717a",
+    padding: "8px 4px",
+    color: "#a1a1aa",
     fontSize: "13px",
   },
 
   searchError: {
-    padding: "10px 4px",
+    padding: "8px 4px",
     color: "#f87171",
     fontSize: "13px",
   },
@@ -984,9 +972,9 @@ const styles = {
     display: "flex",
     alignItems: "center",
     gap: "12px",
-    padding: "10px 6px",
+    padding: "8px 4px",
     border: "none",
-    borderBottom: "1px solid #1e1e24",
+    borderBottom: "1px solid #27272a",
     background: "transparent",
     color: "#fff",
     textAlign: "left",
@@ -994,8 +982,8 @@ const styles = {
   },
 
   searchUserAvatar: {
-    width: "40px",
-    height: "40px",
+    width: "36px",
+    height: "36px",
     borderRadius: "50%",
     backgroundColor: "#6366f1",
     display: "flex",
@@ -1016,128 +1004,65 @@ const styles = {
     flex: 1,
     display: "flex",
     flexDirection: "column",
-    gap: "2px",
+    gap: "1px",
   },
 
   searchUserUsername: {
-    color: "#71717a",
+    color: "#a1a1aa",
     fontSize: "12px",
   },
 
   searchArrow: {
     color: "#71717a",
-    fontSize: "20px",
-  },
-
-  tabs: {
-    height: "46px",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: "28px",
-    borderBottom: "1px solid #27272a",
-    backgroundColor: "#09090b",
-  },
-
-  tab: {
-    height: "46px",
-    border: "none",
-    background: "transparent",
-    color: "#71717a",
-    fontSize: "14px",
-    fontWeight: "600",
-    cursor: "pointer",
-    padding: "0 4px",
-  },
-
-  activeTab: {
-    color: "#ffffff",
-    borderBottom: "2px solid #6366f1",
+    fontSize: "18px",
   },
 
   feed: {
-    width: "100%",
-    maxWidth: "600px",
-    margin: "0 auto",
+    width: "100vw",
+    height: "calc(100vh - 68px)",
+    overflowY: "scroll",
+    scrollSnapType: "y mandatory",
+    scrollbarWidth: "none",
+    msOverflowStyle: "none",
   },
 
   post: {
-    borderBottom: "1px solid #27272a",
-    paddingBottom: "16px",
-    marginBottom: "12px",
-    backgroundColor: "#0f0f12",
-  },
-
-  userRow: {
-    display: "flex",
-    alignItems: "center",
-    gap: "12px",
-    padding: "14px 16px",
-  },
-
-  avatar: {
-    width: "40px",
-    height: "40px",
-    borderRadius: "50%",
-    backgroundColor: "#6366f1",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    overflow: "hidden",
-    fontSize: "16px",
-    fontWeight: "700",
-    flexShrink: 0,
-  },
-
-  avatarImage: {
+    position: "relative",
     width: "100%",
     height: "100%",
-    objectFit: "cover",
+    scrollSnapAlign: "start",
+    scrollSnapStop: "always",
+    background: "#000000",
+    overflow: "hidden",
   },
 
-  userDetails: {
-    flex: 1,
-    display: "flex",
-    flexDirection: "column",
-    gap: "2px",
-  },
-
-  displayName: {
-    fontSize: "14px",
-    fontWeight: "600",
-  },
-
-  username: {
-    fontSize: "12px",
-    color: "#71717a",
-  },
-
-  followButton: {
-    border: "1px solid #6366f1",
-    backgroundColor: "transparent",
-    color: "#818cf8",
-    borderRadius: "8px",
-    padding: "6px 14px",
-    fontSize: "13px",
-    fontWeight: "600",
-    cursor: "pointer",
-  },
-  followingButton: {
-    borderColor: "#3f3f46",
-    backgroundColor: "#18181b",
-    color: "#e4e4e7",
+  mediaFrame: {
+    position: "relative",
+    width: "100%",
+    height: "100%",
+    background: "#000000",
+    overflow: "hidden",
   },
 
   video: {
-    width: "100%",
-    maxHeight: "600px",
     display: "block",
+    width: "100%",
+    height: "100%",
+    objectFit: "cover",
     backgroundColor: "#000000",
-    objectFit: "contain",
+  },
+
+  imagePost: {
+    display: "block",
+    width: "100%",
+    height: "100%",
+    objectFit: "cover",
+    background: "#050505",
   },
 
   videoUnavailable: {
-    height: "280px",
+    position: "absolute",
+    inset: 0,
     backgroundColor: "#121216",
     display: "flex",
     flexDirection: "column",
@@ -1151,53 +1076,86 @@ const styles = {
     fontSize: "40px",
   },
 
-  caption: {
-    margin: "12px 16px 0",
-    fontSize: "14px",
-    lineHeight: "1.5",
-    color: "#e4e4e7",
+  videoRightActions: {
+    position: "absolute",
+    right: "12px",
+    bottom: "85px",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: "14px",
+    zIndex: 10,
   },
 
-  actions: {
+  sideActionButton: {
+    border: "none",
+    background: "rgba(0, 0, 0, 0.4)",
+    backdropFilter: "blur(6px)",
+    WebkitBackdropFilter: "blur(6px)",
+    color: "#ffffff",
+    width: "48px",
+    height: "48px",
+    borderRadius: "50%",
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "2px",
+    cursor: "pointer",
+    boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
+  },
+
+  sideActionCount: {
+    fontSize: "11px",
+    fontWeight: "700",
+    color: "#ffffff",
+    textShadow: "0 1px 2px rgba(0,0,0,0.8)",
+  },
+
+  videoLeftInfo: {
+    position: "absolute",
+    left: "0",
+    bottom: "16px",
+    right: "60px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "8px",
+    zIndex: 10,
+    padding: "16px",
+    background: "linear-gradient(to top, rgba(0,0,0,0.85), rgba(0,0,0,0.4), transparent)",
+  },
+
+  avatarMini: {
+    width: "28px",
+    height: "28px",
+    borderRadius: "50%",
+    backgroundColor: "#6366f1",
     display: "flex",
     alignItems: "center",
-    gap: "16px",
-    padding: "12px 16px 0",
+    justifyContent: "center",
+    overflow: "hidden",
+    fontSize: "12px",
+    fontWeight: "700",
+    flexShrink: 0,
   },
 
-  actionButton: {
-    border: "none",
-    background: "transparent",
-    color: "#a1a1aa",
-    fontSize: "14px",
-    padding: 0,
-    cursor: "pointer",
-    display: "flex",
-    alignItems: "center",
-    gap: "4px",
-  },
-
-  actionButtonActive: {
-    color: "#f43f5e",
-  },
-
-  moreButton: {
-    border: "none",
-    background: "transparent",
-    color: "#a1a1aa",
-    fontSize: "20px",
-    padding: "0 2px",
-    cursor: "pointer",
-    lineHeight: 1,
+  avatarImage: {
+    width: "100%",
+    height: "100%",
+    objectFit: "cover",
   },
 
   postMenu: {
-    margin: "4px 16px 0",
+    position: "absolute",
+    right: "16px",
+    bottom: "70px",
+    width: "160px",
     padding: "6px",
     backgroundColor: "#18181b",
     border: "1px solid #27272a",
     borderRadius: "12px",
-    boxShadow: "0 12px 30px rgba(0,0,0,0.35)",
+    boxShadow: "0 12px 30px rgba(0,0,0,0.5)",
+    zIndex: 30,
   },
 
   menuItem: {
@@ -1213,9 +1171,9 @@ const styles = {
   },
 
   views: {
-    marginLeft: "auto",
-    color: "#71717a",
-    fontSize: "12px",
+    color: "#d4d4d8",
+    fontSize: "11px",
+    textShadow: "0 1px 2px rgba(0,0,0,0.8)",
   },
 
   centerMessage: {
@@ -1270,8 +1228,7 @@ const styles = {
     marginTop: "16px",
     border: "none",
     borderRadius: "20px",
-    background:
-      "linear-gradient(135deg, #6366f1, #38bdf8)",
+    background: "linear-gradient(135deg, #6366f1, #38bdf8)",
     color: "#ffffff",
     padding: "10px 20px",
     fontSize: "14px",
@@ -1284,11 +1241,11 @@ const styles = {
     left: 0,
     right: 0,
     bottom: 0,
-    height: "64px",
+    height: "68px",
     display: "flex",
     alignItems: "center",
     justifyContent: "space-around",
-    backgroundColor: "#0f0f12",
+    backgroundColor: "rgba(15,15,18,.97)",
     borderTop: "1px solid #27272a",
     zIndex: 30,
     padding: "0 8px",
@@ -1324,8 +1281,7 @@ const styles = {
     height: "32px",
     border: "none",
     borderRadius: "8px",
-    background:
-      "linear-gradient(135deg, #6366f1, #38bdf8)",
+    background: "linear-gradient(135deg, #6366f1, #38bdf8)",
     color: "#ffffff",
     fontSize: "22px",
     fontWeight: "800",

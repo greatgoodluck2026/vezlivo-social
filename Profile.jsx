@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import VipProfileBanner from "./VipProfileBanner.jsx";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import {
   onValue,
@@ -15,6 +16,7 @@ import {
 
 import { auth, database, storage } from "./firebase.js";
 import Settings from "./Settings.jsx";
+import { apiGet } from "./apiClient.js";
 
 const DISPLAY_NAME_COOLDOWN =
   7 * 24 * 60 * 60 * 1000;
@@ -58,13 +60,14 @@ function Profile({ onBack, onOpenDraft }) {
   const [localProfilePreview, setLocalProfilePreview] = useState("");
   const [localCoverPreview, setLocalCoverPreview] = useState("");
 
+  // Admin Panel State for VIP Approvals
+  const [targetVipInput, setTargetVipInput] = useState("");
+  const [adminActionLoading, setAdminActionLoading] = useState(false);
+
+  const isAdmin = user?.email === "greatgoodluckp@gmail.com";
+
   /*
    * AUTH + PROFILE
-   *
-   * This keeps the existing profile/settings behavior:
-   * - Firebase authentication remains the source of the signed-in user.
-   * - The profile is stored at users/{uid}.
-   * - Settings.jsx is still opened as its own component and is not redesigned here.
    */
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(
@@ -123,6 +126,7 @@ function Profile({ onBack, onOpenDraft }) {
               coverURL: "",
               bio: "",
               isPrivate: false,
+              isVip: false,
               followersCount: 0,
               followingCount: 0,
               videosCount: 0,
@@ -164,11 +168,6 @@ function Profile({ onBack, onOpenDraft }) {
 
   /*
    * PROFILE SYNC
-   *
-   * This is important for permanent profile-picture and cover-picture
-   * behavior. If another part of Vezlivo changes the profile record,
-   * this page receives the saved value instead of depending only on a
-   * temporary local preview.
    */
   useEffect(() => {
     if (!user) {
@@ -191,12 +190,6 @@ function Profile({ onBack, onOpenDraft }) {
 
         setProfile(nextProfile);
 
-        /*
-         * Keep the saved profile values in sync with Firebase.
-         * The edit form only writes these values when Save is pressed,
-         * so this does not need to resubscribe every time a form field
-         * changes.
-         */
         setDisplayName(
           nextProfile.displayName || ""
         );
@@ -223,13 +216,7 @@ function Profile({ onBack, onOpenDraft }) {
   }, [user]);
 
   /*
-   * USER VIDEOS
-   *
-   * Vezlivo posts are currently saved under:
-   * posts/{uid}/{postId}
-   *
-   * The profile now reads those posts and displays actual videos instead
-   * of leaving the profile permanently empty.
+   * USER VIDEOS (Neon PostgreSQL Backend)
    */
   useEffect(() => {
     if (!user) {
@@ -238,49 +225,45 @@ function Profile({ onBack, onOpenDraft }) {
       return undefined;
     }
 
+    let cancelled = false;
     setContentLoading(true);
 
-    const postsRef = ref(
-      database,
-      `posts/${user.uid}`
-    );
+    async function loadUserVideos() {
+      try {
+        const data = await apiGet("/posts");
+        
+        if (cancelled) return;
 
-    return onValue(
-      postsRef,
-      (snapshot) => {
-        const data = snapshot.val() || {};
+        const allPosts = Array.isArray(data) ? data : (data.posts || []);
 
-        const list = Object.entries(data)
-          .map(([postId, value]) => ({
-            postId,
-            ...(value || {}),
+        const userPosts = allPosts
+          .filter((post) => post.user_id === user.uid || post.uid === user.uid)
+          .map((post) => ({
+            ...post,
+            postId: post.id || post.postId,
+            mediaURL: post.video_url || post.mediaURL || post.videoURL,
+            thumbnailURL: post.thumbnail_url || post.thumbnailURL || post.thumbnail,
           }))
-          .filter(
-            (post) =>
-              post.mediaURL ||
-              post.videoURL ||
-              post.videoUrl ||
-              post.video ||
-              post.url
-          )
           .sort(
             (a, b) =>
-              Number(b.createdAt || 0) -
-              Number(a.createdAt || 0)
+              new Date(b.created_at || b.createdAt || 0) -
+              new Date(a.created_at || a.createdAt || 0)
           );
 
-        setPosts(list);
-        setContentLoading(false);
-      },
-      (error) => {
-        console.error(
-          "Profile videos loading error:",
-          error
-        );
-        setPosts([]);
-        setContentLoading(false);
+        setPosts(userPosts);
+      } catch (error) {
+        console.error("Profile videos loading error:", error);
+        if (!cancelled) setPosts([]);
+      } finally {
+        if (!cancelled) setContentLoading(false);
       }
-    );
+    }
+
+    loadUserVideos();
+
+    return () => {
+      cancelled = true;
+    };
   }, [user]);
 
   /* =====================================================
@@ -311,9 +294,6 @@ function Profile({ onBack, onOpenDraft }) {
 
   /*
    * LIKED + FAVORITE VIDEOS
-   *
-   * These paths are read when they exist. The profile remains usable
-   * when an account does not have either collection yet.
    */
   useEffect(() => {
     if (!user) {
@@ -409,14 +389,63 @@ function Profile({ onBack, onOpenDraft }) {
       USERNAME_COOLDOWN
     );
 
-  /*
-   * PROFILE PHOTO
-   *
-   * The selected picture is uploaded to Firebase Storage and the
-   * permanent download URL is saved in users/{uid}/photoURL.
-   *
-   * The local preview is only temporary while the upload is happening.
-   */
+  // Handle In-App Admin VIP Approval
+  const handleAdminApproveVip = async (status) => {
+    const queryVal = targetVipInput.trim();
+    if (!queryVal) {
+      setMessage("Please enter a User UID or Username.");
+      setMessageType("error");
+      return;
+    }
+
+    setAdminActionLoading(true);
+    setMessage("");
+
+    try {
+      const usersRef = ref(database, "users");
+      const snapshot = await get(usersRef);
+
+      if (!snapshot.exists()) {
+        setMessage("No users found in database.");
+        setMessageType("error");
+        setAdminActionLoading(false);
+        return;
+      }
+
+      let targetUid = null;
+      snapshot.forEach((childSnap) => {
+        const uData = childSnap.val();
+        const cUid = childSnap.key;
+        if (
+          cUid === queryVal ||
+          uData.username?.toLowerCase() === queryVal.replace("@", "").toLowerCase()
+        ) {
+          targetUid = cUid;
+        }
+      });
+
+      if (!targetUid) {
+        setMessage(`User "${queryVal}" not found in database.`);
+        setMessageType("error");
+        setAdminActionLoading(false);
+        return;
+      }
+
+      const targetUserRef = ref(database, `users/${targetUid}`);
+      await update(targetUserRef, { isVip: status });
+
+      setMessage(`Success! User VIP status set to: ${status}`);
+      setMessageType("success");
+      setTargetVipInput("");
+    } catch (err) {
+      console.error("Admin VIP update error:", err);
+      setMessage("Failed to update VIP status.");
+      setMessageType("error");
+    } finally {
+      setAdminActionLoading(false);
+    }
+  };
+
   const handleProfilePhotoChange = async (
     event
   ) => {
@@ -535,22 +564,12 @@ function Profile({ onBack, onOpenDraft }) {
         "Unable to update your profile picture. Please try again."
       );
       setMessageType("error");
-
-      /*
-       * Keep the local preview visible after a failed upload.
-       * This prevents the selected image from suddenly disappearing.
-       */
     } finally {
       setUploadingPhoto(false);
       event.target.value = "";
     }
   };
 
-  /*
-   * COVER PHOTO
-   *
-   * Saved permanently at users/{uid}/coverURL.
-   */
   const handleCoverPhotoChange = async (
     event
   ) => {
@@ -656,23 +675,12 @@ function Profile({ onBack, onOpenDraft }) {
         "Unable to update your cover picture. Please try again."
       );
       setMessageType("error");
-
-      /*
-       * Keep the local cover preview visible after a failed upload.
-       */
     } finally {
       setUploadingCover(false);
       event.target.value = "";
     }
   };
 
-  /*
-   * SAVE PROFILE DETAILS
-   *
-   * Existing cooldown behavior is preserved:
-   * - display name: once every 7 days
-   * - username: once every 30 days
-   */
   const handleSaveProfile = async () => {
     if (!user || !profile) {
       return;
@@ -944,7 +952,6 @@ function Profile({ onBack, onOpenDraft }) {
     Number(
       profile?.followingCount || 0
     );
-
 
   const activeContent =
     activeSection === "liked"
@@ -1220,10 +1227,9 @@ function Profile({ onBack, onOpenDraft }) {
               </span>
             </div>
           </div>
-
         </div>
 
-        {/* STATS */}
+       {/* STATS */}
         <div style={styles.statsRow}>
           <button type="button" onClick={() => setActiveSection("following")} style={styles.statButton}>
             <strong style={styles.statNumber}>{followingCount}</strong>
@@ -1240,6 +1246,50 @@ function Profile({ onBack, onOpenDraft }) {
             <span style={styles.statLabel}>Likes</span>
           </button>
         </div>
+
+        {/* 👑 VIP PROFILE BANNER CARD */}
+        <VipProfileBanner user={user} />
+
+        {/* 👑 IN-APP ADMIN VIP MANAGER (Only visible to greatgoodluckp@gmail.com) */}
+        {isAdmin && (
+          <section style={styles.adminPanel}>
+            <div style={styles.adminHeader}>
+              <span style={{ fontSize: "16px" }}>🛡️</span>
+              <h3 style={styles.adminTitle}>Admin VIP Manager</h3>
+            </div>
+            <p style={styles.adminSubtitle}>
+              Paste a user's UID or username from your email notification to instantly approve or revoke VIP status.
+            </p>
+            <div style={styles.adminInputRow}>
+              <input
+                type="text"
+                placeholder="Enter User UID or @username..."
+                value={targetVipInput}
+                onChange={(e) => setTargetVipInput(e.target.value)}
+                disabled={adminActionLoading}
+                style={styles.input}
+              />
+              <div style={styles.adminBtnGroup}>
+                <button
+                  type="button"
+                  onClick={() => handleAdminApproveVip(true)}
+                  disabled={adminActionLoading}
+                  style={styles.approveBtn}
+                >
+                  {adminActionLoading ? "..." : "Approve 👑"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleAdminApproveVip(false)}
+                  disabled={adminActionLoading}
+                  style={styles.rejectBtn}
+                >
+                  Revoke ❌
+                </button>
+              </div>
+            </div>
+          </section>
+        )}
 
         {/* EDIT FORM */}
         {editing && (
@@ -1570,13 +1620,6 @@ function Profile({ onBack, onOpenDraft }) {
   );
 }
 
-/*
- * VIDEO CARD
- *
- * This is intentionally Vezlivo's own profile presentation.
- * It uses a standard social-video grid pattern rather than copying
- * another app's exact profile screen.
- */
 function ProfileVideoCard({ video }) {
   const videoURL =
     video.mediaURL ||
@@ -2068,25 +2111,68 @@ const styles = {
     color: "#707070",
   },
 
-  toolRow: {
-    display: "flex",
-    gap: "8px",
-    flexWrap: "wrap",
-    padding:
-      "12px 16px 6px",
+  adminPanel: {
+    margin: "12px 16px",
+    padding: "14px 16px",
+    borderRadius: "16px",
+    background: "linear-gradient(135deg, #2e1065 0%, #1e1b4b 100%)",
+    border: "1px solid #7c3aed",
+    color: "#fff",
   },
 
-  secondaryButton: {
-    border:
-      "1px solid #dedede",
-    background: "#fff",
-    color: "#111",
+  adminHeader: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    marginBottom: "4px",
+  },
+
+  adminTitle: {
+    margin: 0,
+    fontSize: "15px",
+    fontWeight: "800",
+    color: "#f59e0b",
+  },
+
+  adminSubtitle: {
+    margin: "0 0 10px 0",
+    fontSize: "11px",
+    color: "#d8b4fe",
+    lineHeight: "1.3",
+  },
+
+  adminInputRow: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "8px",
+  },
+
+  adminBtnGroup: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    gap: "8px",
+  },
+
+  approveBtn: {
+    border: "none",
+    background: "linear-gradient(135deg, #f59e0b, #d97706)",
+    color: "#000",
+    fontWeight: "800",
+    padding: "10px",
     borderRadius: "10px",
-    padding:
-      "9px 13px",
-    fontSize: "13px",
-    fontWeight: 750,
     cursor: "pointer",
+    fontSize: "13px",
+  },
+
+  rejectBtn: {
+    border: "1px solid #ef4444",
+    background: "rgba(239, 68, 68, 0.15)",
+    color: "#fca5a5",
+    fontWeight: "800",
+    padding: "10px",
+    borderRadius: "10px",
+    cursor: "pointer",
+    fontSize: "13px",
   },
 
   editPanel: {
@@ -2278,43 +2364,6 @@ const styles = {
       "3px 8px 4px",
   },
 
-  videoSectionHeader: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: "10px",
-    padding:
-      "0 3px 11px",
-  },
-
-  videoTitle: {
-    margin: 0,
-    fontSize: "18px",
-    fontWeight: 850,
-  },
-
-  videoSubtitle: {
-    margin:
-      "4px 0 0",
-    color: "#777",
-    fontSize: "12px",
-  },
-
-  videoCountPill: {
-    minWidth: "30px",
-    height: "30px",
-    padding:
-      "0 8px",
-    boxSizing: "border-box",
-    borderRadius: "15px",
-    background: "#f1f1f1",
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontSize: "12px",
-    fontWeight: 800,
-  },
-
   contentLoading: {
     minHeight: "230px",
     display: "flex",
@@ -2343,7 +2392,8 @@ const styles = {
 
   videoMedia: {
     width: "100%",
-    aspectRatio: "9 / 13",
+    aspectRatio: "4 / 5",
+    maxHeight: "220px",
     position: "relative",
     overflow: "hidden",
     background:

@@ -370,10 +370,18 @@ function PostCard({
   const avatar =
     getPostAvatar(post);
 
-  const hashtags =
-    Array.isArray(post.hashtags)
-      ? post.hashtags
-      : [];
+  // Robust hashtag parsing for arrays or stringified JSON
+  const hashtags = Array.isArray(post.hashtags)
+    ? post.hashtags
+    : typeof post.hashtags === "string"
+    ? (() => {
+        try {
+          return JSON.parse(post.hashtags);
+        } catch {
+          return post.hashtags.split(",").map((s) => s.trim());
+        }
+      })()
+    : [];
 
   const mentions =
     Array.isArray(post.mentions)
@@ -382,12 +390,12 @@ function PostCard({
 
   const isVideo =
     post.mediaType === "video" ||
-    Boolean(post.videoURL);
+    Boolean(post.videoURL) ||
+    Boolean(post.muxPlaybackId);
 
-  const mediaUrl =
-    post.mediaURL ||
-    post.videoURL ||
-    "";
+  const mediaUrl = post.muxPlaybackId
+    ? `https://stream.mux.com/${post.muxPlaybackId}.m3u8`
+    : post.mediaURL || post.videoURL || "";
 
 
   return (
@@ -441,20 +449,28 @@ function PostCard({
 
 
       {post.caption && (
-        <div className="post-caption">
+        <div className="post-caption" style={{ padding: "0 16px 12px 16px" }}>
 
-          <p>
+          <p style={{ margin: "0 0 8px 0", fontSize: "14px", lineHeight: "1.5", color: "#111" }}>
             {post.caption}
           </p>
 
           {hashtags.length > 0 && (
-            <div className="post-hashtags">
+            <div className="post-hashtags" style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "6px" }}>
               {hashtags.map(
                 (tag) => (
                   <span
                     key={tag}
+                    style={{
+                      fontSize: "13px",
+                      fontWeight: "600",
+                      color: "#0056b3",
+                      background: "#f0f4f8",
+                      padding: "2px 8px",
+                      borderRadius: "6px"
+                    }}
                   >
-                    {tag}
+                    {tag.startsWith("#") ? tag : `#${tag}`}
                   </span>
                 )
               )}
@@ -462,13 +478,21 @@ function PostCard({
           )}
 
           {mentions.length > 0 && (
-            <div className="post-mentions">
+            <div className="post-mentions" style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "6px" }}>
               {mentions.map(
                 (mention) => (
                   <span
                     key={mention}
+                    style={{
+                      fontSize: "13px",
+                      fontWeight: "600",
+                      color: "#111",
+                      background: "#eaeaea",
+                      padding: "2px 8px",
+                      borderRadius: "6px"
+                    }}
                   >
-                    {mention}
+                    {mention.startsWith("@") ? mention : `@${mention}`}
                   </span>
                 )
               )}
