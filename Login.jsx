@@ -167,8 +167,8 @@ function Login({ onBack }) {
 
       setOnboardingUser(user);
 
+      // FORCE MANUAL NAME ENTRY: Clear auto-filled Google/auth names if not explicitly saved in DB
       setDisplayName(existing.displayName || "");
-
       setUsername(existing.username || "");
 
       if (existing.birthMonth) {
@@ -186,9 +186,6 @@ function Login({ onBack }) {
       if (existing.profileURL) {
         setProfilePreview(existing.profileURL);
         setProfileSkipped(false);
-      } else if (user.photoURL) {
-        setProfilePreview(user.photoURL);
-        setProfileSkipped(false);
       } else {
         setProfilePreview("");
         setProfileSkipped(false);
@@ -204,7 +201,7 @@ function Login({ onBack }) {
 
       setOnboardingUser(user);
       setProfileFile(null);
-      setProfilePreview(user.photoURL || "");
+      setProfilePreview("");
       setProfileSkipped(false);
       setOnboardingStep(1);
       clearOnboardingMessage();
@@ -220,7 +217,7 @@ function Login({ onBack }) {
 
     if (!displayName.trim()) {
       showOnboardingMessage(
-        "Please enter the name you want people to see."
+        "Display name is compulsory. Please enter your name."
       );
       return;
     }
@@ -242,7 +239,7 @@ function Login({ onBack }) {
     try {
       let profileURL = profileSkipped
         ? ""
-        : profilePreview || onboardingUser.photoURL || "";
+        : profilePreview || "";
 
       let profileImageBase64 = null;
       let profileImageName = null;
@@ -284,6 +281,8 @@ function Login({ onBack }) {
         isMinor,
         accountAgeGroup,
         canAccessMatureContent: !isMinor,
+        canGoLive: !isMinor,   // Under 18 cannot go live
+        canJoinLive: !isMinor, // Under 18 cannot join live streams
         profileURL,
         profileImageBase64,
         profileImageName,
@@ -359,7 +358,7 @@ function Login({ onBack }) {
     if (onboardingStep === 2) {
       if (!displayName.trim()) {
         showOnboardingMessage(
-          "Please enter the name you want to use on Vezlivo."
+          "Name is compulsory. Please enter your name."
         );
         return;
       }
@@ -954,8 +953,7 @@ function Login({ onBack }) {
               <h1>Choose your name</h1>
 
               <p className="login-subtitle">
-                This is the name people will see on
-                your Vezlivo profile.
+                Name is compulsory. Enter the name people will see on your Vezlivo profile.
               </p>
 
               <input

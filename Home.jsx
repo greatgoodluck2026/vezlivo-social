@@ -4,10 +4,11 @@ import { get, onValue, push, ref, runTransaction, set, update } from "firebase/d
 import { auth, database as db } from "./firebase.js";
 import Comments from "./Comments";
 import Report from "./Report.jsx";
-import { apiGet } from "./apiClient.js"; 
+import SoundFeed from "./SoundFeed.jsx";
+import { apiGet, apiPost } from "./apiClient.js"; 
 import '@mux/mux-video';
 
-export default function Home({ onNavigate }) {
+export default function Home({ onNavigate, onCreate, onProfile, onActivity, onDiscover }) {
   const [user, setUser] = useState(null);
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -26,6 +27,10 @@ export default function Home({ onNavigate }) {
   const [openMenuPostId, setOpenMenuPostId] = useState(null);
   const [reportPost, setReportPost] = useState(null);
   const [viewedPostIds, setViewedPostIds] = useState({});
+  
+  // Clean Modal & Toast states
+  const [deleteConfirmPost, setDeleteConfirmPost] = useState(null);
+  const [toastMessage, setToastMessage] = useState("");
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
@@ -33,6 +38,31 @@ export default function Home({ onNavigate }) {
     });
     return () => unsubscribe();
   }, []);
+
+  // Save scroll position when scrolling the feed
+  useEffect(() => {
+    const feedElement = document.querySelector("main[style*='overflowY']");
+    if (!feedElement) return;
+
+    const handleScroll = () => {
+      sessionStorage.setItem("vezlivo_home_scroll", feedElement.scrollTop);
+    };
+
+    feedElement.addEventListener("scroll", handleScroll);
+    return () => feedElement.removeEventListener("scroll", handleScroll);
+  }, []);
+
+  // Restore scroll position once posts load
+  useEffect(() => {
+    if (loading || posts.length === 0) return;
+    const savedScroll = sessionStorage.getItem("vezlivo_home_scroll");
+    if (savedScroll) {
+      const feedElement = document.querySelector("main[style*='overflowY']");
+      if (feedElement) {
+        feedElement.scrollTop = Number(savedScroll);
+      }
+    }
+  }, [loading, posts]);
 
   useEffect(() => {
     let cancelled = false;
@@ -79,35 +109,46 @@ export default function Home({ onNavigate }) {
     return () => unsubscribe();
   }, [user]);
 
+  // Load user liked states from backend database so they persist on refresh
   useEffect(() => {
-    if (!user || posts.length === 0) {
+    if (!user) {
       setLikedIds({});
       setSavedIds({});
+      return;
+    }
+
+    async function fetchUserLikes() {
+      try {
+        const res = await apiGet(`/users/${user.uid}/likes`);
+        if (res && res.success && res.likedIds) {
+          setLikedIds(res.likedIds);
+        }
+      } catch (err) {
+        console.error("Failed to fetch user likes:", err);
+      }
+    }
+
+    fetchUserLikes();
+  }, [user, posts]);
+
+  useEffect(() => {
+    if (!user || posts.length === 0) {
       return undefined;
     }
 
     const unsubscribers = posts.map((post) => {
-      if (!post.postId) return () => {};
+      const postId = post.postId || post.id;
+      if (!postId) return () => {};
 
-      const likeRef = ref(db, `postLikes/${post.postId}/${user.uid}`);
-      const saveRef = ref(db, `savedPosts/${user.uid}/${post.postId}`);
-
-      const unsubscribeLike = onValue(likeRef, (snapshot) => {
-        setLikedIds((current) => ({
-          ...current,
-          [post.postId]: snapshot.exists(),
-        }));
-      });
-
+      const saveRef = ref(db, `savedPosts/${user.uid}/${postId}`);
       const unsubscribeSave = onValue(saveRef, (snapshot) => {
         setSavedIds((current) => ({
           ...current,
-          [post.postId]: snapshot.exists(),
+          [postId]: snapshot.exists(),
         }));
       });
 
       return () => {
-        unsubscribeLike();
         unsubscribeSave();
       };
     });
@@ -154,16 +195,18 @@ export default function Home({ onNavigate }) {
   }, [showSearch]);
 
   const increaseViews = async (post) => {
-    if (!post.uid || !post.postId || viewedPostIds[post.postId]) return;
+    const postOwnerUid = post.user_id || post.uid;
+    const postId = post.postId || post.id;
+    if (!postOwnerUid || !postId || viewedPostIds[postId]) return;
 
     setViewedPostIds((current) => ({
       ...current,
-      [post.postId]: true,
+      [postId]: true,
     }));
 
     try {
       await runTransaction(
-        ref(db, `posts/${post.uid}/${post.postId}`),
+        ref(db, `posts/${postOwnerUid}/${postId}`),
         (currentPost) => {
           if (!currentPost || typeof currentPost !== "object") {
             return currentPost;
@@ -182,95 +225,98 @@ export default function Home({ onNavigate }) {
     } catch (error) {
       setViewedPostIds((current) => ({
         ...current,
-        [post.postId]: false,
+        [postId]: false,
       }));
       console.error("View update error:", error);
     }
   };
 
   const likePost = async (post) => {
-    if (!user || !post.uid || !post.postId) return;
+    const postId = post.postId || post.id;
+    if (!user || !postId) return;
 
-    const likeRef = ref(db, `postLikes/${post.postId}/${user.uid}`);
-    const likesRef = ref(db, `posts/${post.uid}/${post.postId}/likes`);
-    const wasLiked = Boolean(likedIds[post.postId]);
+    const wasLiked = Boolean(likedIds[postId]);
+    const newAction = wasLiked ? "unlike" : "like";
+
+    // Instant optimistic UI update for heart and counter
+    setLikedIds((current) => ({ ...current, [postId]: !wasLiked }));
+    setPosts((currentPosts) =>
+      currentPosts.map((p) => {
+        const pId = p.postId || p.id;
+        if (pId === postId) {
+          const currentCount = Number(p.likes || p.likes_count || 0);
+          const nextCount = wasLiked ? Math.max(0, currentCount - 1) : currentCount + 1;
+          return { ...p, likes: nextCount, likes_count: nextCount };
+        }
+        return p;
+      })
+    );
 
     try {
-      if (wasLiked) {
-        await set(likeRef, null);
-        await runTransaction(likesRef, (value) =>
-          Math.max(0, Number(value || 0) - 1)
-        );
-        setLikedIds((current) => ({ ...current, [post.postId]: false }));
-      } else {
-        await set(likeRef, {
-          uid: user.uid,
-          createdAt: Date.now(),
-        });
-        await runTransaction(likesRef, (value) =>
-          Number(value || 0) + 1
-        );
-        setLikedIds((current) => ({ ...current, [post.postId]: true }));
+      const res = await apiPost("/like", {
+        userId: user.uid,
+        postId: postId,
+        action: newAction,
+      });
 
-        if (post.uid !== user.uid) {
-          const activityRef = push(ref(db, `activities/${post.uid}`));
-          await set(activityRef, {
-            type: "like",
-            actorId: user.uid,
-            actorName: user.displayName || user.email?.split("@")[0] || "Vezlivo User",
-            postId: post.postId,
-            createdAt: Date.now(),
-            read: false,
-          });
-        }
+      if (!res.success) {
+        setLikedIds((current) => ({ ...current, [postId]: wasLiked }));
       }
     } catch (error) {
       console.error("Like error:", error);
+      setLikedIds((current) => ({ ...current, [postId]: wasLiked }));
     }
   };
 
   const savePost = async (post) => {
-    if (!user || !post.postId) return;
+    const postId = post.postId || post.id;
+    if (!user || !postId) return;
 
-    const saveRef = ref(db, `savedPosts/${user.uid}/${post.postId}`);
-    const wasSaved = Boolean(savedIds[post.postId]);
+    const wasSaved = Boolean(savedIds[postId]);
+    const action = wasSaved ? "unsave" : "save";
+
+    setSavedIds((current) => ({ ...current, [postId]: !wasSaved }));
 
     try {
-      if (wasSaved) {
-        await set(saveRef, null);
-        setSavedIds((current) => ({ ...current, [post.postId]: false }));
-      } else {
-        await set(saveRef, {
-          postId: post.postId,
-          ownerId: post.uid,
-          savedAt: Date.now(),
-        });
-        setSavedIds((current) => ({ ...current, [post.postId]: true }));
+      const res = await apiPost("/save", {
+        userId: user.uid,
+        postId: postId,
+        action: action,
+      });
+
+      if (!res.success) {
+        setSavedIds((current) => ({ ...current, [postId]: wasSaved }));
       }
     } catch (error) {
       console.error("Save error:", error);
+      setSavedIds((current) => ({ ...current, [postId]: wasSaved }));
     }
   };
 
   const copyPostLink = async (post) => {
+    const postOwnerUid = post.user_id || post.uid;
+    const postId = post.postId || post.id;
     const shareUrl =
       window.location.origin +
-      `/?post=${encodeURIComponent(`${post.uid}:${post.postId}`)}`;
+      `/?post=${encodeURIComponent(`${postOwnerUid}:${postId}`)}`;
 
     try {
       await navigator.clipboard.writeText(shareUrl);
-      alert("Vezlivo video link copied.");
+      setToastMessage("Vezlivo video link copied.");
     } catch (error) {
       console.error("Copy link error:", error);
-      alert("Could not copy the link.");
+      setToastMessage("Could not copy the link.");
     }
+    setTimeout(() => setToastMessage(""), 3000);
   };
 
   const sharePost = async (post) => {
+    const postOwnerUid = post.user_id || post.uid;
+    const postId = post.postId || post.id;
     try {
       const shareUrl =
         window.location.origin +
-        `/?post=${encodeURIComponent(`${post.uid}:${post.postId}`)}`;
+        `/?post=${encodeURIComponent(`${postOwnerUid}:${postId}`)}`;
 
       if (navigator.share) {
         await navigator.share({
@@ -280,11 +326,11 @@ export default function Home({ onNavigate }) {
         });
       } else {
         await navigator.clipboard.writeText(shareUrl);
-        alert("Vezlivo video link copied.");
+        setToastMessage("Vezlivo video link copied.");
       }
 
       await runTransaction(
-        ref(db, `posts/${post.uid}/${post.postId}/shares`),
+        ref(db, `posts/${postOwnerUid}/${postId}/shares`),
         (value) => Number(value || 0) + 1
       );
     } catch (error) {
@@ -292,6 +338,34 @@ export default function Home({ onNavigate }) {
         console.error("Share error:", error);
       }
     }
+    setTimeout(() => setToastMessage(""), 3000);
+  };
+
+  const handleDeletePostClick = (post) => {
+    setOpenMenuPostId(null);
+    setDeleteConfirmPost(post);
+  };
+
+  const confirmDeleteVideo = async () => {
+    if (!deleteConfirmPost) return;
+    const targetId = deleteConfirmPost.id || deleteConfirmPost.postId;
+    setDeleteConfirmPost(null);
+
+    try {
+      const res = await apiPost(`/posts/${targetId}/delete`, {});
+      if (res && res.success) {
+        setPosts((currentPosts) =>
+          currentPosts.filter((p) => p.id !== targetId && p.postId !== targetId)
+        );
+        setToastMessage("Video deleted successfully.");
+      } else {
+        setToastMessage("Could not delete the video.");
+      }
+    } catch (error) {
+      console.error("Delete error:", error);
+      setToastMessage("Error deleting video.");
+    }
+    setTimeout(() => setToastMessage(""), 3000);
   };
 
   const openComments = (post) => {
@@ -306,6 +380,24 @@ export default function Home({ onNavigate }) {
 
   const openSection = (section) => {
     setActiveSection(section);
+
+    const lower = section.toLowerCase();
+    if (lower === "create" && typeof onCreate === "function") {
+      onCreate();
+      return;
+    }
+    if (lower === "profile" && typeof onProfile === "function") {
+      onProfile();
+      return;
+    }
+    if (lower === "activity" && typeof onActivity === "function") {
+      onActivity();
+      return;
+    }
+    if (lower === "discover" && typeof onDiscover === "function") {
+      onDiscover();
+      return;
+    }
 
     if (typeof onNavigate === "function") {
       onNavigate(section);
@@ -354,7 +446,8 @@ export default function Home({ onNavigate }) {
 
       if (!user) return false;
 
-      return post.uid === user.uid || Boolean(followingIds[post.uid]);
+      const postOwnerUid = post.user_id || post.uid;
+      return postOwnerUid === user.uid || Boolean(followingIds[postOwnerUid]);
     })
     .sort((a, b) => {
       if (activeTab === "Trending") {
@@ -374,7 +467,6 @@ export default function Home({ onNavigate }) {
       return Number(b.createdAt || 0) - Number(a.createdAt || 0);
     });
 
-  // Strict IntersectionObserver for single-video playback with automatic sound and zero multi-playback
   useEffect(() => {
     const observerCallback = (entries) => {
       entries.forEach((entry) => {
@@ -404,6 +496,21 @@ export default function Home({ onNavigate }) {
 
   return (
     <div style={styles.page}>
+      {/* Global CSS injection to force Mux & HTML videos to cover 100% screen with zero cutoff boxes */}
+      <style>{`
+        mux-video, video {
+          width: 100% !important;
+          height: 100% !important;
+          object-fit: cover !important;
+          background-color: #000000 !important;
+        }
+        mux-video::part(video) {
+          width: 100% !important;
+          height: 100% !important;
+          object-fit: cover !important;
+        }
+      `}</style>
+
       <header style={styles.floatingHeader}>
         <div style={styles.floatingTabs}>
           {["For You", "Following", "Trending"].map((tab) => (
@@ -567,12 +674,16 @@ export default function Home({ onNavigate }) {
               ? `https://stream.mux.com/${muxPlaybackId}/high.mp4`
               : "");
             const posterUrl = post.coverURL || post.coverUrl || post.thumbnailURL || post.thumbnail_url || media.poster || "";
-            const profileUrl = post.profileURL || post.photoURL || post.avatarURL || "";
-            const postIdKey = post.postId || videoUrl;
+            const profileUrl = post.profile_url || post.profileURL || post.photoURL || post.avatarURL || "";
+            const postIdKey = post.postId || post.id || videoUrl;
+            const postOwnerUid = post.user_id || post.uid;
+
+            const isOwner = user && postOwnerUid === user.uid;
+            const isLiked = Boolean(likedIds[postIdKey]);
 
             return (
               <article
-                key={`${post.uid || "user"}-${postIdKey}`}
+                key={`${postOwnerUid || "user"}-${postIdKey}`}
                 style={styles.post}
               >
                 <div 
@@ -596,6 +707,10 @@ export default function Home({ onNavigate }) {
                       playsinline
                       style={styles.video}
                       onPlay={() => increaseViews(post)}
+                      onError={(e) => {
+                        console.error("Mux stream failed (404/Invalid):", e);
+                        e.target.style.display = "none";
+                      }}
                     ></mux-video>
                   ) : videoUrl ? (
                     <video
@@ -607,6 +722,10 @@ export default function Home({ onNavigate }) {
                       preload="metadata"
                       onPlay={() => increaseViews(post)}
                       style={styles.video}
+                      onError={(e) => {
+                        console.error("Video load error:", e);
+                        e.target.style.display = "none";
+                      }}
                     />
                   ) : posterUrl ? (
                     <img src={posterUrl} alt={post.caption || "Vezlivo post"} style={styles.imagePost} />
@@ -617,19 +736,89 @@ export default function Home({ onNavigate }) {
                     </div>
                   )}
 
-                  {/* Vertical Action Stack Overlay */}
+                  {/* Right Action Buttons */}
                   <div style={styles.videoRightActions} onClick={(e) => e.stopPropagation()}>
+                    {/* 1. Floating Avatar (Always visible on all posts) */}
+                    <div 
+  style={styles.floatingAvatarWrapper}
+  onClick={(e) => {
+    e.stopPropagation();
+    const targetUid = post.user_id || post.uid;
+    if (!targetUid) return;
+    if (user && targetUid === user.uid) {
+      if (typeof onProfile === "function") onProfile();
+      else window.dispatchEvent(new CustomEvent("vezlivo:navigate", { detail: { section: "Profile" } }));
+    } else {
+      window.dispatchEvent(new CustomEvent("vezlivo:open-user-profile", { detail: { uid: targetUid } }));
+    }
+  }}
+>
+  <div style={styles.avatarMiniLarge}>
+    {profileUrl ? (
+      <img src={profileUrl} alt="Profile" style={styles.avatarImage} />
+    ) : (
+      <span>{(post.display_name || post.displayName || post.username || "V").charAt(0).toUpperCase()}</span>
+    )}
+  </div>
+                      {/* Follow Plus Button Badge (Shown only if logged in, not post owner, & not following yet) */}
+                      {user && postOwnerUid && postOwnerUid !== user.uid && !followingIds[postOwnerUid] && (
+                        <button 
+                          style={styles.vezlivoPlusButton} 
+                          aria-label="Follow user"
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            const now = Date.now();
+                            try {
+                              await update(ref(db), {
+                                [`users/${user.uid}/following/${postOwnerUid}`]: {
+                                  uid: postOwnerUid,
+                                  username: post.username || "",
+                                  displayName: post.display_name || post.displayName || "",
+                                  createdAt: now,
+                                },
+                                [`users/${postOwnerUid}/followers/${user.uid}`]: {
+                                  uid: user.uid,
+                                  username: post.username || "",
+                                  displayName: post.display_name || post.displayName || "",
+                                  createdAt: now,
+                                },
+                              });
+                              await runTransaction(
+                                ref(db, `users/${postOwnerUid}/followersCount`),
+                                (value) => Number(value || 0) + 1
+                              );
+                              setFollowingIds((current) => ({ ...current, [postOwnerUid]: true }));
+                            } catch (error) {
+                              console.error("Follow error:", error);
+                            }
+                          }}
+                        >
+                          ＋
+                        </button>
+                      )}
+                    </div>
+
+                    {/* 2. Like Button */}
                     <button
                       type="button"
-                      style={styles.sideActionButton}
+                      style={{
+                        ...styles.sideActionButton,
+                        ...(isLiked ? styles.likedActionButton : {}),
+                      }}
                       onClick={() => likePost(post)}
                     >
-                      <span style={{ fontSize: "22px" }}>{likedIds[post.postId] ? "♥" : "♡"}</span>
+                      <span style={{ 
+                        fontSize: "22px",
+                        color: isLiked ? "#38bdf8" : "#ffffff" 
+                      }}>
+                        {isLiked ? "♥" : "♡"}
+                      </span>
                       <span style={styles.sideActionCount}>
-                        {Number(post.likes || post.likesCount || 0)}
+                        {Number(post.likes || post.likes_count || 0)}
                       </span>
                     </button>
 
+                    {/* 3. Comment Button */}
                     <button
                       type="button"
                       style={styles.sideActionButton}
@@ -641,10 +830,16 @@ export default function Home({ onNavigate }) {
                       </span>
                     </button>
 
+                    {/* 4. Share & Options Menu Button */}
                     <button
                       type="button"
                       style={styles.sideActionButton}
-                      onClick={() => sharePost(post)}
+                      onClick={() =>
+                        setOpenMenuPostId(
+                          openMenuPostId === postIdKey ? null : postIdKey
+                        )
+                      }
+                      aria-label="Share and options"
                     >
                       <span style={{ fontSize: "20px" }}>↗️</span>
                       <span style={styles.sideActionCount}>
@@ -652,108 +847,74 @@ export default function Home({ onNavigate }) {
                       </span>
                     </button>
 
+                    {/* 5. Save/Favorite Button */}
                     <button
                       type="button"
                       style={styles.sideActionButton}
                       onClick={() => savePost(post)}
                       aria-label="Save to favorites"
                     >
-                      <span style={{ fontSize: "20px" }}>{savedIds[post.postId] ? "★" : "☆"}</span>
+                      <span style={{ fontSize: "20px" }}>{savedIds[post.postId || post.id] ? "★" : "☆"}</span>
                     </button>
 
-                    <button
-                      type="button"
-                      style={styles.sideActionButton}
-                      onClick={() =>
-                        setOpenMenuPostId(
-                          openMenuPostId === post.postId ? null : post.postId
-                        )
-                      }
-                      aria-label="Video options"
+                    {/* 6. Rotating Sound Disc at the Bottom */}
+                    <div
+                      style={styles.soundDiscButton}
+                      onClick={() => {
+                        const soundName = post.audioName || post.soundName || "Original Audio";
+                        const soundId = post.audioId || post.soundId || "original";
+                        window.dispatchEvent(
+                          new CustomEvent("vezlivo:open-sound", {
+                            detail: { soundId, soundName },
+                          })
+                        );
+                      }}
+                      title="View sound feed"
                     >
-                      <span style={{ fontSize: "18px" }}>⋯</span>
-                    </button>
-                  </div>
-
-                  {/* Bottom-Left Overlay Info */}
-                  <div style={styles.videoLeftInfo} onClick={(e) => e.stopPropagation()}>
-                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                      <div style={styles.avatarMini}>
+                      <div style={styles.soundDiscInner}>
                         {profileUrl ? (
                           <img src={profileUrl} alt="" style={styles.avatarImage} />
                         ) : (
-                          <span>{(post.displayName || post.username || "V").charAt(0).toUpperCase()}</span>
+                          <span>🎵</span>
                         )}
                       </div>
-                      <strong style={{ fontSize: "15px", color: "#ffffff", textShadow: "0 1px 2px rgba(0,0,0,0.8)" }}>
-                        @{post.username || post.uid?.slice(0, 8) || "user"}
-                      </strong>
+                    </div>
+                  </div>
 
-                      {user && post.uid !== user.uid && (
-                        <button
-                          type="button"
-                          style={{
-                            border: "1px solid #ffffff",
-                            backgroundColor: followingIds[post.uid] ? "rgba(255,255,255,0.25)" : "#6366f1",
-                            color: "#ffffff",
-                            borderRadius: "4px",
-                            padding: "3px 10px",
-                            fontSize: "11px",
-                            fontWeight: "600",
-                            cursor: "pointer",
-                          }}
-                          onClick={async () => {
-                            const targetUid = post.uid;
-                            if (!user || !targetUid || targetUid === user.uid) return;
-                            const isFollowing = Boolean(followingIds[targetUid]);
-                            const now = Date.now();
-                            try {
-                              if (isFollowing) {
-                                await update(ref(db), {
-                                  [`users/${user.uid}/following/${targetUid}`]: null,
-                                  [`users/${targetUid}/followers/${user.uid}`]: null,
-                                });
-                                await runTransaction(
-                                  ref(db, `users/${targetUid}/followersCount`),
-                                  (value) => Math.max(0, Number(value || 0) - 1)
-                                );
-                                setFollowingIds((current) => ({ ...current, [targetUid]: false }));
-                              } else {
-                                await update(ref(db), {
-                                  [`users/${user.uid}/following/${targetUid}`]: {
-                                    uid: targetUid,
-                                    username: post.username || "",
-                                    displayName: post.displayName || "",
-                                    createdAt: now,
-                                  },
-                                  [`users/${targetUid}/followers/${user.uid}`]: {
-                                    uid: user.uid,
-                                    username: user.username || "",
-                                    displayName: user.displayName || "",
-                                    createdAt: now,
-                                  },
-                                });
-                                await runTransaction(
-                                  ref(db, `users/${targetUid}/followersCount`),
-                                  (value) => Number(value || 0) + 1
-                                );
-                                setFollowingIds((current) => ({ ...current, [targetUid]: true }));
-                              }
-                            } catch (error) {
-                              console.error("Follow error:", error);
-                            }
-                          }}
-                        >
-                          {followingIds[post.uid] ? "Following" : "Follow"}
-                        </button>
-                      )}
+             {/* Bottom-Left Clean Text Overlay (Name, Handle, Caption, Sound) */}
+                  <div style={styles.videoLeftInfo}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                      <strong style={{ fontSize: "15px", color: "#ffffff", textShadow: "0 1px 2px rgba(0,0,0,0.8)" }}>
+                        {post.display_name || post.displayName || post.username || "Vezlivo User"}
+                      </strong>
+                      <span style={{ fontSize: "12px", color: "#d4d4d8", textShadow: "0 1px 2px rgba(0,0,0,0.8)" }}>
+                        {post.username ? (post.username.startsWith("@") ? post.username : `@${post.username}`) : "@user"}
+                      </span>
                     </div>
 
                     {post.caption && (
-                      <p style={{ margin: "0", fontSize: "14px", color: "#f4f4f5", textShadow: "0 1px 2px rgba(0,0,0,0.8)", overflowWrap: "anywhere" }}>
+                      <p style={{ margin: "2px 0 0 0", fontSize: "14px", color: "#f4f4f5", textShadow: "0 1px 2px rgba(0,0,0,0.8)", overflowWrap: "anywhere" }} onClick={(e) => e.stopPropagation()}>
                         {post.caption}
                       </p>
                     )}
+
+                    {/* Audio Track Badge */}
+                    <div 
+                      style={styles.audioBadge} 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const soundName = post.audioName || post.soundName || "Original Audio";
+                        const soundId = post.audioId || post.soundId || "original";
+                        window.dispatchEvent(
+                          new CustomEvent("vezlivo:open-sound", {
+                            detail: { soundId, soundName },
+                          })
+                        );
+                      }}
+                    >
+                      <span style={{ fontSize: "12px" }}>🎵</span>
+                      <span style={styles.audioText}>{post.audioName || post.soundName || "Original Audio"}</span>
+                    </div>
 
                     <span style={styles.views}>
                       {Number(post.views || post.viewsCount || 0)} views
@@ -761,17 +922,18 @@ export default function Home({ onNavigate }) {
                   </div>
                 </div>
 
-                {openMenuPostId === post.postId && (
+                {/* Combined Share & Options Menu Sheet */}
+                {openMenuPostId === postIdKey && (
                   <div style={styles.postMenu}>
                     <button
                       type="button"
                       style={styles.menuItem}
                       onClick={() => {
                         setOpenMenuPostId(null);
-                        setReportPost(post);
+                        sharePost(post);
                       }}
                     >
-                      🚩 Report video
+                      ↗️ Share Video
                     </button>
 
                     <button
@@ -783,6 +945,27 @@ export default function Home({ onNavigate }) {
                       }}
                     >
                       📋 Copy link
+                    </button>
+
+                    {isOwner && (
+                      <button
+                        type="button"
+                        style={{ ...styles.menuItem, color: "#f87171", fontWeight: "700" }}
+                        onClick={() => handleDeletePostClick(post)}
+                      >
+                        🗑️ Delete Video
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      style={styles.menuItem}
+                      onClick={() => {
+                        setOpenMenuPostId(null);
+                        setReportPost(post);
+                      }}
+                    >
+                      🚩 Report video
                     </button>
 
                     <button
@@ -800,6 +983,39 @@ export default function Home({ onNavigate }) {
         )}
       </main>
 
+      {deleteConfirmPost && (
+        <div style={styles.modalOverlay}>
+          <div style={styles.whiteModalCard}>
+            <h3 style={styles.modalTitle}>Delete video?</h3>
+            <p style={styles.modalText}>
+              Are you sure you want to delete this video? This cannot be undone.
+            </p>
+            <div style={styles.modalButtons}>
+              <button
+                type="button"
+                style={styles.modalCancelBtn}
+                onClick={() => setDeleteConfirmPost(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                style={styles.modalDeleteBtn}
+                onClick={confirmDeleteVideo}
+              >
+                Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {toastMessage && (
+        <div style={styles.toastCard}>
+          {toastMessage}
+        </div>
+      )}
+
       <nav style={styles.bottomNav} aria-label="Main navigation">
         <button
           type="button"
@@ -807,7 +1023,10 @@ export default function Home({ onNavigate }) {
             ...styles.navButton,
             ...(activeSection === "Home" ? styles.navButtonActive : {}),
           }}
-          onClick={() => setActiveSection("Home")}
+          onClick={() => {
+            setActiveSection("Home");
+            window.scrollTo({ top: 0, behavior: "smooth" });
+          }}
         >
           <span style={styles.navIcon}>🏠</span>
           <span>Home</span>
@@ -852,8 +1071,8 @@ export default function Home({ onNavigate }) {
 
       {showComments && selectedPost && (
         <Comments
-          postId={selectedPost.postId}
-          postOwnerId={selectedPost.uid}
+          postId={selectedPost.postId || selectedPost.id}
+          postOwnerId={selectedPost.user_id || selectedPost.uid}
           onClose={closeComments}
         />
       )}
@@ -861,8 +1080,8 @@ export default function Home({ onNavigate }) {
       {reportPost && (
         <Report
           type="post"
-          targetId={reportPost.postId}
-          targetOwnerId={reportPost.uid}
+          targetId={reportPost.postId || reportPost.id}
+          targetOwnerId={reportPost.user_id || reportPost.uid}
           onClose={() => setReportPost(null)}
         />
       )}
@@ -1024,20 +1243,23 @@ const styles = {
     scrollSnapType: "y mandatory",
     scrollbarWidth: "none",
     msOverflowStyle: "none",
+    position: "relative",
+    background: "#000000",
   },
 
   post: {
     position: "relative",
-    width: "100%",
-    height: "100%",
+    width: "100vw",
+    height: "calc(100vh - 68px)",
     scrollSnapAlign: "start",
     scrollSnapStop: "always",
     background: "#000000",
     overflow: "hidden",
   },
 
-  mediaFrame: {
-    position: "relative",
+ mediaFrame: {
+    position: "absolute",
+    inset: 0,
     width: "100%",
     height: "100%",
     background: "#000000",
@@ -1048,10 +1270,24 @@ const styles = {
     display: "block",
     width: "100%",
     height: "100%",
-    objectFit: "cover",
+    objectFit: "contain",
     backgroundColor: "#000000",
+    position: "absolute",
+    inset: 0,
   },
 
+  videoLeftInfo: {
+    position: "absolute",
+    left: "0",
+    bottom: "75px",
+    right: "70px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "6px",
+    zIndex: 10,
+    padding: "12px 16px",
+    background: "transparent",
+  },
   imagePost: {
     display: "block",
     width: "100%",
@@ -1079,12 +1315,52 @@ const styles = {
   videoRightActions: {
     position: "absolute",
     right: "12px",
-    bottom: "85px",
+    bottom: "115px",
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
-    gap: "14px",
-    zIndex: 10,
+    gap: "10px",
+    zIndex: 20,
+  },
+
+  floatingAvatarWrapper: {
+    position: "relative",
+    width: "44px",
+    height: "44px",
+    marginBottom: "4px",
+    cursor: "pointer",
+  },
+
+  avatarMiniLarge: {
+    width: "40px",
+    height: "40px",
+    borderRadius: "50%",
+    backgroundColor: "#6366f1",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+    border: "2px solid #ffffff",
+  },
+
+  vezlivoPlusButton: {
+    position: "absolute",
+    bottom: "-2px",
+    left: "50%",
+    transform: "translateX(-50%)",
+    width: "18px",
+    height: "18px",
+    borderRadius: "50%",
+    background: "linear-gradient(135deg, #6366f1, #38bdf8)",
+    color: "#ffffff",
+    border: "2px solid #000000",
+    fontSize: "12px",
+    fontWeight: "800",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    cursor: "pointer",
+    boxShadow: "0 2px 6px rgba(0,210,255,0.4)",
   },
 
   sideActionButton: {
@@ -1105,6 +1381,12 @@ const styles = {
     boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
   },
 
+  likedActionButton: {
+    background: "rgba(99, 102, 241, 0.25)",
+    border: "1px solid #38bdf8",
+    boxShadow: "0 0 12px rgba(56, 189, 248, 0.4)",
+  },
+
   sideActionCount: {
     fontSize: "11px",
     fontWeight: "700",
@@ -1112,31 +1394,32 @@ const styles = {
     textShadow: "0 1px 2px rgba(0,0,0,0.8)",
   },
 
-  videoLeftInfo: {
-    position: "absolute",
-    left: "0",
-    bottom: "16px",
-    right: "60px",
-    display: "flex",
-    flexDirection: "column",
-    gap: "8px",
-    zIndex: 10,
-    padding: "16px",
-    background: "linear-gradient(to top, rgba(0,0,0,0.85), rgba(0,0,0,0.4), transparent)",
-  },
-
-  avatarMini: {
-    width: "28px",
-    height: "28px",
+  soundDiscButton: {
+    width: "40px",
+    height: "40px",
     borderRadius: "50%",
-    backgroundColor: "#6366f1",
+    background: "linear-gradient(135deg, #18181b, #27272a)",
+    border: "2px solid #3f3f46",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
+    cursor: "pointer",
+    marginTop: "4px",
+    boxShadow: "0 4px 10px rgba(0,0,0,0.4)",
+    animation: "spin 4s linear infinite",
+  },
+
+  soundDiscInner: {
+    width: "24px",
+    height: "24px",
+    borderRadius: "50%",
     overflow: "hidden",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
     fontSize: "12px",
-    fontWeight: "700",
-    flexShrink: 0,
+    color: "#ffffff",
+    backgroundColor: "#6366f1",
   },
 
   avatarImage: {
@@ -1145,11 +1428,31 @@ const styles = {
     objectFit: "cover",
   },
 
+  audioBadge: {
+    display: "flex",
+    alignItems: "center",
+    gap: "6px",
+    backgroundColor: "rgba(0, 0, 0, 0.4)",
+    padding: "4px 10px",
+    borderRadius: "12px",
+    width: "fit-content",
+    cursor: "pointer",
+    marginTop: "4px",
+    backdropFilter: "blur(4px)",
+  },
+
+  audioText: {
+    fontSize: "12px",
+    color: "#ffffff",
+    fontWeight: "600",
+    textShadow: "0 1px 2px rgba(0,0,0,0.8)",
+  },
+
   postMenu: {
     position: "absolute",
     right: "16px",
     bottom: "70px",
-    width: "160px",
+    width: "165px",
     padding: "6px",
     backgroundColor: "#18181b",
     border: "1px solid #27272a",
@@ -1247,7 +1550,8 @@ const styles = {
     justifyContent: "space-around",
     backgroundColor: "rgba(15,15,18,.97)",
     borderTop: "1px solid #27272a",
-    zIndex: 30,
+    zIndex: 2147483647,
+    pointerEvents: "auto",
     padding: "0 8px",
   },
 
@@ -1265,6 +1569,8 @@ const styles = {
     fontSize: "10px",
     fontWeight: "600",
     cursor: "pointer",
+    pointerEvents: "auto",
+    zIndex: 2147483647,
   },
 
   navButtonActive: {
@@ -1289,5 +1595,87 @@ const styles = {
     alignItems: "center",
     justifyContent: "center",
     cursor: "pointer",
+    pointerEvents: "auto",
+    zIndex: 2147483647,
+  },
+
+  modalOverlay: {
+    position: "fixed",
+    inset: 0,
+    backgroundColor: "rgba(0, 0, 0, 0.6)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 99999,
+    padding: "20px",
+  },
+
+  whiteModalCard: {
+    width: "100%",
+    maxWidth: "320px",
+    backgroundColor: "#ffffff",
+    color: "#000000",
+    borderRadius: "16px",
+    padding: "24px",
+    textAlign: "center",
+    boxShadow: "0 20px 40px rgba(0,0,0,0.3)",
+  },
+
+  modalTitle: {
+    margin: "0 0 8px 0",
+    fontSize: "18px",
+    fontWeight: "700",
+    color: "#111111",
+  },
+
+  modalText: {
+    margin: "0 0 20px 0",
+    fontSize: "14px",
+    color: "#555555",
+    lineHeight: "1.4",
+  },
+
+  modalButtons: {
+    display: "flex",
+    gap: "12px",
+  },
+
+  modalCancelBtn: {
+    flex: 1,
+    padding: "12px",
+    borderRadius: "10px",
+    border: "1px solid #d1d5db",
+    backgroundColor: "#f3f4f6",
+    color: "#374151",
+    fontSize: "14px",
+    fontWeight: "600",
+    cursor: "pointer",
+  },
+
+  modalDeleteBtn: {
+    flex: 1,
+    padding: "12px",
+    borderRadius: "10px",
+    border: "none",
+    backgroundColor: "#ef4444",
+    color: "#ffffff",
+    fontSize: "14px",
+    fontWeight: "600",
+    cursor: "pointer",
+  },
+
+  toastCard: {
+    position: "fixed",
+    bottom: "90px",
+    left: "50%",
+    transform: "translateX(-50%)",
+    backgroundColor: "#ffffff",
+    color: "#000000",
+    padding: "12px 24px",
+    borderRadius: "24px",
+    fontSize: "14px",
+    fontWeight: "600",
+    boxShadow: "0 10px 25px rgba(0,0,0,0.3)",
+    zIndex: 99998,
   },
 };

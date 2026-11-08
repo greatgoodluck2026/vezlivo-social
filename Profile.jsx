@@ -1,4 +1,6 @@
-import React, { useEffect, useMemo, useState } from "react";
+// File: src/Profile.jsx
+
+import React, { useEffect, useState } from "react";
 import VipProfileBanner from "./VipProfileBanner.jsx";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import {
@@ -8,15 +10,10 @@ import {
   set,
   update,
 } from "firebase/database";
-import {
-  ref as storageRef,
-  uploadBytes,
-  getDownloadURL,
-} from "firebase/storage";
 
-import { auth, database, storage } from "./firebase.js";
+import { auth, database } from "./firebase.js";
 import Settings from "./Settings.jsx";
-import { apiGet } from "./apiClient.js";
+import { apiGet, apiPost } from "./apiClient.js";
 
 const DISPLAY_NAME_COOLDOWN =
   7 * 24 * 60 * 60 * 1000;
@@ -42,7 +39,6 @@ function Profile({ onBack, onOpenDraft }) {
   const [signingOut, setSigningOut] = useState(false);
 
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
-  const [uploadingCover, setUploadingCover] = useState(false);
 
   const [editing, setEditing] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
@@ -58,7 +54,14 @@ function Profile({ onBack, onOpenDraft }) {
   const [messageType, setMessageType] = useState("");
 
   const [localProfilePreview, setLocalProfilePreview] = useState("");
-  const [localCoverPreview, setLocalCoverPreview] = useState("");
+
+  // 🖼️ Profile Photo Cropper & Framing States
+  const [cropImageFile, setCropImageFile] = useState(null);
+  const [cropPreviewUrl, setCropPreviewUrl] = useState("");
+  const [zoomLevel, setZoomLevel] = useState(1);
+  const [imageOffset, setImageOffset] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
 
   // Admin Panel State for VIP Approvals
   const [targetVipInput, setTargetVipInput] = useState("");
@@ -67,7 +70,7 @@ function Profile({ onBack, onOpenDraft }) {
   const isAdmin = user?.email === "greatgoodluckp@gmail.com";
 
   /*
-   * AUTH + PROFILE
+   * AUTH + PROFILE (Fetches from Neon PostgreSQL backend to guarantee persistence)
    */
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(
@@ -87,65 +90,59 @@ function Profile({ onBack, onOpenDraft }) {
         setUser(currentUser);
 
         try {
+          // Fetch permanent profile from Neon PostgreSQL via Worker API
+          let dbProfile = {};
+          try {
+            const res = await apiGet(`/users/${currentUser.uid}`);
+            if (res && res.profile) {
+              dbProfile = res.profile;
+            }
+          } catch (apiErr) {
+            console.log("Neon profile fetch fallback triggered:", apiErr);
+          }
+
           const profileRef = ref(
             database,
             `users/${currentUser.uid}`
           );
-
           const snapshot = await get(profileRef);
+          const fbProfile = snapshot.exists() ? snapshot.val() || {} : {};
 
-          if (snapshot.exists()) {
-            const existingProfile = snapshot.val() || {};
+          // Merge backend DB data and Firebase data, prioritizing DB for URLs
+          const mergedProfile = {
+  ...fbProfile,
+  ...dbProfile,
+  // Force Neon PostgreSQL profile_url to win first, always
+  photoURL: dbProfile.profile_url || dbProfile.photo_url || currentUser.photoURL || fbProfile.photoURL || "",
+  displayName: dbProfile.display_name || fbProfile.displayName || currentUser.displayName || "",
+  username: dbProfile.username || fbProfile.username || "",
+  bio: dbProfile.bio || fbProfile.bio || "",
+  isPrivate: dbProfile.is_private === true || fbProfile.isPrivate === true,
+};
 
-            setProfile(existingProfile);
+          setProfile(mergedProfile);
+          setDisplayName(mergedProfile.displayName);
+          setUsername(mergedProfile.username);
+          setBio(mergedProfile.bio);
+          setIsPrivate(mergedProfile.isPrivate);
 
-            setDisplayName(
-              existingProfile.displayName ||
-                currentUser.displayName ||
-                ""
-            );
-
-            setUsername(existingProfile.username || "");
-
-            setBio(existingProfile.bio || "");
-
-            setIsPrivate(
-              existingProfile.isPrivate === true
-            );
-          } else {
+          if (!snapshot.exists()) {
             const newProfile = {
               uid: currentUser.uid,
-              displayName:
-                currentUser.displayName || "",
-              username: "",
+              displayName: mergedProfile.displayName,
+              username: mergedProfile.username,
               email: currentUser.email || "",
-              phoneNumber:
-                currentUser.phoneNumber || "",
-              photoURL:
-                currentUser.photoURL || "",
-              coverURL: "",
-              bio: "",
-              isPrivate: false,
+              photoURL: mergedProfile.photoURL,
+              bio: mergedProfile.bio,
+              isPrivate: mergedProfile.isPrivate,
               isVip: false,
               followersCount: 0,
               followingCount: 0,
               videosCount: 0,
               likesCount: 0,
-              favoritesCount: 0,
-              likedVideosCount: 0,
-              favoriteVideosCount: 0,
-              displayNameChangedAt: 0,
-              usernameChangedAt: 0,
               createdAt: Date.now(),
             };
-
             await set(profileRef, newProfile);
-
-            setProfile(newProfile);
-            setDisplayName(newProfile.displayName);
-            setUsername(newProfile.username);
-            setBio(newProfile.bio);
-            setIsPrivate(false);
           }
         } catch (error) {
           console.error(
@@ -167,7 +164,7 @@ function Profile({ onBack, onOpenDraft }) {
   }, []);
 
   /*
-   * PROFILE SYNC
+   * PROFILE SYNC (Ensures data stays updated in real-time)
    */
   useEffect(() => {
     if (!user) {
@@ -188,23 +185,30 @@ function Profile({ onBack, onOpenDraft }) {
 
         const nextProfile = snapshot.val() || {};
 
-        setProfile(nextProfile);
+        setProfile((prev) => ({
+          ...(prev || {}),
+          ...nextProfile,
+          photoURL: nextProfile.photoURL || prev?.photoURL || "",
+        }));
 
-        setDisplayName(
-          nextProfile.displayName || ""
-        );
+        // Only update local input states if user is not actively editing
+        if (!editing) {
+          setDisplayName(
+            nextProfile.displayName || ""
+          );
 
-        setUsername(
-          nextProfile.username || ""
-        );
+          setUsername(
+            nextProfile.username || ""
+          );
 
-        setBio(
-          nextProfile.bio || ""
-        );
+          setBio(
+            nextProfile.bio || ""
+          );
 
-        setIsPrivate(
-          nextProfile.isPrivate === true
-        );
+          setIsPrivate(
+            nextProfile.isPrivate === true
+          );
+        }
       },
       (error) => {
         console.error(
@@ -213,7 +217,7 @@ function Profile({ onBack, onOpenDraft }) {
         );
       }
     );
-  }, [user]);
+  }, [user, editing]);
 
   /*
    * USER VIDEOS (Neon PostgreSQL Backend)
@@ -446,238 +450,98 @@ function Profile({ onBack, onOpenDraft }) {
     }
   };
 
-  const handleProfilePhotoChange = async (
-    event
-  ) => {
-    const file =
-      event.target.files?.[0];
+  // Helper: Convert File to Base64
+  const fileToBase64 = (file) => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = (error) => reject(error);
+    });
+  };
 
-    if (!file || !user) {
-      return;
-    }
+  // 🖼️ Step 1: Trigger Cropper Modal on Photo Select
+  const handleProfilePhotoSelect = (event) => {
+    const file = event.target.files?.[0];
+    if (!file || !user) return;
 
     if (!file.type.startsWith("image/")) {
-      setMessage(
-        "Please select an image file."
-      );
+      setMessage("Please select an image file.");
       setMessageType("error");
       event.target.value = "";
       return;
     }
 
-    if (
-      file.size >
-      5 * 1024 * 1024
-    ) {
-      setMessage(
-        "Profile picture must be 5 MB or smaller."
-      );
+    const maxSize = 5 * 1024 * 1024;
+    if (file.size > maxSize) {
+      setMessage("Image must be 5MB or smaller.");
       setMessageType("error");
       event.target.value = "";
       return;
     }
 
-    const previewURL =
-      URL.createObjectURL(file);
+    const previewURL = URL.createObjectURL(file);
+    setCropPreviewUrl(previewURL);
+    setCropImageFile(file);
+    setZoomLevel(1);
+    setImageOffset({ x: 0, y: 0 });
+    event.target.value = "";
+  };
 
-    setLocalProfilePreview(
-      previewURL
-    );
+  // 🖼️ Step 2: Upload Framed Image & Sync directly to Cloudflare Worker / Neon PostgreSQL
+  const handleConfirmCropAndUpload = async () => {
+    if (!cropImageFile || !user) return;
 
+    const file = cropImageFile;
+    const previewURL = cropPreviewUrl;
+
+    setCropPreviewUrl("");
+    setCropImageFile(null);
+
+    setLocalProfilePreview(previewURL);
     setUploadingPhoto(true);
     setMessage("");
 
     try {
-      const fileExtension =
-        getFileExtension(
-          file.name,
-          "jpg"
-        );
+      const base64Data = await fileToBase64(file);
+      const filename = `profile-${user.uid}-${Date.now()}.jpg`;
 
-      const imageRef = storageRef(
-        storage,
-        `profilePictures/${user.uid}/profile.${fileExtension}`
-      );
+      const payload = {
+        uid: user.uid,
+        displayName: displayName || user.displayName || "Vezlivo User",
+        display_name: displayName || user.displayName || "Vezlivo User",
+        username: username || "",
+        bio: bio || "",
+        profile_url: base64Data,
+        profileImageBase64: base64Data,
+        profileImageName: filename,
+      };
 
-      await uploadBytes(
-        imageRef,
-        file,
-        {
-          contentType: file.type,
-        }
-      );
+      // 1. Sync directly with Neon PostgreSQL via Cloudflare Worker API
+      const res = await apiPost("/users/update-profile", payload);
 
-      const photoURL =
-        await getDownloadURL(
-          imageRef
-        );
+      const newPhotoUrl = res?.profile_url || res?.profileURL || res?.url || res?.photoURL || base64Data;
+      const finalUrl = newPhotoUrl || previewURL;
 
-      const profileRef = ref(
-        database,
-        `users/${user.uid}`
-      );
+      // 2. Keep Firebase Auth/RTDB profile photo updated in sync
+      const profileRef = ref(database, `users/${user.uid}`);
+      await update(profileRef, { photoURL: finalUrl, profile_url: finalUrl });
 
-      await update(
-        profileRef,
-        {
-          photoURL,
-        }
-      );
-
-      setProfile(
-        (previousProfile) => ({
-          ...(previousProfile || {}),
-          photoURL,
-        })
-      );
-
-      setUser(
-        (previousUser) => {
-          if (!previousUser) {
-            return previousUser;
-          }
-
-          return {
-            ...previousUser,
-            photoURL,
-          };
-        }
-      );
-
-      setMessage(
-        "Profile picture updated successfully."
-      );
-      setMessageType("success");
-
-      URL.revokeObjectURL(
-        previewURL
-      );
-
+      setProfile((previousProfile) => ({
+        ...(previousProfile || {}),
+        photoURL: finalUrl,
+        profile_url: finalUrl,
+      }));
+      
       setLocalProfilePreview("");
+      setMessage("Profile picture updated successfully in Neon!");
+      setMessageType("success");
     } catch (error) {
-      console.error(
-        "Profile photo upload error:",
-        error
-      );
-
-      setMessage(
-        "Unable to update your profile picture. Please try again."
-      );
+      console.error("Image upload error:", error);
+      setMessage("Unable to update picture. Please try again.");
       setMessageType("error");
     } finally {
       setUploadingPhoto(false);
-      event.target.value = "";
-    }
-  };
-
-  const handleCoverPhotoChange = async (
-    event
-  ) => {
-    const file =
-      event.target.files?.[0];
-
-    if (!file || !user) {
-      return;
-    }
-
-    if (!file.type.startsWith("image/")) {
-      setMessage(
-        "Please select an image file."
-      );
-      setMessageType("error");
-      event.target.value = "";
-      return;
-    }
-
-    if (
-      file.size >
-      8 * 1024 * 1024
-    ) {
-      setMessage(
-        "Cover picture must be 8 MB or smaller."
-      );
-      setMessageType("error");
-      event.target.value = "";
-      return;
-    }
-
-    const previewURL =
-      URL.createObjectURL(file);
-
-    setLocalCoverPreview(
-      previewURL
-    );
-
-    setUploadingCover(true);
-    setMessage("");
-
-    try {
-      const fileExtension =
-        getFileExtension(
-          file.name,
-          "jpg"
-        );
-
-      const imageRef = storageRef(
-        storage,
-        `profilePictures/${user.uid}/cover.${fileExtension}`
-      );
-
-      await uploadBytes(
-        imageRef,
-        file,
-        {
-          contentType: file.type,
-        }
-      );
-
-      const coverURL =
-        await getDownloadURL(
-          imageRef
-        );
-
-      const profileRef = ref(
-        database,
-        `users/${user.uid}`
-      );
-
-      await update(
-        profileRef,
-        {
-          coverURL,
-        }
-      );
-
-      setProfile(
-        (previousProfile) => ({
-          ...(previousProfile || {}),
-          coverURL,
-        })
-      );
-
-      setMessage(
-        "Cover picture updated successfully."
-      );
-      setMessageType("success");
-
-      URL.revokeObjectURL(
-        previewURL
-      );
-
-      setLocalCoverPreview("");
-    } catch (error) {
-      console.error(
-        "Cover photo upload error:",
-        error
-      );
-
-      setMessage(
-        "Unable to update your cover picture. Please try again."
-      );
-      setMessageType("error");
-    } finally {
-      setUploadingCover(false);
-      event.target.value = "";
     }
   };
 
@@ -803,6 +667,18 @@ function Profile({ onBack, onOpenDraft }) {
     setMessage("");
 
     try {
+      // Direct Sync with Neon PostgreSQL backend via Cloudflare Worker
+      await apiPost("/users/update-profile", {
+        uid: user.uid,
+        display_name: cleanDisplayName,
+        displayName: cleanDisplayName,
+        username: cleanUsername,
+        bio: cleanBio,
+        is_private: isPrivate,
+        isPrivate: isPrivate,
+        profile_url: profile?.photoURL || profile?.profile_url || "",
+      });
+
       const profileRef = ref(
         database,
         `users/${user.uid}`
@@ -925,16 +801,13 @@ function Profile({ onBack, onOpenDraft }) {
   const profilePhoto =
     localProfilePreview ||
     profile?.photoURL ||
+    profile?.profile_url ||
     user?.photoURL ||
-    "";
-
-  const coverPhoto =
-    localCoverPreview ||
-    profile?.coverURL ||
     "";
 
   const profileName =
     profile?.displayName ||
+    profile?.display_name ||
     user?.displayName ||
     "Vezlivo User";
 
@@ -1086,58 +959,6 @@ function Profile({ onBack, onOpenDraft }) {
           </div>
         </header>
 
-        {/* COVER */}
-        <div
-          style={{
-            ...styles.cover,
-            backgroundImage: coverPhoto
-              ? `linear-gradient(rgba(0,0,0,0.08), rgba(0,0,0,0.18)), url("${coverPhoto}")`
-              : "linear-gradient(135deg, #171717 0%, #343434 48%, #606060 100%)",
-          }}
-        >
-          {!coverPhoto && (
-            <div style={styles.coverFallback}>
-              <span style={styles.coverFallbackMark}>
-                V
-              </span>
-              <span>
-                Vezlivo
-              </span>
-            </div>
-          )}
-
-          <label
-            htmlFor="cover-photo-input"
-            title="Change cover picture"
-            style={{
-              ...styles.coverCamera,
-              opacity:
-                uploadingCover ? 0.55 : 1,
-              pointerEvents:
-                uploadingCover
-                  ? "none"
-                  : "auto",
-            }}
-          >
-            📷
-          </label>
-
-          <input
-            id="cover-photo-input"
-            type="file"
-            accept="image/*"
-            onChange={
-              handleCoverPhotoChange
-            }
-            disabled={
-              uploadingCover ||
-              uploadingPhoto ||
-              saving
-            }
-            hidden
-          />
-        </div>
-
         {/* PROFILE HEADER */}
         <div style={styles.profileHeader}>
           <div style={styles.avatarWrap}>
@@ -1182,11 +1003,10 @@ function Profile({ onBack, onOpenDraft }) {
               type="file"
               accept="image/*"
               onChange={
-                handleProfilePhotoChange
+                handleProfilePhotoSelect
               }
               disabled={
                 uploadingPhoto ||
-                uploadingCover ||
                 saving
               }
               hidden
@@ -1616,6 +1436,80 @@ function Profile({ onBack, onOpenDraft }) {
           </div>
         )}
       </section>
+
+      {/* 🖼️ PHOTO FRAMING & ZOOM MODAL */}
+      {cropPreviewUrl && (
+        <div style={cropStyles.overlay}>
+          <div style={cropStyles.modal}>
+            <h3 style={cropStyles.title}>Edit Profile Picture</h3>
+            <p style={cropStyles.subtitle}>Drag to reposition and use the slider to zoom</p>
+
+            <div 
+              style={cropStyles.viewport}
+              onMouseDown={(e) => {
+                setIsDragging(true);
+                setDragStart({ x: e.clientX - imageOffset.x, y: e.clientY - imageOffset.y });
+              }}
+              onMouseMove={(e) => {
+                if (!isDragging) return;
+                setImageOffset({ x: e.clientX - dragStart.x, y: e.clientY - dragStart.y });
+              }}
+              onMouseUp={() => setIsDragging(false)}
+              onTouchStart={(e) => {
+                setIsDragging(true);
+                setDragStart({ x: e.touches[0].clientX - imageOffset.x, y: e.touches[0].clientY - imageOffset.y });
+              }}
+              onTouchMove={(e) => {
+                if (!isDragging) return;
+                setImageOffset({ x: e.touches[0].clientX - imageOffset.x, y: e.touches[0].clientY - imageOffset.y });
+              }}
+              onTouchEnd={() => setIsDragging(false)}
+            >
+              <img
+                src={cropPreviewUrl}
+                alt="Crop Preview"
+                style={{
+                  ...cropStyles.imagePreview,
+                  transform: `translate(${imageOffset.x}px, ${imageOffset.y}px) scale(${zoomLevel})`,
+                }}
+              />
+            </div>
+
+            <div style={cropStyles.sliderContainer}>
+              <span>🔍 Zoom:</span>
+              <input
+                type="range"
+                min="1"
+                max="3"
+                step="0.05"
+                value={zoomLevel}
+                onChange={(e) => setZoomLevel(parseFloat(e.target.value))}
+                style={cropStyles.slider}
+              />
+            </div>
+
+            <div style={cropStyles.buttonRow}>
+              <button
+                type="button"
+                style={cropStyles.cancelBtn}
+                onClick={() => {
+                  setCropPreviewUrl("");
+                  setCropImageFile(null);
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                style={cropStyles.saveBtn}
+                onClick={handleConfirmCropAndUpload}
+              >
+                Apply & Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
@@ -1733,27 +1627,6 @@ function objectToVideoList(data) {
         Number(b.createdAt || 0) -
         Number(a.createdAt || 0)
     );
-}
-
-function getFileExtension(
-  filename,
-  fallback
-) {
-  const parts =
-    String(filename || "")
-      .split(".");
-
-  const extension =
-    parts.length > 1
-      ? parts.pop()
-      : "";
-
-  return (
-    extension
-      .toLowerCase()
-      .replace(/[^a-z0-9]/g, "") ||
-    fallback
-  );
 }
 
 function formatCount(value) {
@@ -1889,51 +1762,10 @@ const styles = {
     cursor: "pointer",
   },
 
-  cover: {
-    width: "100%",
-    height: "175px",
-    position: "relative",
-    backgroundSize: "cover",
-    backgroundPosition: "center",
-    backgroundRepeat: "no-repeat",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  coverFallback: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    color: "rgba(255,255,255,0.82)",
-    fontSize: "16px",
-    fontWeight: 500,
-    letterSpacing: "0.2px",
-  },
-
-  coverCamera: {
-    position: "absolute",
-    right: "14px",
-    bottom: "14px",
-    width: "46px",
-    height: "46px",
-    borderRadius: "50%",
-    background: "#fff",
-    border:
-      "2px solid rgba(255,255,255,0.95)",
-    boxShadow:
-      "0 4px 14px rgba(0,0,0,0.24)",
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontSize: "20px",
-    cursor: "pointer",
-  },
-
   profileHeader: {
     position: "relative",
     padding:
-      "0 14px 7px",
+      "16px 14px 12px",
     minHeight: "116px",
   },
 
@@ -1941,7 +1773,6 @@ const styles = {
     position: "relative",
     width: "112px",
     height: "112px",
-    marginTop: "-56px",
     marginLeft: "8px",
     zIndex: 10,
   },
@@ -2001,7 +1832,7 @@ const styles = {
 
   nameArea: {
     padding:
-      "7px 2px 0",
+      "12px 2px 0",
     maxWidth: "590px",
   },
 
@@ -2053,12 +1884,6 @@ const styles = {
     marginTop: "6px",
     color: "#777",
     fontSize: "13px",
-  },
-
-  headerActions: {
-    position: "absolute",
-    right: "18px",
-    top: "7px",
   },
 
   editButton: {
@@ -2591,6 +2416,94 @@ const styles = {
     margin:
       "0 15px",
     color: "#666",
+  },
+};
+
+// 🖼️ Framing & Zoom Modal Styles
+const cropStyles = {
+  overlay: {
+    position: "fixed",
+    inset: 0,
+    backgroundColor: "rgba(0, 0, 0, 0.8)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 99999,
+    padding: "20px",
+  },
+  modal: {
+    width: "100%",
+    maxWidth: "360px",
+    backgroundColor: "#18181b",
+    color: "#ffffff",
+    borderRadius: "20px",
+    padding: "24px",
+    textAlign: "center",
+    boxShadow: "0 20px 40px rgba(0,0,0,0.5)",
+    border: "1px solid #27272a",
+  },
+  title: {
+    margin: "0 0 6px 0",
+    fontSize: "18px",
+    fontWeight: "700",
+  },
+  subtitle: {
+    margin: "0 0 20px 0",
+    fontSize: "12px",
+    color: "#a1a1aa",
+  },
+  viewport: {
+    width: "220px",
+    height: "220px",
+    borderRadius: "50%",
+    overflow: "hidden",
+    margin: "0 auto 20px auto",
+    border: "3px solid #6366f1",
+    position: "relative",
+    backgroundColor: "#000000",
+    cursor: "grab",
+  },
+  imagePreview: {
+    width: "100%",
+    height: "100%",
+    objectFit: "cover",
+    pointerEvents: "none",
+  },
+  sliderContainer: {
+    display: "flex",
+    alignItems: "center",
+    gap: "10px",
+    marginBottom: "24px",
+    fontSize: "13px",
+    color: "#d4d4d8",
+  },
+  slider: {
+    flex: 1,
+    accentColor: "#6366f1",
+  },
+  buttonRow: {
+    display: "flex",
+    gap: "12px",
+  },
+  cancelBtn: {
+    flex: 1,
+    padding: "12px",
+    borderRadius: "12px",
+    border: "1px solid #3f3f46",
+    backgroundColor: "transparent",
+    color: "#d4d4d8",
+    fontWeight: "600",
+    cursor: "pointer",
+  },
+  saveBtn: {
+    flex: 1,
+    padding: "12px",
+    borderRadius: "12px",
+    border: "none",
+    backgroundColor: "#6366f1",
+    color: "#ffffff",
+    fontWeight: "600",
+    cursor: "pointer",
   },
 };
 

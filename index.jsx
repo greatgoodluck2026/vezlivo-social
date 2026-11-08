@@ -1,3 +1,5 @@
+// File: src/index.jsx
+
 import React, {
   useEffect,
   useRef,
@@ -370,7 +372,6 @@ function PostCard({
   const avatar =
     getPostAvatar(post);
 
-  // Robust hashtag parsing for arrays or stringified JSON
   const hashtags = Array.isArray(post.hashtags)
     ? post.hashtags
     : typeof post.hashtags === "string"
@@ -909,73 +910,46 @@ function HomePage({
       </section>
 
 
-      <nav className="bottom-navigation">
-
+    <nav className="bottom-navigation" style={{ zIndex: 9999, pointerEvents: "auto", position: "fixed", bottom: 0, left: 0, right: 0 }}>
         <button
           type="button"
           className="nav-item active"
+          onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
         >
-          <span>
-            ⌂
-          </span>
-
-          <small>
-            Home
-          </small>
+          <span>⌂</span>
+          <small>Home</small>
         </button>
-
 
         <button
           type="button"
           className="nav-item"
           onClick={onCreate}
         >
-          <span>
-            ＋
-          </span>
-
-          <small>
-            Create
-          </small>
+          <span>＋</span>
+          <small>Create</small>
         </button>
-
 
         <button
           type="button"
           className="nav-item"
           onClick={onActivity}
         >
-          <span>
-            ♡
-          </span>
-
-          <small>
-            Activity
-          </small>
+          <span>♡</span>
+          <small>Activity</small>
         </button>
-
 
         <button
           type="button"
           className="nav-item"
           onClick={onProfile}
         >
-          <span>
-            ☻
-          </span>
-
-          <small>
-            Profile
-          </small>
+          <span>☻</span>
+          <small>Profile</small>
         </button>
-
       </nav>
-
     </main>
   );
 }
-
-
 /* =========================================================
    APP
 ========================================================= */
@@ -1336,53 +1310,37 @@ function App() {
 
   return (
     <Home
-      onNavigate={(section) => {
-        const routes = {
-          Home: "home",
-          Discover: "discover",
-          Create: "create",
-          Activity: "activity",
-          Profile: "profile",
-          Inbox: "inbox",
-        };
-
-
-        const nextPage =
-          routes[section];
-
-
-        if (!nextPage) {
-          return;
-        }
-
-
-        if (
-          [
-            "create",
-            "activity",
-            "profile",
-            "inbox",
-          ].includes(
-            nextPage
-          ) &&
-          !user
-        ) {
+      user={user}
+      onLogin={() => navigate("login")}
+      onCreate={() => {
+        if (!user) {
           navigate("login");
           return;
         }
-
-
-        if (
-          nextPage ===
-          "create"
-        ) {
-          setDraftToOpen("");
+        setDraftToOpen("");
+        navigate("create");
+      }}
+      onDiscover={() => navigate("discover")}
+      onActivity={() => {
+        if (!user) {
+          navigate("login");
+          return;
         }
-
-
-        navigate(
-          nextPage
-        );
+        navigate("activity");
+      }}
+      onProfile={() => {
+        if (!user) {
+          navigate("login");
+          return;
+        }
+        navigate("profile");
+      }}
+      onInbox={() => {
+        if (!user) {
+          navigate("login");
+          return;
+        }
+        navigate("inbox");
       }}
     />
   );

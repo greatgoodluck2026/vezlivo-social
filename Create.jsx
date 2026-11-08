@@ -110,8 +110,7 @@ function extractMentions(text) {
     ...new Set(matches),
   ];
 }
-
-// Function to handle video upload to Mux using resumable chunking (bypasses MTN/Glo mobile restrictions)
+// Function to handle direct video upload to Mux (bypasses proxy and tus-js-client errors)
 const uploadVideoResumable = async (file, onProgress) => {
   const response = await fetch(`${import.meta.env.VITE_API_URL}/mux/uploads`, {
     method: "POST",
@@ -124,27 +123,32 @@ const uploadVideoResumable = async (file, onProgress) => {
   }
 
   return new Promise((resolve, reject) => {
-    const upload = new tus.Upload(file, {
-      endpoint: data.uploadUrl,
-      uploadUrl: data.uploadUrl,
-      retryDelays: [0, 1000, 3000, 5000],
-      chunkSize: 2 * 1024 * 1024, // 2MB chunks for smooth mobile uploading
-      metadata: {
-        filename: file.name,
-        filetype: file.type
-      },
-      onError: (error) => reject(error),
-      onProgress: (bytesUploaded, bytesTotal) => {
-        const percentage = Math.round((bytesUploaded / bytesTotal) * 100);
-        if (onProgress) onProgress(percentage);
-      },
-      onSuccess: () => resolve({ uploadId: data.uploadId })
-    });
+    const xhr = new XMLHttpRequest();
+    xhr.open("PUT", data.uploadUrl, true);
+    xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
 
-    upload.start();
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable && onProgress) {
+        const percentage = Math.round((event.loaded / event.total) * 100);
+        onProgress(percentage);
+      }
+    };
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        resolve({ uploadId: data.uploadId });
+      } else {
+        reject(new Error(`Mux direct upload failed with status ${xhr.status}`));
+      }
+    };
+
+    xhr.onerror = () => {
+      reject(new Error("Network error occurred during video upload."));
+    };
+
+    xhr.send(file);
   });
 };
-
 /* =========================================================
    VEZLIVO PERSISTENT DRAFT STORAGE
 ========================================================= */
@@ -196,11 +200,6 @@ function Create({ draftId = "" } = {}) {
   const [user, setUser] =
     useState(null);
 
-  /*
-    create = choose Post / Reel / Story
-    edit   = edit selected media
-    post   = final publishing screen
-  */
   const [step, setStep] =
     useState("create");
 
@@ -606,17 +605,6 @@ function Create({ draftId = "" } = {}) {
 
     setContentType(type);
 
-    /*
-      POST:
-      photo or video
-
-      REEL:
-      video only
-
-      STORY:
-      photo or video
-    */
-
     if (type === "reel") {
       openCamera("user", "reel");
       return;
@@ -962,6 +950,7 @@ function Create({ draftId = "" } = {}) {
   const handlePreviewPause = () => {
     musicAudioRef.current?.pause();
   };
+
 
   /* =====================================================
      CAMERA
@@ -1572,76 +1561,7 @@ function Create({ draftId = "" } = {}) {
     transform: `scale(${coverZoom})`,
   };
 
- /* =====================================================
-     PUBLISH
-  ===================================================== */
-  const publishPost = async () => {
-    // 🛡️ PREVENT DOUBLE SUBMISSION / MULTI-CLICK GUARD
-    if (uploading) {
-      return;
-    }
-
-    setMessage("");
-    setError("");
-
-    if (!user) {
-      setError(
-        "Please log in before publishing."
-      );
-      return;
-    }
-
-    if (!mediaFile) {
-      setError(
-        "Please select or record something first."
-      );
-      return;
-    }
-
-    if (
-      caption.length >
-      MAX_CAPTION
-    ) {
-      setError(
-        "Your caption is too long."
-      );
-      return;
-    }
-
-    try {
-      setUploading(true);
-      setUploadProgress(0);
-
-      const postId = crypto.randomUUID();
-
-      if (!postId) {
-        throw new Error(
-          "Could not create the post."
-        );
-      }
-
-      const extension =
-        mediaFile.name.includes(".")
-          ? mediaFile.name
-              .split(".")
-              .pop()
-              .toLowerCase()
-          : mediaType === "video"
-          ? "webm"
-          : "jpg";
-
-      const storagePath =
-        `${contentType === "story" ? "stories" : "posts"}/${user.uid}/${postId}.${extension}`;
-
-      setMessage(
-        contentType === "story"
-          ? "Uploading your Vezlivo story..."
-          : contentType === "reel"
-          ? "Uploading your Vezlivo Reel..."
-          : "Uploading your Vezlivo post..."
-      );
-
-       /* =====================================================
+  /* =====================================================
      PUBLISH
   ===================================================== */
   const publishPost = async () => {
@@ -1698,39 +1618,20 @@ function Create({ draftId = "" } = {}) {
 
       const uploadFile = async (file, path, onProgress) => {
         if (file === mediaFile && mediaType === "video") {
-          // 1. Create upload slot on Mux via your Cloudflare Worker backend using the generated postId
-          const created = await apiPost("/mux/uploads", { postId });
-          if (!created.success || !created.uploadUrl) {
-            throw new Error(created.error || "Failed to create Mux upload slot.");
-          }
+          // Use the true TUS resumable chunking function
+          setMessage("Uploading video via TUS resumable stream...");
 
-          if (onProgress) onProgress(10, file.size);
-
-          // 2. Upload video file via Cloudflare Worker proxy using dynamic API URL
-          const apiUrl = import.meta.env.VITE_API_URL || "";
-          const workerProxyUrl = `${apiUrl}/mux/proxy-upload?target=${encodeURIComponent(created.uploadUrl)}`;
-
-          const proxyRes = await fetch(workerProxyUrl, {
-            method: "PUT",
-            headers: {
-              "Content-Type": file.type || "application/octet-stream",
-            },
-            body: file,
+          const uploadResult = await uploadVideoResumable(file, (percentage) => {
+            if (onProgress) onProgress(Math.round((percentage / 100) * file.size), file.size);
           });
 
-          if (!proxyRes.ok) {
-            const errText = await proxyRes.text().catch(() => "");
-            throw new Error(`Video upload via proxy failed (Status ${proxyRes.status}): ${errText}`);
-          }
-
-          if (onProgress) onProgress(file.size, file.size);
           setMessage("Processing video with Mux...");
 
-          // 3. Poll Mux/Worker for processing completion
+          // Poll Mux/Worker for processing completion using the uploadId returned by TUS
           let completed = null;
           for (let attempt = 0; attempt < 30; attempt++) {
             completed = await apiPost(
-              `/mux/uploads/${encodeURIComponent(created.uploadId)}/complete`,
+              `/mux/uploads/${encodeURIComponent(uploadResult.uploadId)}/complete`,
               {}
             );
             if (completed && !completed.processing && completed.playbackId) break;
@@ -1741,6 +1642,7 @@ function Create({ draftId = "" } = {}) {
           }
           return { url: completed.url, key: "", playbackId: completed.playbackId, assetId: completed.assetId };
         }
+
         const form = new FormData();
         form.append("file", file);
         form.append("path", path);
@@ -1805,17 +1707,33 @@ function Create({ draftId = "" } = {}) {
 
       const mentions = extractMentions(caption);
 
-      const username =
+    // Pull display name, username, and profile photo safely from user state or metadata
+      const displayName =
         user.displayName ||
+        user.reloadUserInfo?.displayName ||
         user.email?.split("@")[0] ||
-        "Vezlivo user";
+        "Vezlivo User";
+
+      const rawUsername =
+        user.reloadUserInfo?.screenName ||
+        user.email?.split("@")[0] ||
+        "user";
+      
+      const username = rawUsername.startsWith("@") ? rawUsername : `@${rawUsername}`;
+
+      const profileURL =
+        user.photoURL ||
+        user.reloadUserInfo?.photoUrl ||
+        "";
 
       const now = Date.now();
 
       const baseData = {
         id: postId,
         uid: user.uid,
+        displayName,
         username,
+        profileURL: user.photoURL || "",
         userEmail: user.email || "",
         userPhotoURL: user.photoURL || "",
         mediaType,
@@ -1861,7 +1779,7 @@ function Create({ draftId = "" } = {}) {
         coverZoom,
       };
 
-      if (contentType === "story") {
+    if (contentType === "story") {
         const expiresAt = now + 24 * 60 * 60 * 1000;
         await apiPost("/stories", {
           ...baseData,
@@ -1888,21 +1806,11 @@ function Create({ draftId = "" } = {}) {
           views: 0,
           viewsCount: 0,
           status: "published",
+          shareToStory: contentType === "reel" && shareToStory,
         };
 
-        await apiPost("/posts", {
-          ...postData,
-          shareToStory: contentType === "reel" && shareToStory,
-        });
-
-        await apiPost("/posts/create", {
-          userId: user.uid,
-          caption: caption.trim(),
-          muxAssetId: mediaUpload.assetId || "",
-          muxPlaybackId: mediaUpload.playbackId || "",
-          thumbnailUrl: coverURL || "",
-          videoUrl: mediaURL || ""
-        });
+        // Keep only this single call to publish the post/reel cleanly
+        await apiPost("/posts", postData);
 
         setUploadProgress(100);
         setMessage(
@@ -1911,7 +1819,6 @@ function Create({ draftId = "" } = {}) {
             : "Your post is live on Vezlivo."
         );
       }
-
       setTimeout(() => {
         removeMedia();
       }, 1200);
@@ -1931,119 +1838,6 @@ function Create({ draftId = "" } = {}) {
       setUploading(false);
     }
   };
-        /* ===============================================
-            STORY
-        =============================================== */
-
-        if (
-          contentType === "story"
-        ) {
-          const expiresAt =
-            now +
-            24 *
-              60 *
-              60 *
-              1000;
-
-          await apiPost("/stories", {
-            ...baseData,
-            type: "story",
-            expiresAt,
-            status: "published",
-            views: 0,
-            replies: 0,
-          });
-
-          setUploadProgress(100);
-
-          setMessage(
-            "Your story is now live on Vezlivo for 24 hours."
-          );
-        } else {
-          /* =============================================
-              POST / REEL
-          ============================================= */
-
-          const postData = {
-            ...baseData,
-
-            postType:
-              contentType === "reel"
-                ? "reel"
-                : "post",
-
-            likes: 0,
-
-            likesCount: 0,
-
-            comments: 0,
-
-            commentsCount: 0,
-
-            shares: 0,
-
-            reposts: 0,
-
-            saves: 0,
-
-            views: 0,
-
-            viewsCount: 0,
-
-            status:
-              "published",
-          };
-
-          // 1. Save to original endpoints/JSON storage
-          await apiPost("/posts", {
-            ...postData,
-            shareToStory: contentType === "reel" && shareToStory,
-          });
-
-          // 2. Explicitly persist to Neon PostgreSQL Database via our Cloudflare Worker endpoint
-          await apiPost("/posts/create", {
-            userId: user.uid,
-            caption: caption.trim(),
-            muxAssetId: mediaUpload.assetId || "",
-            muxPlaybackId: mediaUpload.playbackId || "",
-            thumbnailUrl: coverURL || "",
-            videoUrl: mediaURL || ""
-          });
-
-          setUploadProgress(100);
-
-          setMessage(
-            contentType === "reel"
-              ? "Your Reel is live on Vezlivo."
-              : "Your post is live on Vezlivo."
-          );
-        }
-
-        setTimeout(() => {
-          removeMedia();
-        }, 1200);
-
-        if (currentDraftId) {
-          try { await deleteVezlivoDraft(currentDraftId); }
-          catch (draftDeleteError) { console.warn("Vezlivo draft cleanup failed:", draftDeleteError); }
-        }
-
-      } catch (
-        publishError
-      ) {
-        console.error(
-          "Vezlivo publish error:",
-          publishError
-        );
-
-        setError(
-          publishError?.message ||
-            "Something went wrong while publishing your content."
-        );
-      } finally {
-        setUploading(false);
-      }
-    };
  
   /* =====================================================
      LOGIN
@@ -4844,6 +4638,5 @@ const styles = {
     cursor: "pointer",
   },
 };
-
 
 export default Create;
