@@ -440,17 +440,14 @@ function Create({ draftId = "" } = {}) {
      AUTH
   ===================================================== */
 
-  useEffect(() => {
-    const unsubscribe =
-      onAuthStateChanged(
-        auth,
-        (currentUser) => {
-          setUser(currentUser);
-        }
-      );
-
-    return () =>
-      unsubscribe();
+ useEffect(() => {
+    const handleNavigate = (e) => {
+      if (e.detail?.section) {
+        setActiveSection(e.detail.section); // or setCurrentView(e.detail.section)
+      }
+    };
+    window.addEventListener("vezlivo:navigate", handleNavigate);
+    return () => window.removeEventListener("vezlivo:navigate", handleNavigate);
   }, []);
 
   useEffect(() => {
@@ -1611,7 +1608,6 @@ function Create({ draftId = "" } = {}) {
       } else {
         window.dispatchEvent(new CustomEvent("vezlivo:navigate", { detail: { section: "Home" } }));
       }
-
       const extension =
         mediaFile.name.includes(".")
           ? mediaFile.name.split(".").pop().toLowerCase()

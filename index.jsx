@@ -903,9 +903,10 @@ function App() {
   } else if (page === "create") {
     content = (
       <Create
-        draftId={
-          draftToOpen
-        }
+        draftId={draftToOpen}
+        onNavigate={(section) => {
+          if (section === "Home") navigate("home");
+        }}
       />
     );
   } else if (page === "discover") {
