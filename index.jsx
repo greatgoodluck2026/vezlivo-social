@@ -1025,8 +1025,8 @@ function App() {
 
   return (
     <div style={{ position: "relative", width: "100vw", height: "100vh", overflow: "hidden", background: "#000000" }}>
-      {/* Active Screen Content */}
-      <div style={{ width: "100%", height: "calc(100vh - 68px)", overflow: "hidden" }}>
+      {/* Active Screen Content with Scrolling Enabled */}
+      <div style={{ width: "100%", height: "calc(100vh - 68px)", overflowY: "auto" }}>
         {content}
       </div>
 
