@@ -765,10 +765,13 @@ const likePost = async (post) => {
                       onPlay={() => increaseViews(post)}
                       style={styles.video}
                       onError={(e) => {
-                        console.warn("Video stream timeout recovered:", e);
+                        // Prevent infinite reload loops by checking a custom dataset flag
+                        if (e.target.dataset.hasRecovered) return;
+                        e.target.dataset.hasRecovered = "true";
+                        console.warn("Video stream stalled, attempting recovery once.");
                         setTimeout(() => {
                           try { e.target.load(); } catch {}
-                        }, 1000);
+                        }, 1500);
                       }}
                     />
                   ) : posterUrl ? (
