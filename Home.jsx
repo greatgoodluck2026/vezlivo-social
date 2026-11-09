@@ -509,6 +509,19 @@ export default function Home({ onNavigate, onCreate, onProfile, onActivity, onDi
           height: 100% !important;
           object-fit: cover !important;
         }
+        @keyframes spinner-rotate {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+        .vezlivo-loader {
+          width: 42px;
+          height: 42px;
+          border: 4px solid rgba(255, 255, 255, 0.1);
+          border-top: 4px solid #38bdf8;
+          border-right: 4px solid #6366f1;
+          border-radius: 50%;
+          animation: spinner-rotate 0.8s linear infinite;
+        }
       `}</style>
 
       <header style={styles.floatingHeader}>
@@ -633,7 +646,10 @@ export default function Home({ onNavigate, onCreate, onProfile, onActivity, onDi
       <main style={styles.feed}>
         {loading ? (
           <div style={styles.centerMessage}>
-            <div style={styles.loading}>Loading Vezlivo...</div>
+            <div className="vezlivo-loader"></div>
+            <span style={{ marginTop: "12px", color: "#a1a1aa", fontSize: "14px", fontWeight: "600" }}>
+              Loading feed...
+            </span>
           </div>
         ) : filteredPosts.length === 0 ? (
           <div style={styles.empty}>
@@ -736,31 +752,32 @@ export default function Home({ onNavigate, onCreate, onProfile, onActivity, onDi
                     </div>
                   )}
 
-                  {/* Right Action Buttons */}
+                  {/* Right Action Buttons - Clean Vezlivo Style */}
                   <div style={styles.videoRightActions} onClick={(e) => e.stopPropagation()}>
-                    {/* 1. Floating Avatar (Always visible on all posts) */}
+                    {/* 1. Floating Avatar */}
                     <div 
-  style={styles.floatingAvatarWrapper}
-  onClick={(e) => {
-    e.stopPropagation();
-    const targetUid = post.user_id || post.uid;
-    if (!targetUid) return;
-    if (user && targetUid === user.uid) {
-      if (typeof onProfile === "function") onProfile();
-      else window.dispatchEvent(new CustomEvent("vezlivo:navigate", { detail: { section: "Profile" } }));
-    } else {
-      window.dispatchEvent(new CustomEvent("vezlivo:open-user-profile", { detail: { uid: targetUid } }));
-    }
-  }}
->
-  <div style={styles.avatarMiniLarge}>
-    {profileUrl ? (
-      <img src={profileUrl} alt="Profile" style={styles.avatarImage} />
-    ) : (
-      <span>{(post.display_name || post.displayName || post.username || "V").charAt(0).toUpperCase()}</span>
-    )}
-  </div>
-                      {/* Follow Plus Button Badge (Shown only if logged in, not post owner, & not following yet) */}
+                      style={styles.floatingAvatarWrapper}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const targetUid = post.user_id || post.uid;
+                        if (!targetUid) return;
+                        if (user && targetUid === user.uid) {
+                          if (typeof onProfile === "function") onProfile();
+                          else window.dispatchEvent(new CustomEvent("vezlivo:navigate", { detail: { section: "Profile" } }));
+                        } else {
+                          window.dispatchEvent(new CustomEvent("vezlivo:open-user-profile", { detail: { uid: targetUid } }));
+                        }
+                      }}
+                    >
+                      <div style={styles.avatarMiniLarge}>
+                        {profileUrl ? (
+                          <img src={profileUrl} alt="Profile" style={styles.avatarImage} />
+                        ) : (
+                          <span>{(post.display_name || post.displayName || post.username || "V").charAt(0).toUpperCase()}</span>
+                        )}
+                      </div>
+
+                      {/* Follow Plus Badge */}
                       {user && postOwnerUid && postOwnerUid !== user.uid && !followingIds[postOwnerUid] && (
                         <button 
                           style={styles.vezlivoPlusButton} 
@@ -801,15 +818,13 @@ export default function Home({ onNavigate, onCreate, onProfile, onActivity, onDi
                     {/* 2. Like Button */}
                     <button
                       type="button"
-                      style={{
-                        ...styles.sideActionButton,
-                        ...(isLiked ? styles.likedActionButton : {}),
-                      }}
+                      style={styles.vezlivoActionBtn}
                       onClick={() => likePost(post)}
                     >
                       <span style={{ 
-                        fontSize: "22px",
-                        color: isLiked ? "#38bdf8" : "#ffffff" 
+                        fontSize: "28px",
+                        color: isLiked ? "#38bdf8" : "#ffffff",
+                        filter: isLiked ? "drop-shadow(0 2px 6px rgba(56, 189, 248, 0.5))" : "drop-shadow(0 1px 3px rgba(0,0,0,0.8))"
                       }}>
                         {isLiked ? "♥" : "♡"}
                       </span>
@@ -821,10 +836,10 @@ export default function Home({ onNavigate, onCreate, onProfile, onActivity, onDi
                     {/* 3. Comment Button */}
                     <button
                       type="button"
-                      style={styles.sideActionButton}
+                      style={styles.vezlivoActionBtn}
                       onClick={() => openComments(post)}
                     >
-                      <span style={{ fontSize: "20px" }}>💬</span>
+                      <span style={{ fontSize: "26px", color: "#ffffff", filter: "drop-shadow(0 1px 3px rgba(0,0,0,0.8))" }}>💬</span>
                       <span style={styles.sideActionCount}>
                         {Number(post.comments || post.commentsCount || 0)}
                       </span>
@@ -833,7 +848,7 @@ export default function Home({ onNavigate, onCreate, onProfile, onActivity, onDi
                     {/* 4. Share & Options Menu Button */}
                     <button
                       type="button"
-                      style={styles.sideActionButton}
+                      style={styles.vezlivoActionBtn}
                       onClick={() =>
                         setOpenMenuPostId(
                           openMenuPostId === postIdKey ? null : postIdKey
@@ -841,7 +856,7 @@ export default function Home({ onNavigate, onCreate, onProfile, onActivity, onDi
                       }
                       aria-label="Share and options"
                     >
-                      <span style={{ fontSize: "20px" }}>↗️</span>
+                      <span style={{ fontSize: "26px", color: "#ffffff", filter: "drop-shadow(0 1px 3px rgba(0,0,0,0.8))" }}>↗️</span>
                       <span style={styles.sideActionCount}>
                         {Number(post.shares || post.sharesCount || 0)}
                       </span>
@@ -850,14 +865,17 @@ export default function Home({ onNavigate, onCreate, onProfile, onActivity, onDi
                     {/* 5. Save/Favorite Button */}
                     <button
                       type="button"
-                      style={styles.sideActionButton}
+                      style={styles.vezlivoActionBtn}
                       onClick={() => savePost(post)}
                       aria-label="Save to favorites"
                     >
-                      <span style={{ fontSize: "20px" }}>{savedIds[post.postId || post.id] ? "★" : "☆"}</span>
+                      <span style={{ fontSize: "26px", color: savedIds[post.postId || post.id] ? "#38bdf8" : "#ffffff", filter: "drop-shadow(0 1px 3px rgba(0,0,0,0.8))" }}>
+                        {savedIds[post.postId || post.id] ? "★" : "☆"}
+                      </span>
+                      <span style={styles.sideActionCount}>Save</span>
                     </button>
 
-                    {/* 6. Rotating Sound Disc at the Bottom */}
+                    {/* 6. Rotating Sound Disc */}
                     <div
                       style={styles.soundDiscButton}
                       onClick={() => {
@@ -881,7 +899,7 @@ export default function Home({ onNavigate, onCreate, onProfile, onActivity, onDi
                     </div>
                   </div>
 
-             {/* Bottom-Left Clean Text Overlay (Name, Handle, Caption, Sound) */}
+                  {/* Bottom-Left Clean Text Overlay */}
                   <div style={styles.videoLeftInfo}>
                     <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
                       <strong style={{ fontSize: "15px", color: "#ffffff", textShadow: "0 1px 2px rgba(0,0,0,0.8)" }}>
@@ -1315,7 +1333,7 @@ const styles = {
   videoRightActions: {
     position: "absolute",
     right: "12px",
-    bottom: "115px",
+    bottom: "85px",
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
@@ -1363,40 +1381,28 @@ const styles = {
     boxShadow: "0 2px 6px rgba(0,210,255,0.4)",
   },
 
-  sideActionButton: {
+  vezlivoActionBtn: {
     border: "none",
-    background: "rgba(0, 0, 0, 0.4)",
-    backdropFilter: "blur(6px)",
-    WebkitBackdropFilter: "blur(6px)",
-    color: "#ffffff",
-    width: "48px",
-    height: "48px",
-    borderRadius: "50%",
+    background: "transparent",
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
     justifyContent: "center",
     gap: "2px",
     cursor: "pointer",
-    boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
-  },
-
-  likedActionButton: {
-    background: "rgba(99, 102, 241, 0.25)",
-    border: "1px solid #38bdf8",
-    boxShadow: "0 0 12px rgba(56, 189, 248, 0.4)",
+    padding: 0,
   },
 
   sideActionCount: {
-    fontSize: "11px",
+    fontSize: "12px",
     fontWeight: "700",
     color: "#ffffff",
-    textShadow: "0 1px 2px rgba(0,0,0,0.8)",
+    textShadow: "0 1px 3px rgba(0,0,0,0.9)",
   },
 
   soundDiscButton: {
-    width: "40px",
-    height: "40px",
+    width: "38px",
+    height: "38px",
     borderRadius: "50%",
     background: "linear-gradient(135deg, #18181b, #27272a)",
     border: "2px solid #3f3f46",
@@ -1404,14 +1410,14 @@ const styles = {
     alignItems: "center",
     justifyContent: "center",
     cursor: "pointer",
-    marginTop: "4px",
+    marginTop: "2px",
     boxShadow: "0 4px 10px rgba(0,0,0,0.4)",
     animation: "spin 4s linear infinite",
   },
 
   soundDiscInner: {
-    width: "24px",
-    height: "24px",
+    width: "22px",
+    height: "22px",
     borderRadius: "50%",
     overflow: "hidden",
     display: "flex",
@@ -1487,11 +1493,6 @@ const styles = {
     justifyContent: "center",
     textAlign: "center",
     padding: "30px",
-  },
-
-  loading: {
-    color: "#a1a1aa",
-    fontSize: "15px",
   },
 
   empty: {
