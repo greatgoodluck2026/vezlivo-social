@@ -828,7 +828,7 @@ export default {
       }
     }
 
-    // CREATE MUX DIRECT UPLOAD
+   // CREATE MUX DIRECT UPLOAD
     if (
       ["/mux/uploads", "/api/mux/uploads"].includes(url.pathname) &&
       request.method === "POST"
@@ -890,7 +890,55 @@ export default {
       try {
         const targetUrl = url.searchParams.get("target");
         if (!targetUrl) {
-          return new Response("Missing target URL", { status: 400, headers: corsHeaders() });
+          return json({ success: false, error: "Missing target URL" }, 400);
+        }
+
+        const forwardHeaders = {
+          "Content-Type": request.headers.get("Content-Type") || "application/offset+octet-stream",
+        };
+
+        const optionalHeaderKeys = [
+          "upload-length",
+          "upload-offset",
+          "tus-resumable",
+          "upload-metadata",
+          "upload-concat",
+          "x-http-method-override",
+        ];
+
+        for (const key of optionalHeaderKeys) {
+          const val = request.headers.get(key);
+          if (val) {
+            forwardHeaders[key] = val;
+          }
+        }
+
+        const proxyRes = await fetch(targetUrl, {
+          method: request.method,
+          headers: forwardHeaders,
+          body: ["GET", "HEAD"].includes(request.method) ? undefined : request.body,
+        });
+
+        const responseHeaders = new Headers(corsHeaders());
+        proxyRes.headers.forEach((val, key) => responseHeaders.set(key, val));
+
+        return new Response(proxyRes.body, {
+          status: proxyRes.status,
+          headers: responseHeaders,
+        });
+      } catch (err) {
+        return json({ success: false, error: err.message }, 500);
+      }
+    }
+// MUX PROXY UPLOAD ROUTE
+    if (
+      ["/mux/proxy-upload", "/api/mux/proxy-upload"].includes(url.pathname) &&
+      ["GET", "POST", "PUT", "PATCH", "HEAD", "OPTIONS"].includes(request.method)
+    ) {
+      try {
+        const targetUrl = url.searchParams.get("target");
+        if (!targetUrl) {
+          return json({ success: false, error: "Missing target URL" }, 400);
         }
 
         const forwardHeaders = {
