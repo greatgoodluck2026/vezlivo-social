@@ -724,23 +724,7 @@ const likePost = async (post) => {
                     }
                   }}
                 >
-                  {muxPlaybackId ? (
-                    <mux-video
-                      playback-id={muxPlaybackId}
-                      muted
-                      loop
-                      playsinline
-                      style={styles.video}
-                      onPlay={() => increaseViews(post)}
-                      onError={(e) => {
-                        console.warn("Mux stream buffering/timeout recovered:", e);
-                        // Automatically attempt to reload source instead of hiding the video
-                        setTimeout(() => {
-                          try { e.target.load(); } catch {}
-                        }, 1000);
-                      }}
-                    ></mux-video>
-                  ) : videoUrl ? (
+                 {videoUrl ? (
                     <video
                       src={videoUrl}
                       poster={posterUrl || undefined}
@@ -765,7 +749,6 @@ const likePost = async (post) => {
                       <span>Media unavailable</span>
                     </div>
                   )}
-
                   {/* Right Action Buttons - Clean Vezlivo Style */}
                   <div style={styles.videoRightActions} onClick={(e) => e.stopPropagation()}>
                     {/* 1. Floating Avatar */}
