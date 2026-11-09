@@ -230,15 +230,14 @@ export default function Home({ onNavigate, onCreate, onProfile, onActivity, onDi
       console.error("View update error:", error);
     }
   };
-
- const likePost = async (post) => {
+const likePost = async (post) => {
     const postId = String(post.id || post.postId || "");
     if (!user || !postId) return;
 
     const wasLiked = Boolean(likedIds[postId]);
     const newAction = wasLiked ? "unlike" : "like";
 
-    // 1. Instant optimistic UI update
+    // Instant optimistic UI update
     setLikedIds((current) => ({ ...current, [postId]: !wasLiked }));
     setPosts((currentPosts) =>
       currentPosts.map((p) => {
@@ -260,7 +259,6 @@ export default function Home({ onNavigate, onCreate, onProfile, onActivity, onDi
       });
 
       if (!res.success) {
-        // Revert if backend rejects
         setLikedIds((current) => ({ ...current, [postId]: wasLiked }));
         setPosts((currentPosts) =>
           currentPosts.map((p) => {
@@ -276,7 +274,6 @@ export default function Home({ onNavigate, onCreate, onProfile, onActivity, onDi
       }
     } catch (error) {
       console.error("Like error:", error);
-      // Revert on error
       setLikedIds((current) => ({ ...current, [postId]: wasLiked }));
     }
   };
@@ -736,8 +733,11 @@ export default function Home({ onNavigate, onCreate, onProfile, onActivity, onDi
                       style={styles.video}
                       onPlay={() => increaseViews(post)}
                       onError={(e) => {
-                        console.error("Mux stream failed (404/Invalid):", e);
-                        e.target.style.display = "none";
+                        console.warn("Mux stream buffering/timeout recovered:", e);
+                        // Automatically attempt to reload source instead of hiding the video
+                        setTimeout(() => {
+                          try { e.target.load(); } catch {}
+                        }, 1000);
                       }}
                     ></mux-video>
                   ) : videoUrl ? (
@@ -751,8 +751,10 @@ export default function Home({ onNavigate, onCreate, onProfile, onActivity, onDi
                       onPlay={() => increaseViews(post)}
                       style={styles.video}
                       onError={(e) => {
-                        console.error("Video load error:", e);
-                        e.target.style.display = "none";
+                        console.warn("Video stream timeout recovered:", e);
+                        setTimeout(() => {
+                          try { e.target.load(); } catch {}
+                        }, 1000);
                       }}
                     />
                   ) : posterUrl ? (
