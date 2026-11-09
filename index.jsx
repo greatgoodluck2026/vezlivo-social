@@ -761,7 +761,7 @@ function App() {
     const timer =
       setTimeout(() => {
         setShowSplash(false);
-      }, 1800);
+      }, 2000);
 
     return () =>
       clearTimeout(timer);
@@ -1012,6 +1012,13 @@ function App() {
           }
           navigate("profile");
         }}
+        onInbox={() => {
+          if (!user) {
+            navigate("login");
+            return;
+          }
+          navigate("inbox");
+        }}
       />
     );
   }
@@ -1044,7 +1051,7 @@ function App() {
           onClick={() => navigate("discover")}
           style={{ background: "transparent", border: "none", color: page === "discover" ? "#fff" : "#71717a", display: "flex", flexDirection: "column", alignItems: "center", cursor: "pointer", fontSize: "11px", fontWeight: "600" }}
         >
-          <span style={{ fontSize: "18px" -> null ? "" : "" }}>🔎</span>
+          <span style={{ fontSize: "18px" }}>🔎</span>
           <small>Discover</small>
         </button>
 
