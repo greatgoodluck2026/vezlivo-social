@@ -1600,13 +1600,24 @@ function Create({ draftId = "" } = {}) {
       setUploading(true);
       setUploadProgress(0);
 
+      // Trigger background upload reminder on Home.jsx and navigate home
+      window.dispatchEvent(
+        new CustomEvent("vezlivo:start-background-upload", {
+          detail: { title: contentType === "reel" ? "Reel" : contentType === "story" ? "Story" : "Post" }
+        })
+      );
+      if (typeof onNavigate === "function") {
+        onNavigate("Home");
+      } else {
+        window.dispatchEvent(new CustomEvent("vezlivo:navigate", { detail: { section: "Home" } }));
+      }
+
       const extension =
         mediaFile.name.includes(".")
           ? mediaFile.name.split(".").pop().toLowerCase()
           : mediaType === "video"
           ? "webm"
           : "jpg";
-
       const storagePath = `${contentType === "story" ? "stories" : "posts"}/${user.uid}/${postId}.${extension}`;
 
       setMessage(

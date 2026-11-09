@@ -28,28 +28,39 @@ export default function Home({ onNavigate, onCreate, onProfile, onActivity, onDi
   const [reportPost, setReportPost] = useState(null);
   const [viewedPostIds, setViewedPostIds] = useState({});
   
-  // Clean Modal & Toast states
+// Clean Modal & Toast states
   const [deleteConfirmPost, setDeleteConfirmPost] = useState(null);
   const [toastMessage, setToastMessage] = useState("");
 
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-    });
-    return () => unsubscribe();
-  }, []);
+  // Background upload banner state
+  const [backgroundPublish, setBackgroundPublish] = useState(null);
 
-  // Save scroll position when scrolling the feed
   useEffect(() => {
-    const feedElement = document.querySelector("main[style*='overflowY']");
-    if (!feedElement) return;
+    const handleStartUpload = (e) => {
+      setBackgroundPublish({
+        title: e.detail?.title || "Reel",
+        progress: 10,
+      });
 
-    const handleScroll = () => {
-      sessionStorage.setItem("vezlivo_home_scroll", feedElement.scrollTop);
+      let currentProg = 10;
+      const interval = setInterval(() => {
+        currentProg += Math.floor(Math.random() * 8) + 4;
+        if (currentProg >= 98) {
+          clearInterval(interval);
+        } else {
+          setBackgroundPublish((prev) => prev ? { ...prev, progress: currentProg } : null);
+        }
+      }, 1000);
+
+      setTimeout(() => {
+        clearInterval(interval);
+        setBackgroundPublish((prev) => prev ? { ...prev, progress: 100 } : null);
+        setTimeout(() => setBackgroundPublish(null), 2000);
+      }, 12000);
     };
 
-    feedElement.addEventListener("scroll", handleScroll);
-    return () => feedElement.removeEventListener("scroll", handleScroll);
+    window.addEventListener("vezlivo:start-background-upload", handleStartUpload);
+    return () => window.removeEventListener("vezlivo:start-background-upload", handleStartUpload);
   }, []);
 
   // Restore scroll position once posts load
@@ -532,6 +543,25 @@ const likePost = async (post) => {
           animation: spinner-rotate 0.8s linear infinite;
         }
       `}</style>
+
+      {/* Background Publishing Reminder Banner */}
+      {backgroundPublish && (
+        <div style={styles.backgroundPublishBanner}>
+          <div style={styles.bgBannerTextRow}>
+            <strong>
+              {backgroundPublish.progress === 100 
+                ? `Your ${backgroundPublish.title} is live!` 
+                : `Publishing your ${backgroundPublish.title} (${backgroundPublish.progress}%)`}
+            </strong>
+            <span style={styles.bgBannerSub}>
+              {backgroundPublish.progress === 100 ? "Success!" : "Don't turn off Vezlivo. Keep app open."}
+            </span>
+          </div>
+          <div style={styles.bgBannerTrack}>
+            <div style={{ ...styles.bgBannerFill, width: `${backgroundPublish.progress}%` }} />
+          </div>
+        </div>
+      )}
 
       <header style={styles.floatingHeader}>
         <div style={styles.floatingTabs}>
@@ -1660,6 +1690,52 @@ const styles = {
     fontSize: "14px",
     fontWeight: "600",
     cursor: "pointer",
+  },
+
+  backgroundPublishBanner: {
+    position: "absolute",
+    top: "64px",
+    left: "14px",
+    right: "14px",
+    backgroundColor: "rgba(24, 24, 27, 0.96)",
+    backdropFilter: "blur(12px)",
+    borderRadius: "16px",
+    border: "1px solid #3f3f46",
+    padding: "12px 16px",
+    zIndex: 40,
+    boxShadow: "0 10px 30px rgba(0,0,0,0.6)",
+    display: "flex",
+    flexDirection: "column",
+    gap: "8px",
+  },
+
+  bgBannerTextRow: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    fontSize: "13px",
+    color: "#ffffff",
+  },
+
+  bgBannerSub: {
+    color: "#38bdf8",
+    fontSize: "11px",
+    fontWeight: "700",
+  },
+
+  bgBannerTrack: {
+    width: "100%",
+    height: "5px",
+    backgroundColor: "#27272a",
+    borderRadius: "4px",
+    overflow: "hidden",
+  },
+
+  bgBannerFill: {
+    height: "100%",
+    background: "linear-gradient(135deg, #6366f1, #38bdf8)",
+    borderRadius: "4px",
+    transition: "width 0.4s ease",
   },
 
   toastCard: {
