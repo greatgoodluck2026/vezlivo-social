@@ -651,7 +651,6 @@ function HomePage({
   user,
   onLogin,
   onCreate,
-  onProfile,
   onDiscover,
   onActivity,
   onInbox,
@@ -756,7 +755,7 @@ function HomePage({
 
 
   return (
-    <main className="vezlivo-app">
+    <main className="vezlivo-app" style={{ paddingBottom: "80px" }}>
 
       <header className="vezlivo-header">
 
@@ -908,48 +907,11 @@ function HomePage({
           )}
 
       </section>
-
-
-    <nav className="bottom-navigation" style={{ zIndex: 9999, pointerEvents: "auto", position: "fixed", bottom: 0, left: 0, right: 0 }}>
-        <button
-          type="button"
-          className="nav-item active"
-          onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
-        >
-          <span>⌂</span>
-          <small>Home</small>
-        </button>
-
-        <button
-          type="button"
-          className="nav-item"
-          onClick={onCreate}
-        >
-          <span>＋</span>
-          <small>Create</small>
-        </button>
-
-        <button
-          type="button"
-          className="nav-item"
-          onClick={onActivity}
-        >
-          <span>♡</span>
-          <small>Activity</small>
-        </button>
-
-        <button
-          type="button"
-          className="nav-item"
-          onClick={onProfile}
-        >
-          <span>☻</span>
-          <small>Profile</small>
-        </button>
-      </nav>
     </main>
   );
 }
+
+
 /* =========================================================
    APP
 ========================================================= */
@@ -1168,29 +1130,22 @@ function App() {
   }
 
 
-  if (
-    page === "login" &&
-    !user
-  ) {
-    return (
+  let content = null;
+
+  if (page === "login" && !user) {
+    content = (
       <Login
         onBack={() =>
           setPage("home")
         }
       />
     );
-  }
-
-
-  if (
-    page === "user-profile"
-  ) {
+  } else if (page === "user-profile") {
     if (!userProfileToOpen) {
       navigate("home");
       return null;
     }
-
-    return (
+    content = (
       <UserProfile
         uid={userProfileToOpen}
         currentUser={user}
@@ -1200,13 +1155,8 @@ function App() {
         }}
       />
     );
-  }
-
-
-  if (
-    page === "profile"
-  ) {
-    return (
+  } else if (page === "profile") {
+    content = (
       <Profile
         onBack={() =>
           setPage("home")
@@ -1220,13 +1170,8 @@ function App() {
         }}
       />
     );
-  }
-
-
-  if (
-    page === "settings"
-  ) {
-    return (
+  } else if (page === "settings") {
+    content = (
       <Settings
         user={user}
         onBack={() =>
@@ -1234,62 +1179,40 @@ function App() {
         }
       />
     );
-  }
-
-
-  if (
-    page === "create"
-  ) {
-    return (
+  } else if (page === "create") {
+    content = (
       <Create
         draftId={
           draftToOpen
         }
       />
     );
-  }
-
-
-  if (
-    page === "discover"
-  ) {
-    return (
+  } else if (page === "discover") {
+    content = (
       <Discover
         onBack={() =>
           navigate("home")
         }
       />
     );
-  }
-
-
-  if (
-    page === "activity"
-  ) {
+  } else if (page === "activity") {
     if (!user) {
       navigate("login");
       return null;
     }
-
-    return (
+    content = (
       <Activity
         onBack={() =>
           navigate("home")
         }
       />
     );
-  }
-
-
-  if (
-    page === "inbox"
-  ) {
+  } else if (page === "inbox") {
     if (!user) {
       navigate("login");
       return null;
     }
-
-    return (
+    content = (
       <Inbox
         onBack={() =>
           navigate("home")
@@ -1305,44 +1228,126 @@ function App() {
         }}
       />
     );
+  } else {
+    content = (
+      <HomePage
+        user={user}
+        onLogin={() => navigate("login")}
+        onCreate={() => {
+          if (!user) {
+            navigate("login");
+            return;
+          }
+          setDraftToOpen("");
+          navigate("create");
+        }}
+        onDiscover={() => navigate("discover")}
+        onActivity={() => {
+          if (!user) {
+            navigate("login");
+            return;
+          }
+          navigate("activity");
+        }}
+        onProfile={() => {
+          if (!user) {
+            navigate("login");
+            return;
+          }
+          navigate("profile");
+        }}
+        onInbox={() => {
+          if (!user) {
+            navigate("login");
+            return;
+          }
+          navigate("inbox");
+        }}
+      />
+    );
   }
 
-
   return (
-    <Home
-      user={user}
-      onLogin={() => navigate("login")}
-      onCreate={() => {
-        if (!user) {
-          navigate("login");
-          return;
-        }
-        setDraftToOpen("");
-        navigate("create");
-      }}
-      onDiscover={() => navigate("discover")}
-      onActivity={() => {
-        if (!user) {
-          navigate("login");
-          return;
-        }
-        navigate("activity");
-      }}
-      onProfile={() => {
-        if (!user) {
-          navigate("login");
-          return;
-        }
-        navigate("profile");
-      }}
-      onInbox={() => {
-        if (!user) {
-          navigate("login");
-          return;
-        }
-        navigate("inbox");
-      }}
-    />
+    <div style={{ position: "relative", width: "100vw", height: "100vh", overflowY: "auto", background: "#000000" }}>
+      {/* Active Screen Content */}
+      <div style={{ paddingBottom: "72px" }}>
+        {content}
+      </div>
+
+      {/* Global Permanent Bottom Navigation Bar */}
+      <nav className="bottom-navigation" style={{ zIndex: 99999, pointerEvents: "auto", position: "fixed", bottom: 0, left: 0, right: 0, display: "flex", justifyContent: "space-around", background: "rgba(15,15,18,0.97)", borderTop: "1px solid #27272a", height: "68px", alignItems: "center" }}>
+        <button
+          type="button"
+          className={`nav-item ${page === "home" ? "active" : ""}`}
+          onClick={() => {
+            navigate("home");
+            window.scrollTo({ top: 0, behavior: "smooth" });
+          }}
+          style={{ background: "transparent", border: "none", color: page === "home" ? "#fff" : "#71717a", display: "flex", flexDirection: "column", alignItems: "center", cursor: "pointer", fontSize: "11px", fontWeight: "600" }}
+        >
+          <span style={{ fontSize: "18px" }}>🏠</span>
+          <small>Home</small>
+        </button>
+
+        <button
+          type="button"
+          className={`nav-item ${page === "discover" ? "active" : ""}`}
+          onClick={() => navigate("discover")}
+          style={{ background: "transparent", border: "none", color: page === "discover" ? "#fff" : "#71717a", display: "flex", flexDirection: "column", alignItems: "center", cursor: "pointer", fontSize: "11px", fontWeight: "600" }}
+        >
+          <span style={{ fontSize: "18px" }}>🔎</span>
+          <small>Discover</small>
+        </button>
+
+        <button
+          type="button"
+          className="nav-item"
+          onClick={() => {
+            if (!user) {
+              navigate("login");
+              return;
+            }
+            setDraftToOpen("");
+            navigate("create");
+          }}
+          style={{ background: "linear-gradient(135deg, #6366f1, #38bdf8)", border: "none", color: "#fff", width: "44px", height: "32px", borderRadius: "8px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", fontSize: "22px", fontWeight: "800" }}
+        >
+          ＋
+        </button>
+
+        <button
+          type="button"
+          className={`nav-item ${page === "activity" ? "active" : ""}`}
+          onClick={() => {
+            if (!user) {
+              navigate("login");
+              return;
+            }
+            navigate("activity");
+          }}
+          style={{ background: "transparent", border: "none", color: page === "activity" ? "#fff" : "#71717a", display: "flex", flexDirection: "column", alignItems: "center", cursor: "pointer", fontSize: "11px", fontWeight: "600" }}
+        >
+          <span style={{ fontSize: "18px" }}>🔔</span>
+          <small>Activity</small>
+        </button>
+
+        <button
+          type="button"
+          className={`nav-item ${page === "profile" ? "active" : ""}`}
+          onClick={() => {
+            if (!user) {
+              navigate("login");
+              return;
+            }
+            navigate("profile");
+          }}
+          style={{ background: "transparent", border: "none", color: page === "profile" ? "#fff" : "#71717a", display: "flex", flexDirection: "column", alignItems: "center", cursor: "pointer", fontSize: "11px", fontWeight: "600" }}
+        >
+          <span style={{ fontSize: "18px" }}>👤</span>
+          <small>Profile</small>
+        </button>
+      </nav>
+    </div>
   );
 }
 
