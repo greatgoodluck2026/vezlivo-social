@@ -208,19 +208,18 @@ function PostCard({
       return;
     }
 
-    if (busy) {
-      return;
-    }
-
+    if (busy) return; // Prevent spam-clicking entirely!
     setBusy(true);
 
-    // 1. Instantly update UI locally (Optimistic update for immediate feedback)
-    const nextLikedState = !liked;
-    setLiked(nextLikedState);
-    setLikeCount((value) => (nextLikedState ? value + 1 : Math.max(0, value - 1)));
-
     try {
-      const action = nextLikedState ? "like" : "unlike";
+      const action = liked ? "unlike" : "like";
+
+      // Optimistically flip state immediately for snappy UI
+      const previousLiked = liked;
+      const previousCount = likeCount;
+      
+      setLiked(!previousLiked);
+      setLikeCount(previousLiked ? Math.max(0, previousCount - 1) : previousCount + 1);
 
       const response = await fetch(`${API_URL}/like`, {
         method: "POST",
@@ -235,20 +234,16 @@ function PostCard({
       const data = await response.json();
 
       if (!data.success) {
-        // If backend failed, revert local state back
-        setLiked(!nextLikedState);
-        setLikeCount((value) => (!nextLikedState ? value + 1 : Math.max(0, value - 1)));
+        // If the worker rejected it for any reason, roll back
+        setLiked(previousLiked);
+        setLikeCount(previousCount);
       }
     } catch (error) {
       console.error("Like error:", error);
-      // Revert local state on network error
-      setLiked(!nextLikedState);
-      setLikeCount((value) => (!nextLikedState ? value + 1 : Math.max(0, value - 1)));
     } finally {
       setBusy(false);
     }
   };
-
 
   const handleSave = async () => {
     if (!user) {
