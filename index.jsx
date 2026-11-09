@@ -39,10 +39,11 @@ import Inbox from "./Inbox.jsx";
 
 
 /* =========================================================
-   FIREBASE DATABASE
+   FIREBASE DATABASE & CLOUDFLARE WORKER API
 ========================================================= */
 
 const db = getDatabase(auth.app);
+const API_URL = "https://vezlivo-api.vezlivo-api.workers.dev";
 
 
 /* =========================================================
@@ -132,13 +133,14 @@ function getPostAvatar(post) {
   return (
     post?.userPhotoURL ||
     post?.photoURL ||
+    post?.profile_url ||
     ""
   );
 }
 
 
 /* =========================================================
-   POST CARD
+   POST CARD (Cloudflare Worker & Neon PostgreSQL Backend)
 ========================================================= */
 
 function PostCard({
@@ -148,7 +150,7 @@ function PostCard({
 }) {
   const [liked, setLiked] = useState(false);
   const [likeCount, setLikeCount] = useState(
-    Number(post.likes || 0)
+    Number(post.likes_count || post.likes || 0)
   );
   const [saved, setSaved] = useState(false);
   const [viewed, setViewed] = useState(false);
@@ -156,24 +158,27 @@ function PostCard({
 
   const videoRef = useRef(null);
 
+  // Check backend for user's like state to ensure permanent active blue state & 1-like enforcement
   useEffect(() => {
     if (!user || !post.id) {
       return;
     }
 
-    const likeRef = ref(
-      db,
-      `postLikes/${post.id}/${user.uid}`
-    );
-
-    const unsubscribe = onValue(
-      likeRef,
-      (snapshot) => {
-        setLiked(snapshot.exists());
+    async function checkLikeStatus() {
+      try {
+        const response = await fetch(`${API_URL}/users/${user.uid}/likes`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.likedIds && data.likedIds[String(post.id)]) {
+            setLiked(true);
+          }
+        }
+      } catch (error) {
+        console.error("Check like status error:", error);
       }
-    );
+    }
 
-    return () => unsubscribe();
+    checkLikeStatus();
   }, [post.id, user]);
 
   useEffect(() => {
@@ -210,49 +215,29 @@ function PostCard({
     setBusy(true);
 
     try {
-      const likeRef = ref(
-        db,
-        `postLikes/${post.id}/${user.uid}`
-      );
+      const action = liked ? "unlike" : "like";
 
-      const postLikesRef = ref(
-        db,
-        `posts/${post.uid}/${post.id}/likes`
-      );
+      const response = await fetch(`${API_URL}/like`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: user.uid,
+          postId: String(post.id),
+          action: action,
+        }),
+      });
 
-      await runTransaction(
-        postLikesRef,
-        (currentValue) => {
-          const current = Number(
-            currentValue || 0
-          );
+      const data = await response.json();
 
-          if (liked) {
-            return Math.max(0, current - 1);
-          }
-
-          return current + 1;
+      if (data.success) {
+        if (liked) {
+          setLiked(false);
+          setLikeCount((value) => Math.max(0, value - 1));
+        } else {
+          setLiked(true);
+          setLikeCount((value) => value + 1);
         }
-      );
-
-      if (liked) {
-        await set(likeRef, null);
-
-        setLikeCount((value) =>
-          Math.max(0, value - 1)
-        );
-      } else {
-        await set(likeRef, {
-          uid: user.uid,
-          createdAt: Date.now(),
-        });
-
-        setLikeCount(
-          (value) => value + 1
-        );
       }
-
-      setLiked((value) => !value);
     } catch (error) {
       console.error(
         "Like error:",
@@ -394,8 +379,9 @@ function PostCard({
     Boolean(post.videoURL) ||
     Boolean(post.muxPlaybackId);
 
-  const mediaUrl = post.muxPlaybackId
-    ? `https://stream.mux.com/${post.muxPlaybackId}.m3u8`
+  const playbackId = post.muxPlaybackId || post.mux_playback_id;
+  const mediaUrl = playbackId
+    ? `https://stream.mux.com/${playbackId}.m3u8`
     : post.mediaURL || post.videoURL || "";
 
 
@@ -428,7 +414,7 @@ function PostCard({
 
           <span>
             {formatDate(
-              post.createdAt
+              post.createdAt || post.created_at
             )}
           </span>
         </div>
@@ -554,7 +540,7 @@ function PostCard({
 
         <span>
           {formatCount(
-            post.comments
+            post.comments || post.comments_count
           )}{" "}
           comments
         </span>
