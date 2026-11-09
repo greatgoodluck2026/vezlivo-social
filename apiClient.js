@@ -1,3 +1,5 @@
+// File: src/apiClient.js
+
 import { auth } from "./firebase.js";
 
 const API_BASE_URL =
@@ -28,7 +30,13 @@ async function apiRequest(path, options = {}) {
     }
   );
 
-  const data = await response.json().catch(() => ({}));
+  const text = await response.text();
+  let data = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    data = { error: text ? text.slice(0, 150) : `API request failed: ${response.status}` };
+  }
 
   if (!response.ok) {
     throw new Error(
@@ -84,7 +92,13 @@ export async function apiUpload(path, formData) {
     }
   );
 
-  const data = await response.json().catch(() => ({}));
+  const text = await response.text();
+  let data = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    data = { error: text ? text.slice(0, 150) : `API upload failed: ${response.status}` };
+  }
 
   if (!response.ok) {
     throw new Error(
