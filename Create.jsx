@@ -112,7 +112,8 @@ function extractMentions(text) {
 }
 // Function to handle direct video upload to Mux (bypasses proxy and tus-js-client errors)
 const uploadVideoResumable = async (file, onProgress) => {
-  const response = await fetch(`${import.meta.env.VITE_API_URL}/mux/uploads`, {
+  const apiBase = import.meta.env.VITE_API_URL || "https://vezlivo-api.vezlivo-api.workers.dev";
+  const response = await fetch(`${apiBase}/mux/uploads`, {
     method: "POST",
     headers: { "Content-Type": "application/json" }
   });
