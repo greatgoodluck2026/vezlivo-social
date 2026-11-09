@@ -231,18 +231,18 @@ export default function Home({ onNavigate, onCreate, onProfile, onActivity, onDi
     }
   };
 
-  const likePost = async (post) => {
-    const postId = post.postId || post.id;
+ const likePost = async (post) => {
+    const postId = String(post.id || post.postId || "");
     if (!user || !postId) return;
 
     const wasLiked = Boolean(likedIds[postId]);
     const newAction = wasLiked ? "unlike" : "like";
 
-    // Instant optimistic UI update for heart and counter
+    // 1. Instant optimistic UI update
     setLikedIds((current) => ({ ...current, [postId]: !wasLiked }));
     setPosts((currentPosts) =>
       currentPosts.map((p) => {
-        const pId = p.postId || p.id;
+        const pId = String(p.id || p.postId || "");
         if (pId === postId) {
           const currentCount = Number(p.likes || p.likes_count || 0);
           const nextCount = wasLiked ? Math.max(0, currentCount - 1) : currentCount + 1;
@@ -260,14 +260,26 @@ export default function Home({ onNavigate, onCreate, onProfile, onActivity, onDi
       });
 
       if (!res.success) {
+        // Revert if backend rejects
         setLikedIds((current) => ({ ...current, [postId]: wasLiked }));
+        setPosts((currentPosts) =>
+          currentPosts.map((p) => {
+            const pId = String(p.id || p.postId || "");
+            if (pId === postId) {
+              const currentCount = Number(p.likes || p.likes_count || 0);
+              const nextCount = wasLiked ? currentCount + 1 : Math.max(0, currentCount - 1);
+              return { ...p, likes: nextCount, likes_count: nextCount };
+            }
+            return p;
+          })
+        );
       }
     } catch (error) {
       console.error("Like error:", error);
+      // Revert on error
       setLikedIds((current) => ({ ...current, [postId]: wasLiked }));
     }
   };
-
   const savePost = async (post) => {
     const postId = post.postId || post.id;
     if (!user || !postId) return;
@@ -691,7 +703,7 @@ export default function Home({ onNavigate, onCreate, onProfile, onActivity, onDi
               : "");
             const posterUrl = post.coverURL || post.coverUrl || post.thumbnailURL || post.thumbnail_url || media.poster || "";
             const profileUrl = post.profile_url || post.profileURL || post.photoURL || post.avatarURL || "";
-            const postIdKey = post.postId || post.id || videoUrl;
+           const postIdKey = String(post.id || post.postId || "");
             const postOwnerUid = post.user_id || post.uid;
 
             const isOwner = user && postOwnerUid === user.uid;
