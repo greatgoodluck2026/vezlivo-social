@@ -27,6 +27,7 @@ import "./style.css";
 import { auth } from "./firebase.js";
 import UserProfile from "./UserProfile.jsx";
 
+import SplashScreen from "./SplashScreen.jsx";
 import Login from "./Login.jsx";
 import Profile from "./Profile.jsx";
 import Settings from "./Settings.jsx";
@@ -643,7 +644,7 @@ function PostCard({
 
 
 /* =========================================================
-   HOME PAGE WRAPPER (Connected to your Home.jsx video feed)
+   HOME PAGE WRAPPER
 ========================================================= */
 
 function HomePage({
@@ -680,6 +681,9 @@ function App() {
 
   const [authReady, setAuthReady] =
     useState(false);
+
+  const [showSplash, setShowSplash] =
+    useState(true);
 
   const [draftToOpen, setDraftToOpen] =
     useState("");
@@ -750,6 +754,17 @@ function App() {
         handleOpenUserProfile
       );
     };
+  }, []);
+
+
+  useEffect(() => {
+    const timer =
+      setTimeout(() => {
+        setShowSplash(false);
+      }, 1800);
+
+    return () =>
+      clearTimeout(timer);
   }, []);
 
 
@@ -857,11 +872,16 @@ function App() {
   };
 
 
-  if (!authReady) {
+  if (
+    showSplash ||
+    !authReady
+  ) {
     return (
-      <div style={{ width: "100vw", height: "100vh", backgroundColor: "#000", display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <div className="vezlivo-loader"></div>
-      </div>
+      <SplashScreen
+        onComplete={() =>
+          setShowSplash(false)
+        }
+      />
     );
   }
 
@@ -992,13 +1012,6 @@ function App() {
           }
           navigate("profile");
         }}
-        onInbox={() => {
-          if (!user) {
-            navigate("login");
-            return;
-          }
-          navigate("inbox");
-        }}
       />
     );
   }
@@ -1031,7 +1044,7 @@ function App() {
           onClick={() => navigate("discover")}
           style={{ background: "transparent", border: "none", color: page === "discover" ? "#fff" : "#71717a", display: "flex", flexDirection: "column", alignItems: "center", cursor: "pointer", fontSize: "11px", fontWeight: "600" }}
         >
-          <span style={{ fontSize: "18px" }}>🔎</span>
+          <span style={{ fontSize: "18px" -> null ? "" : "" }}>🔎</span>
           <small>Discover</small>
         </button>
 
