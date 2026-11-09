@@ -248,6 +248,8 @@ function PostCard({
       setBusy(false);
     }
   };
+
+
   const handleSave = async () => {
     if (!user) {
       onLogin();
@@ -255,21 +257,20 @@ function PostCard({
     }
 
     try {
-      const saveRef = ref(
-        db,
-        `savedPosts/${user.uid}/${post.id}`
-      );
+      const action = saved ? "unsave" : "save";
+      const response = await fetch(`${API_URL}/save`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: user.uid,
+          postId: String(post.id),
+          action: action,
+        }),
+      });
 
-      if (saved) {
-        await set(saveRef, null);
-        setSaved(false);
-      } else {
-        await set(saveRef, {
-          postId: post.id,
-          savedAt: Date.now(),
-        });
-
-        setSaved(true);
+      const data = await response.json();
+      if (data.success) {
+        setSaved((prev) => !prev);
       }
     } catch (error) {
       console.error(
@@ -286,24 +287,6 @@ function PostCard({
     }
 
     setViewed(true);
-
-    try {
-      const viewsRef = ref(
-        db,
-        `posts/${post.uid}/${post.id}/views`
-      );
-
-      await runTransaction(
-        viewsRef,
-        (currentValue) =>
-          Number(currentValue || 0) + 1
-      );
-    } catch (error) {
-      console.error(
-        "View error:",
-        error
-      );
-    }
   };
 
 
@@ -376,12 +359,14 @@ function PostCard({
   const isVideo =
     post.mediaType === "video" ||
     Boolean(post.videoURL) ||
-    Boolean(post.muxPlaybackId);
+    Boolean(post.video_url) ||
+    Boolean(post.muxPlaybackId) ||
+    Boolean(post.mux_playback_id);
 
   const playbackId = post.muxPlaybackId || post.mux_playback_id;
   const mediaUrl = playbackId
     ? `https://stream.mux.com/${playbackId}.m3u8`
-    : post.mediaURL || post.videoURL || "";
+    : post.videoURL || post.video_url || post.mediaURL || "";
 
 
   return (
