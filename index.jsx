@@ -27,7 +27,6 @@ import "./style.css";
 import { auth } from "./firebase.js";
 import UserProfile from "./UserProfile.jsx";
 
-import SplashScreen from "./SplashScreen.jsx";
 import Login from "./Login.jsx";
 import Profile from "./Profile.jsx";
 import Settings from "./Settings.jsx";
@@ -644,7 +643,7 @@ function PostCard({
 
 
 /* =========================================================
-   HOME PAGE
+   HOME PAGE WRAPPER (Connected to your Home.jsx video feed)
 ========================================================= */
 
 function HomePage({
@@ -655,259 +654,15 @@ function HomePage({
   onActivity,
   onInbox,
 }) {
-  const [posts, setPosts] =
-    useState([]);
-
-  const [loading, setLoading] =
-    useState(true);
-
-  const [error, setError] =
-    useState("");
-
-  useEffect(() => {
-    const postsRef =
-      ref(db, "posts");
-
-    const unsubscribe =
-      onValue(
-        postsRef,
-        (snapshot) => {
-          try {
-            const data =
-              snapshot.val() || {};
-
-            const loadedPosts = [];
-
-            Object.entries(data).forEach(
-              ([uid, userPosts]) => {
-                if (!userPosts) {
-                  return;
-                }
-
-                Object.entries(
-                  userPosts
-                ).forEach(
-                  ([postId, post]) => {
-                    if (!post) {
-                      return;
-                    }
-
-                    loadedPosts.push({
-                      ...post,
-                      uid,
-                      id: postId,
-                    });
-                  }
-                );
-              }
-            );
-
-            loadedPosts.sort(
-              (a, b) =>
-                Number(
-                  b.createdAt || 0
-                ) -
-                Number(
-                  a.createdAt || 0
-                )
-            );
-
-            setPosts(
-              loadedPosts
-            );
-
-            setLoading(false);
-            setError("");
-          } catch (err) {
-            console.error(
-              "Feed error:",
-              err
-            );
-
-            setError(
-              "We couldn't load your feed."
-            );
-
-            setLoading(false);
-          }
-        },
-        (err) => {
-          console.error(
-            "Firebase feed error:",
-            err
-          );
-
-          setError(
-            "We couldn't load your feed."
-          );
-
-          setLoading(false);
-        }
-      );
-
-    return () =>
-      unsubscribe();
-  }, []);
-
-
-  const visiblePosts =
-    posts;
-
-
   return (
-    <main className="vezlivo-app" style={{ paddingBottom: "80px" }}>
-
-      <header className="vezlivo-header">
-
-        <button
-          type="button"
-          className="brand-button"
-          onClick={() =>
-            window.scrollTo({
-              top: 0,
-              behavior: "smooth",
-            })
-          }
-        >
-          <img
-            src="/Logo.png"
-            alt="Vezlivo"
-          />
-
-          <strong>
-            Vezlivo
-          </strong>
-        </button>
-
-
-        <div className="header-actions">
-
-          <button
-            type="button"
-            onClick={onDiscover}
-            aria-label="Discover"
-          >
-            🔍
-          </button>
-
-          <button
-            type="button"
-            onClick={onInbox}
-            aria-label="Inbox"
-          >
-            💬
-          </button>
-
-        </div>
-
-      </header>
-
-
-      <section className="feed-section">
-
-        {loading && (
-          <div className="feed-loading">
-            <div className="loading-spinner" />
-
-            <p>
-              Loading Vezlivo...
-            </p>
-          </div>
-        )}
-
-
-        {!loading &&
-          error && (
-            <div className="feed-error">
-
-              <img
-                src="/Logo.png"
-                alt="Vezlivo"
-              />
-
-              <p>
-                {error}
-              </p>
-
-              <button
-                type="button"
-                onClick={() =>
-                  window.location.reload()
-                }
-              >
-                Try again
-              </button>
-
-            </div>
-          )}
-
-
-        {!loading &&
-          !error &&
-          visiblePosts.length ===
-            0 && (
-            <div className="empty-feed">
-
-              <img
-                src="/Logo.png"
-                alt="Vezlivo logo"
-                className="feed-logo"
-              />
-
-              <h1>
-                Welcome to Vezlivo
-              </h1>
-
-              <p>
-                Your feed is ready.
-                Be the first to
-                create something.
-              </p>
-
-              {user ? (
-                <button
-                  type="button"
-                  className="feed-create-button"
-                  onClick={onCreate}
-                >
-                  Create your first post
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="feed-create-button"
-                  onClick={onLogin}
-                >
-                  Log in to create
-                </button>
-              )}
-
-            </div>
-          )}
-
-
-        {!loading &&
-          !error &&
-          visiblePosts.length >
-            0 && (
-            <div className="posts-list">
-
-              {visiblePosts.map(
-                (post) => (
-                  <PostCard
-                    key={post.id}
-                    post={post}
-                    user={user}
-                    onLogin={onLogin}
-                  />
-                )
-              )}
-
-            </div>
-          )}
-
-      </section>
-    </main>
+    <Home
+      user={user}
+      onLogin={onLogin}
+      onCreate={onCreate}
+      onDiscover={onDiscover}
+      onActivity={onActivity}
+      onInbox={onInbox}
+    />
   );
 }
 
@@ -925,9 +680,6 @@ function App() {
 
   const [authReady, setAuthReady] =
     useState(false);
-
-  const [showSplash, setShowSplash] =
-    useState(true);
 
   const [draftToOpen, setDraftToOpen] =
     useState("");
@@ -998,17 +750,6 @@ function App() {
         handleOpenUserProfile
       );
     };
-  }, []);
-
-
-  useEffect(() => {
-    const timer =
-      setTimeout(() => {
-        setShowSplash(false);
-      }, 2000);
-
-    return () =>
-      clearTimeout(timer);
   }, []);
 
 
@@ -1116,16 +857,11 @@ function App() {
   };
 
 
-  if (
-    showSplash ||
-    !authReady
-  ) {
+  if (!authReady) {
     return (
-      <SplashScreen
-        onComplete={() =>
-          setShowSplash(false)
-        }
-      />
+      <div style={{ width: "100vw", height: "100vh", backgroundColor: "#000", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div className="vezlivo-loader"></div>
+      </div>
     );
   }
 
@@ -1268,14 +1004,14 @@ function App() {
   }
 
   return (
-    <div style={{ position: "relative", width: "100vw", height: "100vh", overflowY: "auto", background: "#000000" }}>
+    <div style={{ position: "relative", width: "100vw", height: "100vh", overflow: "hidden", background: "#000000" }}>
       {/* Active Screen Content */}
-      <div style={{ paddingBottom: "72px" }}>
+      <div style={{ width: "100%", height: "calc(100vh - 68px)", overflow: "hidden" }}>
         {content}
       </div>
 
       {/* Global Permanent Bottom Navigation Bar */}
-      <nav className="bottom-navigation" style={{ zIndex: 99999, pointerEvents: "auto", position: "fixed", bottom: 0, left: 0, right: 0, display: "flex", justifyContent: "space-around", background: "rgba(15,15,18,0.97)", borderTop: "1px solid #27272a", height: "68px", alignItems: "center" }}>
+      <nav className="bottom-navigation" style={{ zIndex: 99999, pointerEvents: "auto", position: "fixed", bottom: 0, left: 0, right: 0, display: "flex", justifyContent: "space-around", background: "rgba(15,15,18,0.97)", borderTop: "1px solid #27272a", height: "68px", alignItems: "center", padding: "0 8px" }}>
         <button
           type="button"
           className={`nav-item ${page === "home" ? "active" : ""}`}
