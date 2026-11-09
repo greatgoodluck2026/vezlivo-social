@@ -2786,107 +2786,132 @@ function Create({ draftId = "" } = {}) {
         <div className="vezlivo-editor-shell">
 
           <section className="vezlivo-editor-preview-pane">
-            <div
-              className="vezlivo-media-stage"
-              style={
-                activeBackground !== "none"
-                  ? selectedBackgroundStyle
-                  : { background: "#000000" }
-              }
-            >
-              <div
-                style={{
-                  ...styles.mediaFrame,
-                  background: "transparent",
-                }}
-              >
-                {mediaType ===
-                "video" ? (
-                  <video
-                    ref={
-                      previewVideoRef
-                    }
-                    src={
-                      previewUrl
-                    }
-                    controls
-                    playsInline
-                    autoPlay
-                    loop
-                    muted={
-                      muted ||
-                      !originalAudio
-                    }
-                    onPlay={
-                      handlePreviewPlay
-                    }
-                    onPause={
-                      handlePreviewPause
-                    }
-                    onSeeked={
-                      syncMusicToVideo
-                    }
-                    onTimeUpdate={
-                      syncMusicToVideo
-                    }
-                    style={{
-                      ...styles.previewMedia,
-
-                      filter:
-                        FILTERS.find(
-                          (item) =>
-                            item.value ===
-                            selectedFilter
-                        )?.value ||
-                        "none",
-                    }}
-                  />
-                ) : (
-                  <img
-                    src={
-                      previewUrl
-                    }
-                    alt="Selected Vezlivo media"
-                    style={{
-                      ...styles.previewMedia,
-
-                      filter:
-                        FILTERS.find(
-                          (item) =>
-                            item.value ===
-                            selectedFilter
-                        )?.value ||
-                        "none",
-                    }}
-                  />
-                )}
-
-                {overlayText && (
-                  <div
-                    style={
-                      styles.textOverlay
-                    }
-                  >
-                    {overlayText}
-                  </div>
-                )}
-
-                {musicUrl && (
-                  <div className="vezlivo-audio-chip">
-                    ♪ {musicName || "Added sound"}
-                  </div>
-                )}
-
-                <div
-                  style={
-                    styles.previewBadge
-                  }
-                >
-                  {contentType.toUpperCase()}
-                </div>
-              </div>
+  <div
+    className="vezlivo-media-stage"
+    style={
+      activeBackground !== "none"
+        ? selectedBackgroundStyle
+        : { background: "#000000" }
+    }
+  >
+    <div
+      style={{
+        ...styles.mediaFrame,
+        background: "transparent",
+      }}
+    >
+      {mediaType === "video" ? (
+        <div style={{ position: "relative", width: "100%", height: "100%", background: "#000000", display: "grid", placeItems: "center" }}>
+          {/* Loading Spinner Overlay */}
+          {uploading && (
+            <div style={{
+              position: "absolute",
+              inset: 0,
+              background: "rgba(0, 0, 0, 0.75)",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "12px",
+              zIndex: 5,
+            }}>
+              <div style={{
+                width: "45px",
+                height: "45px",
+                border: "4px solid rgba(255, 255, 255, 0.2)",
+                borderTop: "4px solid #ffffff",
+                borderRadius: "50%",
+                animation: "vezlivoSpin 0.8s linear infinite",
+              }} />
+              <span style={{ color: "#ffffff", fontSize: "13px", fontWeight: 600 }}>Loading Vezlivo video...</span>
             </div>
+          )}
 
+          <video
+            ref={
+              previewVideoRef
+            }
+            src={
+              previewUrl
+            }
+            controls
+            playsInline
+            autoPlay
+            loop
+            muted={
+              muted ||
+              !originalAudio
+            }
+            onPlay={
+              handlePreviewPlay
+            }
+            onPause={
+              handlePreviewPause
+            }
+            onSeeked={
+              syncMusicToVideo
+            }
+            onTimeUpdate={
+              syncMusicToVideo
+            }
+            style={{
+              ...styles.previewMedia,
+
+              filter:
+                FILTERS.find(
+                  (item) =>
+                    item.value ===
+                    selectedFilter
+                )?.value ||
+                "none",
+            }}
+          />
+        </div>
+      ) : (
+        <img
+          src={
+            previewUrl
+          }
+          alt="Selected Vezlivo media"
+          style={{
+            ...styles.previewMedia,
+
+            filter:
+              FILTERS.find(
+                (item) =>
+                  item.value ===
+                  selectedFilter
+              )?.value ||
+              "none",
+          }}
+        />
+      )}
+
+      {overlayText && (
+        <div
+          style={
+            styles.textOverlay
+          }
+        >
+          {overlayText}
+        </div>
+      )}
+
+      {musicUrl && (
+        <div className="vezlivo-audio-chip">
+          ♪ {musicName || "Added sound"}
+        </div>
+      )}
+
+      <div
+        style={
+          styles.previewBadge
+        }
+      >
+        {contentType.toUpperCase()}
+      </div>
+    </div>
+  </div>
             {musicUrl && (
               <audio
                 ref={musicAudioRef}
