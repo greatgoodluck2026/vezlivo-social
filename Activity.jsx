@@ -103,7 +103,6 @@ export default function Activity({ onBack }) {
 
   const handleItemClick = (item) => {
     if (item.postId) {
-      // Dispatch event or navigate to the specific post video
       window.dispatchEvent(
         new CustomEvent("vezlivo:open-post", { detail: { postId: item.postId } })
       );
@@ -310,17 +309,15 @@ const styles = {
     flexShrink: 0,
   },
   empty: {
-    minHeight: "65vh",
-    padding: "30px",
+    minHeight: "60vh",
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
     justifyContent: "center",
-    textAlign: "center",
     color: "#71717a",
   },
   emptyIcon: {
     fontSize: "48px",
-    marginBottom: "10px",
+    marginBottom: "12px",
   },
 };
