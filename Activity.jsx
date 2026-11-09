@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { onAuthStateChanged } from "firebase/auth";
-import { onValue, ref, update } from "firebase/database";
-import { auth, database as db } from "./firebase.js";
+import { auth } from "./firebase.js";
+
+const API_URL = "https://vezlivo-api.vezlivo-api.workers.dev";
 
 function timeAgo(timestamp) {
   const value = Number(timestamp || 0);
@@ -72,54 +73,32 @@ export default function Activity({ onBack }) {
     if (!user) {
       setActivities([]);
       setLoading(false);
-      return undefined;
+      return;
     }
 
-    const activityRef = ref(db, `activities/${user.uid}`);
+    async function fetchActivities() {
+      try {
+        const token = await user.getIdToken();
+        const response = await fetch(`${API_URL}/api/activities?uid=${user.uid}`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
 
-    const unsubscribe = onValue(
-      activityRef,
-      async (snapshot) => {
-        const data = snapshot.val() || {};
-
-        const list = Object.entries(data)
-          .map(([id, item]) => ({
-            id,
-            ...(item || {}),
-          }))
-          .filter((item) => item && item.createdAt)
-          .sort(
-            (a, b) =>
-              Number(b.createdAt || 0) -
-              Number(a.createdAt || 0)
-          );
-
-        setActivities(list);
-        setLoading(false);
-
-        const unread = list.filter((item) => item.read === false);
-
-        if (unread.length > 0) {
-          const changes = {};
-
-          unread.forEach((item) => {
-            changes[`activities/${user.uid}/${item.id}/read`] = true;
-          });
-
-          try {
-            await update(ref(db), changes);
-          } catch (error) {
-            console.error("Could not mark activities as read:", error);
-          }
+        if (!response.ok) {
+          throw new Error("Failed to load activities");
         }
-      },
-      (error) => {
+
+        const data = await response.json();
+        setActivities(data.activities || []);
+      } catch (error) {
         console.error("Activity loading error:", error);
+      } finally {
         setLoading(false);
       }
-    );
+    }
 
-    return () => unsubscribe();
+    fetchActivities();
   }, [user]);
 
   return (
@@ -156,8 +135,7 @@ export default function Activity({ onBack }) {
         ) : (
           <div style={styles.list}>
             {activities.map((item) => (
-              <button
-                type="button"
+              <div
                 key={item.id}
                 style={{
                   ...styles.row,
@@ -184,14 +162,14 @@ export default function Activity({ onBack }) {
                   </div>
                 </div>
 
-                {item.postThumbnail || item.thumbnailURL ? (
+                {item.postThumbnail ? (
                   <img
-                    src={item.postThumbnail || item.thumbnailURL}
+                    src={item.postThumbnail}
                     alt=""
                     style={styles.thumbnail}
                   />
                 ) : null}
-              </button>
+              </div>
             ))}
           </div>
         )}
@@ -208,7 +186,6 @@ const styles = {
     fontFamily:
       "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
   },
-
   header: {
     height: "62px",
     display: "flex",
@@ -221,7 +198,6 @@ const styles = {
     top: 0,
     zIndex: 20,
   },
-
   backButton: {
     width: "40px",
     height: "40px",
@@ -232,23 +208,19 @@ const styles = {
     lineHeight: 1,
     cursor: "pointer",
   },
-
   title: {
     margin: 0,
     fontSize: "19px",
     fontWeight: "800",
   },
-
   headerSpacer: {
     width: "40px",
   },
-
   content: {
     width: "100%",
     maxWidth: "680px",
     margin: "0 auto",
   },
-
   center: {
     minHeight: "60vh",
     display: "flex",
@@ -256,29 +228,23 @@ const styles = {
     justifyContent: "center",
     color: "#a1a1aa",
   },
-
   list: {
     width: "100%",
   },
-
   row: {
     width: "100%",
     display: "flex",
     alignItems: "center",
     gap: "12px",
     padding: "14px 16px",
-    border: "none",
     borderBottom: "1px solid #1f1f23",
     background: "transparent",
     color: "#ffffff",
     textAlign: "left",
-    cursor: "pointer",
   },
-
   unread: {
     background: "#111118",
   },
-
   icon: {
     width: "42px",
     height: "42px",
@@ -291,18 +257,15 @@ const styles = {
     flexShrink: 0,
     fontSize: "19px",
   },
-
   body: {
     flex: 1,
     minWidth: 0,
   },
-
   message: {
     fontSize: "14px",
     fontWeight: "650",
     lineHeight: 1.35,
   },
-
   comment: {
     marginTop: "4px",
     color: "#a1a1aa",
@@ -311,13 +274,11 @@ const styles = {
     textOverflow: "ellipsis",
     whiteSpace: "nowrap",
   },
-
   time: {
     marginTop: "5px",
     color: "#71717a",
     fontSize: "12px",
   },
-
   thumbnail: {
     width: "46px",
     height: "62px",
@@ -326,7 +287,6 @@ const styles = {
     background: "#18181b",
     flexShrink: 0,
   },
-
   empty: {
     minHeight: "65vh",
     padding: "30px",
@@ -337,7 +297,6 @@ const styles = {
     textAlign: "center",
     color: "#a1a1aa",
   },
-
   emptyIcon: {
     fontSize: "48px",
     marginBottom: "10px",
