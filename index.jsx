@@ -181,6 +181,7 @@ function PostCard({
     checkLikeStatus();
   }, [post.id, user]);
 
+  // ❌ DELETE THIS ENTIRE useEffect BLOCK:
   useEffect(() => {
     if (!user || !post.id) {
       return;
@@ -200,7 +201,6 @@ function PostCard({
 
     return () => unsubscribe();
   }, [post.id, user]);
-
 
   const handleLike = async () => {
     if (!user) {
