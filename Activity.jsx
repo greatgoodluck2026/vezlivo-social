@@ -101,6 +101,15 @@ export default function Activity({ onBack }) {
     fetchActivities();
   }, [user]);
 
+  const handleItemClick = (item) => {
+    if (item.postId) {
+      // Dispatch event or navigate to the specific post video
+      window.dispatchEvent(
+        new CustomEvent("vezlivo:open-post", { detail: { postId: item.postId } })
+      );
+    }
+  };
+
   return (
     <div style={styles.page}>
       <header style={styles.header}>
@@ -134,43 +143,52 @@ export default function Activity({ onBack }) {
           </div>
         ) : (
           <div style={styles.list}>
-            {activities.map((item) => (
-              <div
-                key={item.id}
-                style={{
-                  ...styles.row,
-                  ...(item.read === false ? styles.unread : {}),
-                }}
-              >
-                <div style={styles.icon}>
-                  {activityIcon(item.type)}
-                </div>
+            {activities.map((item) => {
+              const thumbnailSrc =
+                item.postThumbnail ||
+                (item.muxPlaybackId
+                  ? `https://image.mux.com/${item.muxPlaybackId}/thumbnail.jpg`
+                  : "");
 
-                <div style={styles.body}>
-                  <div style={styles.message}>
-                    {activityText(item)}
+              return (
+                <div
+                  key={item.id}
+                  onClick={() => handleItemClick(item)}
+                  style={{
+                    ...styles.row,
+                    ...(item.read === false ? styles.unread : {}),
+                  }}
+                >
+                  <div style={styles.icon}>
+                    {activityIcon(item.type)}
                   </div>
 
-                  {item.commentText && (
-                    <div style={styles.comment}>
-                      “{item.commentText}”
+                  <div style={styles.body}>
+                    <div style={styles.message}>
+                      {activityText(item)}
                     </div>
-                  )}
 
-                  <div style={styles.time}>
-                    {timeAgo(item.createdAt)}
+                    {item.commentText && (
+                      <div style={styles.comment}>
+                        “{item.commentText}”
+                      </div>
+                    )}
+
+                    <div style={styles.time}>
+                      {timeAgo(item.createdAt)}
+                    </div>
                   </div>
-                </div>
 
-                {item.postThumbnail ? (
-                  <img
-                    src={item.postThumbnail}
-                    alt=""
-                    style={styles.thumbnail}
-                  />
-                ) : null}
-              </div>
-            ))}
+                  {thumbnailSrc ? (
+                    <img
+                      src={thumbnailSrc}
+                      alt=""
+                      style={styles.thumbnail}
+                    />
+                  ) : null}
+                </div>
+              );
+            })}
           </div>
         )}
       </main>
@@ -181,8 +199,8 @@ export default function Activity({ onBack }) {
 const styles = {
   page: {
     minHeight: "100vh",
-    background: "#09090b",
-    color: "#ffffff",
+    background: "#ffffff",
+    color: "#111111",
     fontFamily:
       "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
   },
@@ -192,8 +210,8 @@ const styles = {
     alignItems: "center",
     justifyContent: "space-between",
     padding: "0 14px",
-    borderBottom: "1px solid #27272a",
-    background: "#09090b",
+    borderBottom: "1px solid #e4e4e7",
+    background: "#ffffff",
     position: "sticky",
     top: 0,
     zIndex: 20,
@@ -203,7 +221,7 @@ const styles = {
     height: "40px",
     border: "none",
     background: "transparent",
-    color: "#ffffff",
+    color: "#111111",
     fontSize: "34px",
     lineHeight: 1,
     cursor: "pointer",
@@ -212,6 +230,7 @@ const styles = {
     margin: 0,
     fontSize: "19px",
     fontWeight: "800",
+    color: "#111111",
   },
   headerSpacer: {
     width: "40px",
@@ -226,7 +245,7 @@ const styles = {
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    color: "#a1a1aa",
+    color: "#71717a",
   },
   list: {
     width: "100%",
@@ -237,25 +256,27 @@ const styles = {
     alignItems: "center",
     gap: "12px",
     padding: "14px 16px",
-    borderBottom: "1px solid #1f1f23",
+    borderBottom: "1px solid #f4f4f5",
     background: "transparent",
-    color: "#ffffff",
+    color: "#111111",
     textAlign: "left",
+    cursor: "pointer",
   },
   unread: {
-    background: "#111118",
+    background: "#f8fafc",
   },
   icon: {
     width: "42px",
     height: "42px",
     borderRadius: "50%",
-    background: "#18181b",
-    border: "1px solid #27272a",
+    background: "#f1f5f9",
+    border: "1px solid #e2e8f0",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
     flexShrink: 0,
     fontSize: "19px",
+    color: "#0f172a",
   },
   body: {
     flex: 1,
@@ -265,10 +286,11 @@ const styles = {
     fontSize: "14px",
     fontWeight: "650",
     lineHeight: 1.35,
+    color: "#111111",
   },
   comment: {
     marginTop: "4px",
-    color: "#a1a1aa",
+    color: "#52525b",
     fontSize: "13px",
     overflow: "hidden",
     textOverflow: "ellipsis",
@@ -284,7 +306,7 @@ const styles = {
     height: "62px",
     objectFit: "cover",
     borderRadius: "7px",
-    background: "#18181b",
+    background: "#e4e4e7",
     flexShrink: 0,
   },
   empty: {
@@ -295,7 +317,7 @@ const styles = {
     alignItems: "center",
     justifyContent: "center",
     textAlign: "center",
-    color: "#a1a1aa",
+    color: "#71717a",
   },
   emptyIcon: {
     fontSize: "48px",
