@@ -44,6 +44,78 @@ export default {
       });
     }
 
+    // ACTIVITIES ENDPOINT (GET & POST)
+    if (["/activities", "/api/activities"].includes(url.pathname)) {
+      try {
+        const { neon } = await import("@neondatabase/serverless");
+        const sql = neon(env.DATABASE_URL);
+
+        await sql`
+          CREATE TABLE IF NOT EXISTS activities (
+            id SERIAL PRIMARY KEY,
+            user_uid TEXT NOT NULL,
+            type VARCHAR(50) NOT NULL,
+            actor_id TEXT,
+            actor_name TEXT,
+            comment_text TEXT,
+            post_id TEXT,
+            post_thumbnail TEXT,
+            read BOOLEAN DEFAULT FALSE,
+            created_at BIGINT
+          )
+        `;
+
+        if (request.method === "GET") {
+          const uid = url.searchParams.get("uid");
+          if (!uid) {
+            return json({ success: false, error: "Missing uid" }, 400);
+          }
+
+          const rows = await sql`
+            SELECT * FROM activities WHERE user_uid = ${uid} ORDER BY created_at DESC LIMIT 50
+          `;
+
+          const activities = rows.map(row => ({
+            id: row.id.toString(),
+            type: row.type,
+            actorId: row.actor_id,
+            actorName: row.actor_name,
+            commentText: row.comment_text,
+            postId: row.post_id,
+            postThumbnail: row.post_thumbnail,
+            read: row.read,
+            createdAt: Number(row.created_at)
+          }));
+
+          return json({ success: true, activities });
+        }
+
+        if (request.method === "POST") {
+          const body = await request.json();
+          const { userUid, type, actorId, actorName, commentText, postId, postThumbnail } = body;
+
+          if (!userUid || !type) {
+            return json({ success: false, error: "Missing userUid or type" }, 400);
+          }
+
+          const createdAt = Date.now();
+          const result = await sql`
+            INSERT INTO activities (
+              user_uid, type, actor_id, actor_name, comment_text, post_id, post_thumbnail, read, created_at
+            )
+            VALUES (
+              ${userUid}, ${type}, ${actorId || ""}, ${actorName || "Someone"}, ${commentText || null}, ${postId || null}, ${postThumbnail || null}, FALSE, ${createdAt}
+            )
+            RETURNING *
+          `;
+
+          return json({ success: true, activity: result[0] });
+        }
+      } catch (err) {
+        return json({ success: false, error: err.message }, 500);
+      }
+    }
+
     // SERVE MEDIA FROM R2
     if (url.pathname.startsWith("/media/")) {
       const filename = url.pathname.slice("/media/".length);
@@ -69,7 +141,7 @@ export default {
       }
     }
 
-    // GET USER LIKED POST IDS (Ensures likes persist correctly across refreshes)
+    // GET USER LIKED POST IDS
     const userLikesMatch = url.pathname.match(/^\/users\/([^/]+)\/likes$/);
     if (userLikesMatch && request.method === "GET") {
       try {
@@ -92,7 +164,7 @@ export default {
       }
     }
 
-    // GET USER PROFILE & STATS (Followers, Following, Likes & Liked Videos)
+    // GET USER PROFILE & STATS
     const profileStatsMatch = url.pathname.match(/^\/users\/([^/]+)\/profile-data$/);
     if (profileStatsMatch && request.method === "GET") {
       try {
@@ -161,7 +233,7 @@ export default {
       }
     }
 
-    // SYNC USER PROFILE & IMAGES (Cloudflare R2 & Neon PostgreSQL with Age Controls)
+    // SYNC USER PROFILE & IMAGES
     if (
       [
         "/users/sync",
@@ -264,7 +336,6 @@ export default {
         const { neon } = await import("@neondatabase/serverless");
         const sql = neon(env.DATABASE_URL);
 
-        // Ensure table exists safely with mandatory primary key constraint and age/live columns
         await sql`
           CREATE TABLE IF NOT EXISTS users (
             uid TEXT PRIMARY KEY,
@@ -291,7 +362,6 @@ export default {
           )
         `;
 
-        // Ensure columns exist if table was previously created without them
         await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS cover_url TEXT`;
         await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_url TEXT`;
         await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS bio TEXT`;
@@ -303,7 +373,6 @@ export default {
         await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS can_join_live BOOLEAN DEFAULT FALSE`;
         await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS content_maturity_rating VARCHAR(20) DEFAULT 'mature'`;
 
-        // Calculate live stream permissions & maturity rating dynamically based on age
         const calculatedAge = typeof age === 'number' ? age : (age ? parseInt(age, 10) : 18);
         const derivedIsMinor = calculatedAge < 18;
         const derivedCanGoLive = !derivedIsMinor;
@@ -387,7 +456,7 @@ export default {
       }
     }
 
-    // GET POSTS AND REELS (With Age-Gating & Maturity Filtering)
+    // GET POSTS AND REELS
     if (
       [
         "/posts",
@@ -401,31 +470,7 @@ export default {
         const { neon } = await import("@neondatabase/serverless");
         const sql = neon(env.DATABASE_URL);
 
-        const userId = url.searchParams.get("userId") || url.searchParams.get("uid");
-
-        let isUserMinor = false;
-        if (userId) {
-          const userCheck = await sql`SELECT age, is_minor FROM users WHERE uid = ${userId}`;
-          if (userCheck.length > 0) {
-            isUserMinor = userCheck[0].is_minor || (userCheck[0].age !== null && userCheck[0].age < 18);
-          }
-        }
-
-        let posts;
-        if (userId && url.searchParams.get("filterByUser") === "true") {
-         posts = await sql`
-            SELECT p.*, 
-                   COALESCE(u.display_name, p.display_name, 'Vezlivo User') AS display_name, 
-                   COALESCE(u.username, p.username, '@user') AS username, 
-                   COALESCE(u.profile_url, u.photo_url, p.profile_url, '') AS profile_url,
-                   COALESCE(u.profile_url, u.photo_url, p.profile_url, '') AS "profileURL"
-            FROM posts p
-            LEFT JOIN users u ON p.user_id = u.uid
-            ORDER BY p.created_at DESC 
-            LIMIT 50
-          `;
-        } else if (isUserMinor) {
-          posts = await sql`
+        const posts = await sql`
           SELECT p.*, 
                  COALESCE(u.display_name, p.display_name, 'Vezlivo User') AS display_name, 
                  COALESCE(u.username, p.username, '@user') AS username, 
@@ -436,19 +481,6 @@ export default {
           ORDER BY p.created_at DESC 
           LIMIT 50
         `;
-        } else {
-          posts = await sql`
-          SELECT p.*, 
-                 COALESCE(u.display_name, p.display_name, 'Vezlivo User') AS display_name, 
-                 COALESCE(u.username, p.username, '@user') AS username, 
-                 COALESCE(u.profile_url, u.photo_url, p.profile_url, '') AS profile_url,
-                 COALESCE(u.profile_url, u.photo_url, p.profile_url, '') AS "profileURL"
-          FROM posts p
-          LEFT JOIN users u ON p.user_id = u.uid
-          ORDER BY p.created_at DESC 
-          LIMIT 50
-        `;
-        }
 
         return json({
           success: true,
@@ -481,44 +513,15 @@ export default {
           username,
           profileURL,
           userPhotoURL,
-          userEmail,
-          mediaType,
-          storagePath,
-          muxPlaybackId,
-          muxAssetId,
-          hashtags,
-          taggedFriends,
-          audience,
-          commentsEnabled,
-          originalAudio,
-          selectedSound,
-          musicName,
-          musicURL,
-          musicVolume,
-          background,
-          filter,
-          speed,
-          muted,
-          overlayText,
-          location,
-          allowSharing,
-          allowDownloads,
-          brandedContent,
-          brandName,
-          coverURL,
-          coverStoragePath,
-          coverSource,
-          coverFrameTime,
-          coverFit,
-          coverPositionX,
-          coverPositionY,
-          coverZoom,
           caption,
           videoUrl,
           mediaURL,
           thumbnailUrl,
+          muxAssetId,
+          muxPlaybackId,
           isMature,
           category,
+          coverURL,
         } = body;
 
         const effectiveUserId = userId || uid;
@@ -560,13 +563,6 @@ export default {
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
           )
         `;
-
-        await sql`ALTER TABLE posts ADD COLUMN IF NOT EXISTS display_name TEXT`;
-        await sql`ALTER TABLE posts ADD COLUMN IF NOT EXISTS username TEXT`;
-        await sql`ALTER TABLE posts ADD COLUMN IF NOT EXISTS profile_url TEXT`;
-        await sql`ALTER TABLE posts ADD COLUMN IF NOT EXISTS is_mature BOOLEAN DEFAULT FALSE`;
-        await sql`ALTER TABLE posts ADD COLUMN IF NOT EXISTS category VARCHAR(50) DEFAULT 'general'`;
-        await sql`ALTER TABLE posts ADD COLUMN IF NOT EXISTS likes_count INT DEFAULT 0`;
 
         const result = await sql`
           INSERT INTO posts (
@@ -654,6 +650,29 @@ export default {
             SET followers_count = COALESCE(followers_count, 0) + 1 
             WHERE uid = ${followingId}
           `;
+
+          // Record follow activity in Neon PostgreSQL
+          const userRes = await sql`SELECT display_name, username FROM users WHERE uid = ${followerId}`;
+          const actorName = userRes[0]?.display_name || userRes[0]?.username || "Someone";
+          
+          await sql`
+            CREATE TABLE IF NOT EXISTS activities (
+              id SERIAL PRIMARY KEY,
+              user_uid TEXT NOT NULL,
+              type VARCHAR(50) NOT NULL,
+              actor_id TEXT,
+              actor_name TEXT,
+              comment_text TEXT,
+              post_id TEXT,
+              post_thumbnail TEXT,
+              read BOOLEAN DEFAULT FALSE,
+              created_at BIGINT
+            )
+          `;
+          await sql`
+            INSERT INTO activities (user_uid, type, actor_id, actor_name, read, created_at)
+            VALUES (${followingId}, 'follow', ${followerId}, ${actorName}, FALSE, ${Date.now()})
+          `;
         }
 
         return json({ success: true, message: "Follow updated successfully" });
@@ -662,7 +681,7 @@ export default {
       }
     }
 
-    // TOGGLE LIKE / UNLIKE ENDPOINT (Safely ensures tables and columns exist)
+    // TOGGLE LIKE / UNLIKE ENDPOINT (Automatically triggers activity notification in Neon)
     if (
       url.pathname === "/like" ||
       url.pathname === "/api/like" ||
@@ -685,7 +704,6 @@ export default {
         const { neon } = await import("@neondatabase/serverless");
         const sql = neon(env.DATABASE_URL);
 
-        // Ensure likes table and likes_count column exist before proceeding
         await sql`
           CREATE TABLE IF NOT EXISTS likes (
             user_id VARCHAR(128) NOT NULL,
@@ -717,6 +735,40 @@ export default {
             SET likes_count = COALESCE(likes_count, 0) + 1 
             WHERE id::text = ${postId}
           `;
+
+          // Automatically record like activity with correct Mux thumbnail for the video owner in Neon PostgreSQL
+          const postRes = await sql`SELECT user_id, thumbnail_url, video_url, mux_playback_id FROM posts WHERE id::text = ${postId}`;
+          if (postRes.length > 0) {
+            const ownerId = postRes[0].user_id;
+            if (ownerId && ownerId !== userId) {
+              const userRes = await sql`SELECT display_name, username FROM users WHERE uid = ${userId}`;
+              const actorName = userRes[0]?.display_name || userRes[0]?.username || "Someone";
+
+              const playbackId = postRes[0].mux_playback_id;
+              const thumbnail = playbackId 
+                ? `https://image.mux.com/${playbackId}/thumbnail.jpg` 
+                : (postRes[0].thumbnail_url || postRes[0].video_url || null);
+
+              await sql`
+                CREATE TABLE IF NOT EXISTS activities (
+                  id SERIAL PRIMARY KEY,
+                  user_uid TEXT NOT NULL,
+                  type VARCHAR(50) NOT NULL,
+                  actor_id TEXT,
+                  actor_name TEXT,
+                  comment_text TEXT,
+                  post_id TEXT,
+                  post_thumbnail TEXT,
+                  read BOOLEAN DEFAULT FALSE,
+                  created_at BIGINT
+                )
+              `;
+              await sql`
+                INSERT INTO activities (user_uid, type, actor_id, actor_name, post_id, post_thumbnail, read, created_at)
+                VALUES (${ownerId}, 'like', ${userId}, ${actorName}, ${postId}, ${thumbnail}, FALSE, ${Date.now()})
+              `;
+            }
+          }
         }
 
         return json({ success: true, message: "Like updated successfully" });
