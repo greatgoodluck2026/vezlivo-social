@@ -1098,6 +1098,70 @@ export default {
         return json({ success: false, error: err.message }, 500);
       }
     }
+// GET USER FOLLOWING LIST
+    const userFollowingMatch = url.pathname.match(/^\/users\/([^/]+)\/following$/);
+    if (userFollowingMatch && request.method === "GET") {
+      try {
+        const uid = decodeURIComponent(userFollowingMatch[1]);
+        const { neon } = await import("@neondatabase/serverless");
+        const sql = neon(env.DATABASE_URL);
+
+        await sql`
+          CREATE TABLE IF NOT EXISTS follows (
+            follower_id TEXT NOT NULL,
+            following_id TEXT NOT NULL,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            PRIMARY KEY (follower_id, following_id)
+          )
+        `;
+
+        const follows = await sql`
+          SELECT following_id FROM follows WHERE follower_id = ${uid}
+        `;
+
+        const followingMap = {};
+        follows.forEach((row) => {
+          followingMap[row.following_id] = true;
+        });
+
+        return json({ success: true, followingIds: followingMap });
+      } catch (err) {
+        return json({ success: false, error: err.message }, 500);
+      }
+    }
+
+    // INCREMENT POST VIEW COUNT
+    const postViewMatch = url.pathname.match(/^\/posts\/([^/]+)\/view$/);
+    if (postViewMatch && request.method === "POST") {
+      try {
+        const rawId = decodeURIComponent(postViewMatch[1]);
+        const { neon } = await import("@neondatabase/serverless");
+        const sql = neon(env.DATABASE_URL);
+
+        await sql`ALTER TABLE posts ADD COLUMN IF NOT EXISTS views_count INT DEFAULT 0`;
+        await sql`ALTER TABLE posts ADD COLUMN IF NOT EXISTS views INT DEFAULT 0`;
+
+        if (!isNaN(rawId)) {
+          await sql`
+            UPDATE posts 
+            SET views_count = COALESCE(views_count, 0) + 1,
+                views = COALESCE(views, 0) + 1
+            WHERE id = ${parseInt(rawId, 10)}
+          `;
+        } else {
+          await sql`
+            UPDATE posts 
+            SET views_count = COALESCE(views_count, 0) + 1,
+                views = COALESCE(views, 0) + 1
+            WHERE id::text = ${rawId}
+          `;
+        }
+
+        return json({ success: true, message: "View recorded successfully" });
+      } catch (err) {
+        return json({ success: false, error: err.message }, 500);
+      }
+    }
 
     return json({
       ok: false,
