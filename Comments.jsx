@@ -80,7 +80,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
 
       if (data.success) {
         setCommentText("");
-        // Optimistically add or reload comments
+        // Optimistically update UI
         setComments((prev) => [
           ...prev,
           {
@@ -223,11 +223,13 @@ const styles = {
   panel: {
     width: "100%",
     maxWidth: "650px",
-    height: "70vh",
+    height: "75vh",
+    maxHeight: "80vh",
     background: "#ffffff",
     borderRadius: "22px 22px 0 0",
     display: "flex",
     flexDirection: "column",
+    position: "relative",
     overflow: "hidden",
     boxShadow: "0 -10px 40px rgba(0, 0, 0, 0.2)",
   },
@@ -264,6 +266,7 @@ const styles = {
     flex: 1,
     overflowY: "auto",
     padding: "14px 18px",
+    paddingBottom: "80px",
   },
   commentItem: {
     display: "flex",
@@ -309,11 +312,16 @@ const styles = {
     color: "#999999",
   },
   inputArea: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
     display: "flex",
     gap: "8px",
-    padding: "12px 14px",
+    padding: "12px 18px",
     borderTop: "1px solid #eeeeee",
     background: "#ffffff",
+    zIndex: 10,
   },
   input: {
     flex: 1,
