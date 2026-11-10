@@ -674,10 +674,11 @@ export default function Home({ onNavigate, onCreate, onProfile, onActivity, onDi
             </button>
           </div>
         ) : (
-          filteredPosts.map((post) => {
+         filteredPosts.map((post) => {
            const media = post.media || post.video || post.asset || {};
             const muxPlaybackId =
               post.muxPlaybackId || post.mux_playback_id ||
+              post.playbackId || post.playback_id ||
               media.playbackId || media.playback_id || "";
               
             const rawVideoUrl =
