@@ -26,6 +26,29 @@ export default {
         return json({ success: false, error: err.message }, 500);
       }
     }
+// SERVE FILES FROM CLOUDFARE R2 (/media/*)
+    const mediaMatch = url.pathname.match(/^\/media\/(.+)$/);
+    if (mediaMatch && request.method === "GET") {
+      try {
+        const filename = decodeURIComponent(mediaMatch[1]);
+        if (!env.R2) {
+          return new Response("R2 storage not configured", { status: 500 });
+        }
+        
+        const object = await env.R2.get(filename);
+        if (!object) {
+          return new Response("File not found", { status: 404 });
+        }
+
+        const headers = new Headers(corsHeaders());
+        object.writeHttpMetadata(headers);
+        headers.set("etag", object.httpEtag);
+        
+        return new Response(object.body, { headers });
+      } catch (err) {
+        return json({ success: false, error: err.message }, 500);
+      }
+    }
 
     // HEALTH CHECK
     if (url.pathname === "/health") {
@@ -387,7 +410,7 @@ export default {
       }
     }
 
-    // GET USER PROFILE (Fixed mapping with photo_url fallback)
+    // GET USER PROFILE ROUTE
     const userProfileMatch = url.pathname.match(/^\/users\/([^/]+)$/);
     if (userProfileMatch && request.method === "GET") {
       try {
@@ -428,7 +451,6 @@ export default {
         return json({ success: false, error: err.message }, 500);
       }
     }
-
     // SEARCH USERS
     if (
       (url.pathname === "/search/users" ||

@@ -185,10 +185,11 @@ function Profile({ onBack, onOpenDraft }) {
 
         const nextProfile = snapshot.val() || {};
 
-        setProfile((prev) => ({
+       setProfile((prev) => ({
           ...(prev || {}),
           ...nextProfile,
-          photoURL: nextProfile.photoURL || prev?.photoURL || "",
+          photoURL: prev?.photoURL || nextProfile.photoURL || "",
+          profile_url: prev?.profile_url || nextProfile.profile_url || "",
         }));
 
         // Only update local input states if user is not actively editing
