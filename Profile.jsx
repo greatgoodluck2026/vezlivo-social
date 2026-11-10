@@ -962,20 +962,20 @@ function Profile({ onBack, onOpenDraft }) {
         {/* PROFILE HEADER */}
         <div style={styles.profileHeader}>
           <div style={styles.avatarWrap}>
-            <div style={styles.avatarRing}>
+         <div style={styles.avatarRing}>
               {profilePhoto ? (
                 <img
                   src={profilePhoto}
                   alt={profileName}
                   style={styles.avatar}
+                  onError={(e) => {
+                    console.error("Avatar image failed to load:", profilePhoto);
+                    e.target.style.display = "none";
+                  }}
                 />
               ) : (
-                <div
-                  style={styles.avatarFallback}
-                >
-                  {profileName
-                    .charAt(0)
-                    .toUpperCase()}
+                <div style={styles.avatarFallback}>
+                  {profileName ? profileName.charAt(0).toUpperCase() : "R"}
                 </div>
               )}
             </div>
@@ -1790,7 +1790,7 @@ const styles = {
     justifyContent: "center",
   },
 
-  avatar: {
+ avatar: {
     width: "100%",
     height: "100%",
     display: "block",
