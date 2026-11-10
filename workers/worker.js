@@ -44,122 +44,13 @@ export default {
       });
     }
 
-   // ACTIVITIES ENDPOINT (GET & POST)
-    if (["/activities", "/api/activities"].includes(url.pathname)) {
+// COMMENTS ENDPOINT (GET & POST)
+    if (url.pathname === "/comments") {
       try {
         const { neon } = await import("@neondatabase/serverless");
         const sql = neon(env.DATABASE_URL);
 
-        await sql`
-          CREATE TABLE IF NOT EXISTS activities (
-            id SERIAL PRIMARY KEY,
-            user_uid TEXT NOT NULL,
-            type VARCHAR(50) NOT NULL,
-            actor_id TEXT,
-            actor_name TEXT,
-            comment_text TEXT,
-            post_id TEXT,
-            post_thumbnail TEXT,
-            read BOOLEAN DEFAULT FALSE,
-            created_at BIGINT
-          )
-        `;
-
-        if (request.method === "GET") {
-          const uid = url.searchParams.get("uid");
-          if (!uid) {
-            return json({ success: false, error: "Missing uid" }, 400);
-          }
-
-          const rows = await sql`
-            SELECT * FROM activities WHERE user_uid = ${uid} ORDER BY created_at DESC LIMIT 50
-          `;
-
-          const activities = rows.map(row => ({
-            id: row.id.toString(),
-            type: row.type,
-            actorId: row.actor_id,
-            actorName: row.actor_name,
-            commentText: row.comment_text,
-            postId: row.post_id,
-            postThumbnail: row.post_thumbnail,
-            read: row.read,
-            createdAt: Number(row.created_at)
-          }));
-
-          return json({ success: true, activities });
-        }
-
-        if (request.method === "POST") {
-          const body = await request.json();
-          const { userUid, type, actorId, actorName, commentText, postId, postThumbnail } = body;
-
-          if (!userUid || !type) {
-            return json({ success: false, error: "Missing userUid or type" }, 400);
-          }
-
-          const createdAt = Date.now();
-          const result = await sql`
-            INSERT INTO activities (
-              user_uid, type, actor_id, actor_name, comment_text, post_id, post_thumbnail, read, created_at
-            )
-            VALUES (
-              ${userUid}, ${type}, ${actorId || ""}, ${actorName || "Someone"}, ${commentText || null}, ${postId || null}, ${postThumbnail || null}, FALSE, ${createdAt}
-            )
-            RETURNING *
-          `;
-
-          return json({ success: true, activity: result[0] });
-        }
-      } catch (err) {
-        return json({ success: false, error: err.message }, 500);
-      }
-    }
-
-  // COMMENTS ENDPOINT (POST)
-    if (url.pathname === "/comments" && request.method === "POST") {
-      try {
-        const body = await request.json();
-        const { postId, postOwnerId, userId, text } = body;
-
-        if (!postId || !userId || !text) {
-          return json({ success: false, error: "Missing required fields" }, 400);
-        }
-
-        // --- BACKEND COMMENT FILTER (Policy Protection) ---
-        const trimmedText = typeof text === "string" ? text.trim() : "";
-        if (!trimmedText || trimmedText.length > 500) {
-          return json({ success: false, error: "Invalid comment length." }, 400);
-        }
-
-        const cleanedText = trimmedText
-          .toLowerCase()
-          .replace(/[^\p{L}\p{N}\s]/gu, " ")
-          .replace(/\s+/g, " ")
-          .trim();
-
-        const blockedWords = ["badword", "badword2", "badword3", "idiot", "stupid", "fool", "dumb"];
-        const words = cleanedText.split(" ");
-        const hasBlockedWord = words.some((word) => blockedWords.includes(word));
-
-        if (hasBlockedWord) {
-          return json({ success: false, error: "This comment contains language that is not allowed on Vezlivo." }, 400);
-        }
-
-        const repeatedCharacters = /(.)\1{7,}/i;
-        if (repeatedCharacters.test(cleanedText)) {
-          return json({ success: false, error: "Please do not send repeated or spam characters." }, 400);
-        }
-
-        const repeatedWords = /\b(\w+)(?:\s+\1){4,}\b/i;
-        if (repeatedWords.test(cleanedText)) {
-          return json({ success: false, error: "Please do not spam the same word repeatedly." }, 400);
-        }
-        // --------------------------------------------------
-
-        const { neon } = await import("@neondatabase/serverless");
-        const sql = neon(env.DATABASE_URL);
-
+        // Ensure comments table exists
         await sql`
           CREATE TABLE IF NOT EXISTS comments (
             id SERIAL PRIMARY KEY,
@@ -171,184 +62,129 @@ export default {
           )
         `;
 
-        await sql`ALTER TABLE posts ADD COLUMN IF NOT EXISTS comments_count INT DEFAULT 0`;
-        await sql`ALTER TABLE posts ADD COLUMN IF NOT EXISTS comments INT DEFAULT 0`;
-
-        const createdAt = Date.now();
-
-        await sql`
-          INSERT INTO comments (post_id, post_owner_id, user_id, text, created_at)
-          VALUES (${postId}, ${postOwnerId || ""}, ${userId}, ${trimmedText}, ${createdAt})
-        `;
-
-        if (!isNaN(postId)) {
-          await sql`
-            UPDATE posts 
-            SET comments_count = COALESCE(comments_count, 0) + 1,
-                comments = COALESCE(comments, 0) + 1
-            WHERE id = ${parseInt(postId, 10)}
-          `;
-        } else {
-          await sql`
-            UPDATE posts 
-            SET comments_count = COALESCE(comments_count, 0) + 1,
-                comments = COALESCE(comments, 0) + 1
-            WHERE id::text = ${postId}
-          `;
-        }
-
-        if (postOwnerId && postOwnerId !== userId) {
-          const userRes = await sql`SELECT display_name, username FROM users WHERE uid = ${userId}`;
-          const actorName = userRes[0]?.display_name || userRes[0]?.username || "Someone";
-
-          const postRes = await sql`SELECT thumbnail_url, video_url, mux_playback_id FROM posts WHERE id::text = ${postId}`;
-          let thumbnail = null;
-          if (postRes.length > 0) {
-            const playbackId = postRes[0].mux_playback_id;
-            thumbnail = playbackId 
-              ? `https://image.mux.com/${playbackId}/thumbnail.jpg` 
-              : (postRes[0].thumbnail_url || postRes[0].video_url || null);
+        // GET Comments
+        if (request.method === "GET") {
+          const postId = url.searchParams.get("postId");
+          if (!postId) {
+            return json({ success: false, error: "Missing postId" }, 400);
           }
 
-          await sql`
-            CREATE TABLE IF NOT EXISTS activities (
-              id SERIAL PRIMARY KEY,
-              user_uid TEXT NOT NULL,
-              type VARCHAR(50) NOT NULL,
-              actor_id TEXT,
-              actor_name TEXT,
-              comment_text TEXT,
-              post_id TEXT,
-              post_thumbnail TEXT,
-              read BOOLEAN DEFAULT FALSE,
-              created_at BIGINT
-            )
+          const comments = await sql`
+            SELECT c.*, 
+                   COALESCE(u.display_name, 'Vezlivo User') AS display_name, 
+                   COALESCE(u.username, 'user') AS username, 
+                   COALESCE(u.profile_url, u.photo_url, '') AS profile_url
+            FROM comments c
+            LEFT JOIN users u ON c.user_id = u.uid
+            WHERE c.post_id = ${postId}
+            ORDER BY c.created_at ASC
           `;
 
+          return json({ success: true, comments });
+        }
+
+        // POST Comments
+        if (request.method === "POST") {
+          const body = await request.json();
+          const { postId, postOwnerId, userId, text } = body;
+
+          if (!postId || !userId || !text) {
+            return json({ success: false, error: "Missing required fields" }, 400);
+          }
+
+          // --- BACKEND COMMENT FILTER (Policy Protection) ---
+          const trimmedText = typeof text === "string" ? text.trim() : "";
+          if (!trimmedText || trimmedText.length > 500) {
+            return json({ success: false, error: "Invalid comment length." }, 400);
+          }
+
+          const cleanedText = trimmedText
+            .toLowerCase()
+            .replace(/[^\p{L}\p{N}\s]/gu, " ")
+            .replace(/\s+/g, " ")
+            .trim();
+
+          const blockedWords = ["badword", "badword2", "badword3", "idiot", "stupid", "fool", "dumb"];
+          const words = cleanedText.split(" ");
+          const hasBlockedWord = words.some((word) => blockedWords.includes(word));
+
+          if (hasBlockedWord) {
+            return json({ success: false, error: "This comment contains language that is not allowed on Vezlivo." }, 400);
+          }
+
+          const repeatedCharacters = /(.)\1{7,}/i;
+          if (repeatedCharacters.test(cleanedText)) {
+            return json({ success: false, error: "Please do not send repeated or spam characters." }, 400);
+          }
+
+          const repeatedWords = /\b(\w+)(?:\s+\1){4,}\b/i;
+          if (repeatedWords.test(cleanedText)) {
+            return json({ success: false, error: "Please do not spam the same word repeatedly." }, 400);
+          }
+          // --------------------------------------------------
+
+          await sql`ALTER TABLE posts ADD COLUMN IF NOT EXISTS comments_count INT DEFAULT 0`;
+          await sql`ALTER TABLE posts ADD COLUMN IF NOT EXISTS comments INT DEFAULT 0`;
+
+          const createdAt = Date.now();
+
           await sql`
-            INSERT INTO activities (user_uid, type, actor_id, actor_name, comment_text, post_id, post_thumbnail, read, created_at)
-            VALUES (${postOwnerId}, 'comment', ${userId}, ${actorName}, ${trimmedText}, ${postId}, ${thumbnail}, FALSE, ${createdAt})
+            INSERT INTO comments (post_id, post_owner_id, user_id, text, created_at)
+            VALUES (${postId}, ${postOwnerId || ""}, ${userId}, ${trimmedText}, ${createdAt})
           `;
+
+          if (!isNaN(postId)) {
+            await sql`
+              UPDATE posts 
+              SET comments_count = COALESCE(comments_count, 0) + 1,
+                  comments = COALESCE(comments, 0) + 1
+              WHERE id = ${parseInt(postId, 10)}
+            `;
+          } else {
+            await sql`
+              UPDATE posts 
+              SET comments_count = COALESCE(comments_count, 0) + 1,
+                  comments = COALESCE(comments, 0) + 1
+              WHERE id::text = ${postId}
+            `;
+          }
+
+          if (postOwnerId && postOwnerId !== userId) {
+            const userRes = await sql`SELECT display_name, username FROM users WHERE uid = ${userId}`;
+            const actorName = userRes[0]?.display_name || userRes[0]?.username || "Someone";
+
+            const postRes = await sql`SELECT thumbnail_url, video_url, mux_playback_id FROM posts WHERE id::text = ${postId}`;
+            let thumbnail = null;
+            if (postRes.length > 0) {
+              const playbackId = postRes[0].mux_playback_id;
+              thumbnail = playbackId 
+                ? `https://image.mux.com/${playbackId}/thumbnail.jpg` 
+                : (postRes[0].thumbnail_url || postRes[0].video_url || null);
+            }
+
+            await sql`
+              CREATE TABLE IF NOT EXISTS activities (
+                id SERIAL PRIMARY KEY,
+                user_uid TEXT NOT NULL,
+                type VARCHAR(50) NOT NULL,
+                actor_id TEXT,
+                actor_name TEXT,
+                comment_text TEXT,
+                post_id TEXT,
+                post_thumbnail TEXT,
+                read BOOLEAN DEFAULT FALSE,
+                created_at BIGINT
+              )
+            `;
+
+            await sql`
+              INSERT INTO activities (user_uid, type, actor_id, actor_name, comment_text, post_id, post_thumbnail, read, created_at)
+              VALUES (${postOwnerId}, 'comment', ${userId}, ${actorName}, ${trimmedText}, ${postId}, ${thumbnail}, FALSE, ${createdAt})
+            `;
+          }
+
+          return json({ success: true, message: "Comment added successfully" });
         }
-
-        return json({ success: true, message: "Comment added successfully" });
-      } catch (err) {
-        return json({ success: false, error: err.message }, 500);
-      }
-    } 
-
-    // SERVE MEDIA FROM R2
-    if (url.pathname.startsWith("/media/")) {
-      const filename = url.pathname.slice("/media/".length);
-
-      if (!filename) {
-        return new Response("Not found", { status: 404 });
-      }
-
-      try {
-        const object = await env.R2.get(filename);
-
-        if (!object) {
-          return new Response("Media not found", { status: 404 });
-        }
-
-        const headers = new Headers(corsHeaders());
-        object.writeHttpMetadata(headers);
-        headers.set("ETag", object.httpEtag);
-
-        return new Response(object.body, { headers });
-      } catch (err) {
-        return json({ success: false, error: err.message }, 500);
-      }
-    }
-
-    // GET USER LIKED POST IDS
-    const userLikesMatch = url.pathname.match(/^\/users\/([^/]+)\/likes$/);
-    if (userLikesMatch && request.method === "GET") {
-      try {
-        const uid = decodeURIComponent(userLikesMatch[1]);
-        const { neon } = await import("@neondatabase/serverless");
-        const sql = neon(env.DATABASE_URL);
-
-        const likes = await sql`
-          SELECT post_id FROM likes WHERE user_id = ${uid}
-        `;
-
-        const likedMap = {};
-        likes.forEach((row) => {
-          likedMap[row.post_id] = true;
-        });
-
-        return json({ success: true, likedIds: likedMap });
-      } catch (err) {
-        return json({ success: false, error: err.message }, 500);
-      }
-    }
-
-    // GET USER PROFILE & STATS
-    const profileStatsMatch = url.pathname.match(/^\/users\/([^/]+)\/profile-data$/);
-    if (profileStatsMatch && request.method === "GET") {
-      try {
-        const uid = decodeURIComponent(profileStatsMatch[1]);
-        const { neon } = await import("@neondatabase/serverless");
-        const sql = neon(env.DATABASE_URL);
-
-        const userRes = await sql`
-          SELECT 
-            uid, display_name, username, profile_url, cover_url, bio,
-            COALESCE(followers_count, 0) AS followers_count,
-            COALESCE(following_count, 0) AS following_count,
-            (SELECT COALESCE(SUM(likes_count), 0) FROM posts WHERE user_id = ${uid}) AS likes_count
-          FROM users 
-          WHERE uid = ${uid}
-        `;
-
-        if (userRes.length === 0) {
-          return json({ success: false, error: "User not found" }, 404);
-        }
-
-        const likedVideos = await sql`
-          SELECT p.*, 
-                 COALESCE(u.display_name, p.display_name, 'Vezlivo User') AS display_name, 
-                 COALESCE(u.username, p.username, '@user') AS username, 
-                 COALESCE(u.profile_url, u.photo_url, p.profile_url, '') AS profile_url
-          FROM likes l
-          JOIN posts p ON l.post_id = p.id::text
-          LEFT JOIN users u ON p.user_id = u.uid
-          WHERE l.user_id = ${uid}
-          ORDER BY l.created_at DESC
-        `;
-
-        return json({
-          success: true,
-          profile: userRes[0],
-          likedVideos: likedVideos,
-        });
-      } catch (err) {
-        return json({ success: false, error: err.message }, 500);
-      }
-    }
-
-    // GET USER PROFILE
-    const userProfileMatch = url.pathname.match(/^\/users\/([^/]+)$/);
-    if (userProfileMatch && request.method === "GET") {
-      try {
-        const uid = decodeURIComponent(userProfileMatch[1]);
-        const { neon } = await import("@neondatabase/serverless");
-        const sql = neon(env.DATABASE_URL);
-
-        const users = await sql`
-          SELECT * FROM users WHERE uid = ${uid}
-        `;
-
-        if (users.length === 0) {
-          return json({ success: false, error: "User not found" }, 404);
-        }
-
-        return json({
-          success: true,
-          profile: users[0],
-        });
       } catch (err) {
         return json({ success: false, error: err.message }, 500);
       }
