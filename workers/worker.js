@@ -387,7 +387,7 @@ export default {
       }
     }
 
-    // GET USER PROFILE (Fixed mapping)
+    // GET USER PROFILE (Fixed mapping with photo_url fallback)
     const userProfileMatch = url.pathname.match(/^\/users\/([^/]+)$/);
     if (userProfileMatch && request.method === "GET") {
       try {
@@ -396,8 +396,10 @@ export default {
         const sql = neon(env.DATABASE_URL);
 
         const users = await sql`
-          SELECT uid, display_name, username, bio, profile_url, cover_url, 
-                 followers_count, following_count, is_private 
+          SELECT uid, display_name, username, bio, 
+                 COALESCE(profile_url, photo_url, '') AS profile_url, 
+                 COALESCE(photo_url, profile_url, '') AS photo_url,
+                 cover_url, followers_count, following_count, is_private 
           FROM users 
           WHERE uid = ${uid}
         `;
@@ -406,18 +408,20 @@ export default {
           return json({ success: false, error: "User not found" }, 404);
         }
 
+        const u = users[0];
         return json({
           success: true,
           profile: {
-            uid: users[0].uid,
-            displayName: users[0].display_name || "Vezlivo User",
-            username: users[0].username || "user",
-            bio: users[0].bio || "",
-            profileURL: users[0].profile_url || "",
-            coverURL: users[0].cover_url || "",
-            followersCount: users[0].followers_count || 0,
-            followingCount: users[0].following_count || 0,
-            isPrivate: users[0].is_private || false,
+            uid: u.uid,
+            displayName: u.display_name || "Vezlivo User",
+            username: u.username || "user",
+            bio: u.bio || "",
+            profileURL: u.profile_url || u.photo_url || "",
+            photoURL: u.photo_url || u.profile_url || "",
+            coverURL: u.cover_url || "",
+            followersCount: u.followers_count || 0,
+            followingCount: u.following_count || 0,
+            isPrivate: u.is_private || false,
           },
         });
       } catch (err) {
