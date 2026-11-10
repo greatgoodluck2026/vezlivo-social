@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { onAuthStateChanged } from "firebase/auth";
-import { get, onValue, push, ref, runTransaction, set, update } from "firebase/database";
-import { auth, database as db } from "./firebase.js";
+import { auth } from "./firebase.js";
 import Comments from "./Comments";
 import Report from "./Report.jsx";
 import SoundFeed from "./SoundFeed.jsx";
@@ -28,12 +27,20 @@ export default function Home({ onNavigate, onCreate, onProfile, onActivity, onDi
   const [reportPost, setReportPost] = useState(null);
   const [viewedPostIds, setViewedPostIds] = useState({});
   
-// Clean Modal & Toast states
+  // Clean Modal & Toast states
   const [deleteConfirmPost, setDeleteConfirmPost] = useState(null);
   const [toastMessage, setToastMessage] = useState("");
 
   // Background upload banner state
   const [backgroundPublish, setBackgroundPublish] = useState(null);
+
+  // Auth listener
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+    });
+    return () => unsubscribe();
+  }, []);
 
   useEffect(() => {
     const handleStartUpload = (e) => {
@@ -106,18 +113,25 @@ export default function Home({ onNavigate, onCreate, onProfile, onActivity, onDi
     };
   }, []);
 
+  // Fetch following state from backend API
   useEffect(() => {
     if (!user) {
       setFollowingIds({});
       return;
     }
 
-    const followingRef = ref(db, `users/${user.uid}/following`);
-    const unsubscribe = onValue(followingRef, (snapshot) => {
-      setFollowingIds(snapshot.val() || {});
-    });
+    async function fetchFollowing() {
+      try {
+        const res = await apiGet(`/users/${user.uid}/following`);
+        if (res && res.success && res.followingIds) {
+          setFollowingIds(res.followingIds);
+        }
+      } catch (err) {
+        console.error("Failed to fetch user following list:", err);
+      }
+    }
 
-    return () => unsubscribe();
+    fetchFollowing();
   }, [user]);
 
   // Load user liked states from backend database so they persist on refresh
@@ -128,45 +142,24 @@ export default function Home({ onNavigate, onCreate, onProfile, onActivity, onDi
       return;
     }
 
-    async function fetchUserLikes() {
+    async function fetchUserLikesAndSaves() {
       try {
         const res = await apiGet(`/users/${user.uid}/likes`);
         if (res && res.success && res.likedIds) {
           setLikedIds(res.likedIds);
         }
+        if (res && res.success && res.savedIds) {
+          setSavedIds(res.savedIds);
+        }
       } catch (err) {
-        console.error("Failed to fetch user likes:", err);
+        console.error("Failed to fetch user likes/saves:", err);
       }
     }
 
-    fetchUserLikes();
+    fetchUserLikesAndSaves();
   }, [user, posts]);
 
-  useEffect(() => {
-    if (!user || posts.length === 0) {
-      return undefined;
-    }
-
-    const unsubscribers = posts.map((post) => {
-      const postId = post.postId || post.id;
-      if (!postId) return () => {};
-
-      const saveRef = ref(db, `savedPosts/${user.uid}/${postId}`);
-      const unsubscribeSave = onValue(saveRef, (snapshot) => {
-        setSavedIds((current) => ({
-          ...current,
-          [postId]: snapshot.exists(),
-        }));
-      });
-
-      return () => {
-        unsubscribeSave();
-      };
-    });
-
-    return () => unsubscribers.forEach((unsubscribe) => unsubscribe());
-  }, [user, posts]);
-
+  // Search users via Backend API
   useEffect(() => {
     if (!showSearch) return;
 
@@ -174,26 +167,16 @@ export default function Home({ onNavigate, onCreate, onProfile, onActivity, onDi
     setSearchingUsers(true);
     setSearchError("");
 
-    get(ref(db, "usersPublic"))
-      .then((snapshot) => {
+    apiGet("/users/search")
+      .then((data) => {
         if (cancelled) return;
-        const data = snapshot.val() || {};
-        const list = Object.entries(data)
-          .map(([uid, profile]) => ({ uid, ...(profile || {}) }))
-          .filter((profile) => !profile.disabled)
-          .sort((a, b) =>
-            String(a.displayName || a.username || "").localeCompare(
-              String(b.displayName || b.username || "")
-            )
-          );
+        const list = Array.isArray(data) ? data : (data.users || []);
         setUsers(list);
       })
       .catch((error) => {
         console.error("Vezlivo user search error:", error);
         if (!cancelled) {
-          setSearchError(
-            "User search could not load. Check your Firebase users read rules."
-          );
+          setSearchError("User search could not load.");
         }
       })
       .finally(() => {
@@ -206,9 +189,8 @@ export default function Home({ onNavigate, onCreate, onProfile, onActivity, onDi
   }, [showSearch]);
 
   const increaseViews = async (post) => {
-    const postOwnerUid = post.user_id || post.uid;
     const postId = post.postId || post.id;
-    if (!postOwnerUid || !postId || viewedPostIds[postId]) return;
+    if (!postId || viewedPostIds[postId]) return;
 
     setViewedPostIds((current) => ({
       ...current,
@@ -216,23 +198,7 @@ export default function Home({ onNavigate, onCreate, onProfile, onActivity, onDi
     }));
 
     try {
-      await runTransaction(
-        ref(db, `posts/${postOwnerUid}/${postId}`),
-        (currentPost) => {
-          if (!currentPost || typeof currentPost !== "object") {
-            return currentPost;
-          }
-          const nextViews = Math.max(
-            Number(currentPost.views || 0),
-            Number(currentPost.viewsCount || 0)
-          ) + 1;
-          return {
-            ...currentPost,
-            views: nextViews,
-            viewsCount: nextViews,
-          };
-        }
-      );
+      await apiPost(`/posts/${postId}/view`, {});
     } catch (error) {
       setViewedPostIds((current) => ({
         ...current,
@@ -241,7 +207,8 @@ export default function Home({ onNavigate, onCreate, onProfile, onActivity, onDi
       console.error("View update error:", error);
     }
   };
-const likePost = async (post) => {
+
+  const likePost = async (post) => {
     const postId = String(post.id || post.postId || "");
     if (!user || !postId) return;
 
@@ -288,6 +255,7 @@ const likePost = async (post) => {
       setLikedIds((current) => ({ ...current, [postId]: wasLiked }));
     }
   };
+
   const savePost = async (post) => {
     const postId = post.postId || post.id;
     if (!user || !postId) return;
@@ -349,10 +317,7 @@ const likePost = async (post) => {
         setToastMessage("Vezlivo video link copied.");
       }
 
-      await runTransaction(
-        ref(db, `posts/${postOwnerUid}/${postId}/shares`),
-        (value) => Number(value || 0) + 1
-      );
+      await apiPost(`/posts/${postId}/share`, {});
     } catch (error) {
       if (error?.name !== "AbortError") {
         console.error("Share error:", error);
@@ -730,7 +695,7 @@ const likePost = async (post) => {
               : "");
             const posterUrl = post.coverURL || post.coverUrl || post.thumbnailURL || post.thumbnail_url || media.poster || "";
             const profileUrl = post.profile_url || post.profileURL || post.photoURL || post.avatarURL || "";
-           const postIdKey = String(post.id || post.postId || "");
+            const postIdKey = String(post.id || post.postId || "");
             const postOwnerUid = post.user_id || post.uid;
 
             const isOwner = user && postOwnerUid === user.uid;
@@ -765,7 +730,6 @@ const likePost = async (post) => {
                       onPlay={() => increaseViews(post)}
                       style={styles.video}
                       onError={(e) => {
-                        // Prevent infinite reload loops by checking a custom dataset flag
                         if (e.target.dataset.hasRecovered) return;
                         e.target.dataset.hasRecovered = "true";
                         console.warn("Video stream stalled, attempting recovery once.");
@@ -814,26 +778,11 @@ const likePost = async (post) => {
                           aria-label="Follow user"
                           onClick={async (e) => {
                             e.stopPropagation();
-                            const now = Date.now();
                             try {
-                              await update(ref(db), {
-                                [`users/${user.uid}/following/${postOwnerUid}`]: {
-                                  uid: postOwnerUid,
-                                  username: post.username || "",
-                                  displayName: post.display_name || post.displayName || "",
-                                  createdAt: now,
-                                },
-                                [`users/${postOwnerUid}/followers/${user.uid}`]: {
-                                  uid: user.uid,
-                                  username: post.username || "",
-                                  displayName: post.display_name || post.displayName || "",
-                                  createdAt: now,
-                                },
+                              await apiPost("/follow", {
+                                userId: user.uid,
+                                targetUserId: postOwnerUid,
                               });
-                              await runTransaction(
-                                ref(db, `users/${postOwnerUid}/followersCount`),
-                                (value) => Number(value || 0) + 1
-                              );
                               setFollowingIds((current) => ({ ...current, [postOwnerUid]: true }));
                             } catch (error) {
                               console.error("Follow error:", error);
