@@ -704,7 +704,7 @@ export default function Home({ onNavigate, onCreate, onProfile, onActivity, onDi
            const isOwner = user && postOwnerUid === user.uid;
            const isLiked = Boolean(likedIds[postIdKey]);
 
-           return (
+        return (
              <article
                key={`${postOwnerUid || "user"}-${postIdKey}`}
                style={styles.post}
@@ -722,7 +722,18 @@ export default function Home({ onNavigate, onCreate, onProfile, onActivity, onDi
                    }
                  }}
                >
-               {videoUrl && typeof videoUrl === "string" && videoUrl.trim() !== "" ? (
+               {muxPlaybackId ? (
+                   <mux-video
+                     playback-id={muxPlaybackId}
+                     poster={posterUrl || undefined}
+                     muted
+                     loop
+                     playsInline
+                     preload="auto"
+                     onPlay={() => increaseViews(post)}
+                     style={styles.video}
+                   />
+                 ) : videoUrl && typeof videoUrl === "string" && videoUrl.trim() !== "" ? (
                    <video
                      src={videoUrl.trim()}
                      poster={posterUrl || undefined}
@@ -732,14 +743,6 @@ export default function Home({ onNavigate, onCreate, onProfile, onActivity, onDi
                      preload="metadata"
                      onPlay={() => increaseViews(post)}
                      style={styles.video}
-                     onError={(e) => {
-                       if (e.target.dataset.hasRecovered) return;
-                       e.target.dataset.hasRecovered = "true";
-                       console.warn("Video stream stalled, attempting recovery once.");
-                       setTimeout(() => {
-                         try { e.target.load(); } catch {}
-                       }, 1500);
-                     }}
                    />
                  ) : posterUrl ? (
                    <img src={posterUrl} alt={post.caption || "Vezlivo post"} style={styles.imagePost} />
