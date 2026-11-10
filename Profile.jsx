@@ -108,17 +108,17 @@ function Profile({ onBack, onOpenDraft }) {
           const snapshot = await get(profileRef);
           const fbProfile = snapshot.exists() ? snapshot.val() || {} : {};
 
-          // Merge backend DB data and Firebase data, prioritizing DB for URLs
+       // Merge backend DB data and Firebase data, prioritizing DB for URLs
           const mergedProfile = {
-  ...fbProfile,
-  ...dbProfile,
-  // Force Neon PostgreSQL profile_url to win first, always
-  photoURL: dbProfile.profile_url || dbProfile.photo_url || currentUser.photoURL || fbProfile.photoURL || "",
-  displayName: dbProfile.display_name || fbProfile.displayName || currentUser.displayName || "",
-  username: dbProfile.username || fbProfile.username || "",
-  bio: dbProfile.bio || fbProfile.bio || "",
-  isPrivate: dbProfile.is_private === true || fbProfile.isPrivate === true,
-};
+            ...fbProfile,
+            ...dbProfile,
+            // Check all possible casing variations returned by Neon / Worker
+            photoURL: dbProfile.profileURL || dbProfile.photoURL || dbProfile.profile_url || dbProfile.photo_url || currentUser.photoURL || fbProfile.photoURL || "",
+            displayName: dbProfile.displayName || dbProfile.display_name || fbProfile.displayName || currentUser.displayName || "",
+            username: dbProfile.username || fbProfile.username || "",
+            bio: dbProfile.bio || fbProfile.bio || "",
+            isPrivate: dbProfile.isPrivate === true || dbProfile.is_private === true || fbProfile.isPrivate === true,
+          };
 
           setProfile(mergedProfile);
           setDisplayName(mergedProfile.displayName);
