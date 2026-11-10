@@ -488,8 +488,7 @@ function Profile({ onBack, onOpenDraft }) {
     setImageOffset({ x: 0, y: 0 });
     event.target.value = "";
   };
-
- // 🖼️ Step 2: Upload Framed Image & Sync directly to Cloudflare Worker / Neon PostgreSQL
+// 🖼️ Step 2: Upload Framed Image & Sync directly to Cloudflare Worker / Neon PostgreSQL
   const handleConfirmCropAndUpload = async () => {
     if (!cropImageFile || !user) return;
 
@@ -514,6 +513,7 @@ function Profile({ onBack, onOpenDraft }) {
         username: username || "",
         bio: bio || "",
         profile_url: base64Data,
+        profileURL: base64Data,
         profileImageBase64: base64Data,
         profileImageName: filename,
       };
@@ -521,18 +521,17 @@ function Profile({ onBack, onOpenDraft }) {
       // 1. Sync directly with Neon PostgreSQL via Cloudflare Worker API
       const res = await apiPost("/users/update-profile", payload);
 
-      // Extract the exact URL returned by the backend worker API safely
-      const serverProfileUrl = res?.profile_url || res?.profile?.profile_url || res?.profileURL || res?.photoURL || "";
-      const finalUrl = serverProfileUrl || base64Data;
+      // Extract the exact permanent URL returned by the backend worker API
+      const serverProfileUrl = res?.profileURL || res?.profile_url || res?.profile?.profile_url || res?.photoURL || previewURL;
 
       // 2. Keep Firebase Auth/RTDB profile photo updated in sync
       const profileRef = ref(database, `users/${user.uid}`);
-      await update(profileRef, { photoURL: finalUrl, profile_url: finalUrl });
+      await update(profileRef, { photoURL: serverProfileUrl, profile_url: serverProfileUrl });
 
       setProfile((previousProfile) => ({
         ...(previousProfile || {}),
-        photoURL: finalUrl,
-        profile_url: finalUrl,
+        photoURL: serverProfileUrl,
+        profile_url: serverProfileUrl,
       }));
       
       setLocalProfilePreview("");
