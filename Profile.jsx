@@ -1777,15 +1777,17 @@ const styles = {
     zIndex: 10,
   },
 
-  avatarRing: {
+ avatarRing: {
     width: "112px",
     height: "112px",
-    padding: "5px",
     boxSizing: "border-box",
     borderRadius: "50%",
-    background: "#fff",
-    boxShadow:
-      "0 4px 18px rgba(0,0,0,0.20)",
+    background: "linear-gradient(135deg, #27272a, #18181b)", // Replaces harsh white with a sleek dark neutral background
+    boxShadow: "0 4px 18px rgba(0,0,0,0.20)",
+    overflow: "hidden", // Strictly clips any image or transparency inside the circle
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
   },
 
   avatar: {
@@ -1794,7 +1796,7 @@ const styles = {
     display: "block",
     objectFit: "cover",
     borderRadius: "50%",
-    background: "#eee",
+    background: "#18181b",
   },
 
   avatarFallback: {
