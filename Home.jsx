@@ -723,9 +723,9 @@ export default function Home({ onNavigate, onCreate, onProfile, onActivity, onDi
                     }
                   }}
                 >
-                 {videoUrl ? (
+                {videoUrl && typeof videoUrl === "string" && videoUrl.trim() !== "" ? (
                     <video
-                      src={videoUrl}
+                      src={videoUrl.trim()}
                       poster={posterUrl || undefined}
                       muted
                       loop
