@@ -44,7 +44,7 @@ export default {
       });
     }
 
-    // ACTIVITIES ENDPOINT (GET & POST)
+   // ACTIVITIES ENDPOINT (GET & POST)
     if (["/activities", "/api/activities"].includes(url.pathname)) {
       try {
         const { neon } = await import("@neondatabase/serverless");
@@ -116,6 +116,95 @@ export default {
       }
     }
 
+    // COMMENTS ENDPOINT (POST)
+    if (url.pathname === "/comments" && request.method === "POST") {
+      try {
+        const body = await request.json();
+        const { postId, postOwnerId, userId, text } = body;
+
+        if (!postId || !userId || !text) {
+          return json({ success: false, error: "Missing required fields" }, 400);
+        }
+
+        const { neon } = await import("@neondatabase/serverless");
+        const sql = neon(env.DATABASE_URL);
+
+        await sql`
+          CREATE TABLE IF NOT EXISTS comments (
+            id SERIAL PRIMARY KEY,
+            post_id TEXT NOT NULL,
+            post_owner_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            text TEXT NOT NULL,
+            created_at BIGINT
+          )
+        `;
+
+        await sql`ALTER TABLE posts ADD COLUMN IF NOT EXISTS comments_count INT DEFAULT 0`;
+        await sql`ALTER TABLE posts ADD COLUMN IF NOT EXISTS comments INT DEFAULT 0`;
+
+        const createdAt = Date.now();
+
+        await sql`
+          INSERT INTO comments (post_id, post_owner_id, user_id, text, created_at)
+          VALUES (${postId}, ${postOwnerId || ""}, ${userId}, ${text}, ${createdAt})
+        `;
+
+        if (!isNaN(postId)) {
+          await sql`
+            UPDATE posts 
+            SET comments_count = COALESCE(comments_count, 0) + 1,
+                comments = COALESCE(comments, 0) + 1
+            WHERE id = ${parseInt(postId, 10)}
+          `;
+        } else {
+          await sql`
+            UPDATE posts 
+            SET comments_count = COALESCE(comments_count, 0) + 1,
+                comments = COALESCE(comments, 0) + 1
+            WHERE id::text = ${postId}
+          `;
+        }
+
+        if (postOwnerId && postOwnerId !== userId) {
+          const userRes = await sql`SELECT display_name, username FROM users WHERE uid = ${userId}`;
+          const actorName = userRes[0]?.display_name || userRes[0]?.username || "Someone";
+
+          const postRes = await sql`SELECT thumbnail_url, video_url, mux_playback_id FROM posts WHERE id::text = ${postId}`;
+          let thumbnail = null;
+          if (postRes.length > 0) {
+            const playbackId = postRes[0].mux_playback_id;
+            thumbnail = playbackId 
+              ? `https://image.mux.com/${playbackId}/thumbnail.jpg` 
+              : (postRes[0].thumbnail_url || postRes[0].video_url || null);
+          }
+
+          await sql`
+            CREATE TABLE IF NOT EXISTS activities (
+              id SERIAL PRIMARY KEY,
+              user_uid TEXT NOT NULL,
+              type VARCHAR(50) NOT NULL,
+              actor_id TEXT,
+              actor_name TEXT,
+              comment_text TEXT,
+              post_id TEXT,
+              post_thumbnail TEXT,
+              read BOOLEAN DEFAULT FALSE,
+              created_at BIGINT
+            )
+          `;
+
+          await sql`
+            INSERT INTO activities (user_uid, type, actor_id, actor_name, comment_text, post_id, post_thumbnail, read, created_at)
+            VALUES (${postOwnerId}, 'comment', ${userId}, ${actorName}, ${text}, ${postId}, ${thumbnail}, FALSE, ${createdAt})
+          `;
+        }
+
+        return json({ success: true, message: "Comment added successfully" });
+      } catch (err) {
+        return json({ success: false, error: err.message }, 500);
+      }
+    } 
     // SERVE MEDIA FROM R2
     if (url.pathname.startsWith("/media/")) {
       const filename = url.pathname.slice("/media/".length);
