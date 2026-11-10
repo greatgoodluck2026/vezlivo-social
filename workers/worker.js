@@ -374,13 +374,51 @@ export default {
           `;
         }
 
-        return json({
+       return json({
           success: true,
           message: "User profile synchronized successfully with age rules",
           profileURL: finalProfileURL,
           coverURL: finalCoverURL,
           canGoLive: derivedCanGoLive,
           canJoinLive: derivedCanJoinLive,
+        });
+      } catch (err) {
+        return json({ success: false, error: err.message }, 500);
+      }
+    }
+
+    // GET USER PROFILE (Fixed mapping)
+    const userProfileMatch = url.pathname.match(/^\/users\/([^/]+)$/);
+    if (userProfileMatch && request.method === "GET") {
+      try {
+        const uid = decodeURIComponent(userProfileMatch[1]);
+        const { neon } = await import("@neondatabase/serverless");
+        const sql = neon(env.DATABASE_URL);
+
+        const users = await sql`
+          SELECT uid, display_name, username, bio, profile_url, cover_url, 
+                 followers_count, following_count, is_private 
+          FROM users 
+          WHERE uid = ${uid}
+        `;
+
+        if (users.length === 0) {
+          return json({ success: false, error: "User not found" }, 404);
+        }
+
+        return json({
+          success: true,
+          profile: {
+            uid: users[0].uid,
+            displayName: users[0].display_name || "Vezlivo User",
+            username: users[0].username || "user",
+            bio: users[0].bio || "",
+            profileURL: users[0].profile_url || "",
+            coverURL: users[0].cover_url || "",
+            followersCount: users[0].followers_count || 0,
+            followingCount: users[0].following_count || 0,
+            isPrivate: users[0].is_private || false,
+          },
         });
       } catch (err) {
         return json({ success: false, error: err.message }, 500);
