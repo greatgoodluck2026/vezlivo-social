@@ -12,16 +12,6 @@ import {
   onAuthStateChanged,
 } from "firebase/auth";
 
-import {
-  getDatabase,
-  onValue,
-  push,
-  ref,
-  runTransaction,
-  set,
-  update,
-} from "firebase/database";
-
 import "./style.css";
 
 import { auth } from "./firebase.js";
@@ -42,7 +32,6 @@ import Inbox from "./Inbox.jsx";
    FIREBASE DATABASE & CLOUDFLARE WORKER API
 ========================================================= */
 
-const db = getDatabase(auth.app);
 const API_URL = "https://vezlivo-api.vezlivo-api.workers.dev";
 
 
