@@ -567,10 +567,7 @@ export default {
         let finalVideoUrl = videoUrl || mediaURL || "";
         const finalMuxPlaybackId = muxPlaybackId || "";
 
-        if (!finalVideoUrl && finalMuxPlaybackId) {
-          finalVideoUrl = `https://stream.mux.com/${finalMuxPlaybackId}/high.mp4`;
-        }
-        if (!finalVideoUrl && finalMuxPlaybackId) {
+        if ((!finalVideoUrl || finalVideoUrl.trim() === "") && finalMuxPlaybackId) {
           finalVideoUrl = `https://stream.mux.com/${finalMuxPlaybackId}/high.mp4`;
         }
 
@@ -1074,7 +1071,7 @@ export default {
           assetStatus,
           processing: assetStatus !== "ready",
           url: playbackId
-            ? `https://stream.mux.com/${playbackId}.m3u8`
+            ? `https://stream.mux.com/${playbackId}/high.mp4`
             : "",
         });
       } catch (err) {

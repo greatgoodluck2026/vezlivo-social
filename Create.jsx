@@ -436,20 +436,26 @@ function Create({ draftId = "" } = {}) {
     useRef(null);
 
 
-  /* =====================================================
+ /* =====================================================
      AUTH
   ===================================================== */
 
- useEffect(() => {
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  useEffect(() => {
     const handleNavigate = (e) => {
       if (e.detail?.section) {
-        setActiveSection(e.detail.section); // or setCurrentView(e.detail.section)
+        setActiveSection(e.detail.section);
       }
     };
     window.addEventListener("vezlivo:navigate", handleNavigate);
     return () => window.removeEventListener("vezlivo:navigate", handleNavigate);
   }, []);
-
   useEffect(() => {
     let active = true;
     apiGet("/sounds")
