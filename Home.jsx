@@ -676,80 +676,79 @@ export default function Home({ onNavigate, onCreate, onProfile, onActivity, onDi
         ) : (
          filteredPosts.map((post) => {
            const media = post.media || post.video || post.asset || {};
-            const muxPlaybackId =
-              post.muxPlaybackId || post.mux_playback_id ||
-              post.playbackId || post.playback_id ||
-              media.playbackId || media.playback_id || "";
-              
-            const rawVideoUrl =
-              (typeof post.video_url === "string" && post.video_url) ||
-              (typeof post.videoUrl === "string" && post.videoUrl) ||
-              (typeof post.mediaURL === "string" && post.mediaURL) ||
-              (typeof post.mediaUrl === "string" && post.mediaUrl) ||
-              (typeof post.videoURL === "string" && post.videoURL) ||
-              (typeof post.url === "string" && post.url) ||
-              (typeof post.secure_url === "string" && post.secure_url) ||
-              (typeof post.fileUrl === "string" && post.fileUrl) ||
-              (typeof post.fileURL === "string" && post.fileURL) ||
-              media.url || media.playbackUrl || media.playback_url || "";
-              
-            const videoUrl = rawVideoUrl || (muxPlaybackId
-              ? `https://stream.mux.com/${muxPlaybackId}/high.mp4`
-              : "");
-              
-            const posterUrl = post.coverURL || post.coverUrl || post.thumbnailURL || post.thumbnail_url || media.poster || "";
-            const profileUrl = post.profile_url || post.profileURL || post.photoURL || post.avatarURL || "";
-            const postIdKey = String(post.id || post.postId || "");
-            const postOwnerUid = post.user_id || post.uid;
+           const muxPlaybackId =
+             post.muxPlaybackId || post.mux_playback_id ||
+             post.playbackId || post.playback_id ||
+             media.playbackId || media.playback_id || "";
 
-            const isOwner = user && postOwnerUid === user.uid;
-            const isLiked = Boolean(likedIds[postIdKey]);
+           // Prioritize Mux direct MP4 fallback if playbackId exists
+           const videoUrl = (muxPlaybackId
+             ? `https://stream.mux.com/${muxPlaybackId}/high.mp4`
+             : "") ||
+             (typeof post.video_url === "string" && post.video_url) ||
+             (typeof post.videoUrl === "string" && post.videoUrl) ||
+             (typeof post.mediaURL === "string" && post.mediaURL) ||
+             (typeof post.mediaUrl === "string" && post.mediaUrl) ||
+             (typeof post.videoURL === "string" && post.videoURL) ||
+             (typeof post.url === "string" && post.url) ||
+             (typeof post.secure_url === "string" && post.secure_url) ||
+             (typeof post.fileUrl === "string" && post.fileUrl) ||
+             (typeof post.fileURL === "string" && post.fileURL) ||
+             media.url || media.playbackUrl || media.playback_url || "";
+             
+           const posterUrl = post.coverURL || post.coverUrl || post.thumbnailURL || post.thumbnail_url || media.poster || "";
+           const profileUrl = post.profile_url || post.profileURL || post.photoURL || post.avatarURL || "";
+           const postIdKey = String(post.id || post.postId || "");
+           const postOwnerUid = post.user_id || post.uid;
 
-            return (
-              <article
-                key={`${postOwnerUid || "user"}-${postIdKey}`}
-                style={styles.post}
-              >
-                <div
-                  style={styles.mediaFrame}
-                  onClick={(e) => {
-                    const videoEl = e.currentTarget.querySelector("video, mux-video");
-                    if (videoEl) {
-                      if (videoEl.paused) {
-                        videoEl.play();
-                      } else {
-                        videoEl.pause();
-                      }
-                    }
-                  }}
-                >
-                {videoUrl && typeof videoUrl === "string" && videoUrl.trim() !== "" ? (
-                    <video
-                      src={videoUrl.trim()}
-                      poster={posterUrl || undefined}
-                      muted
-                      loop
-                      playsInline
-                      preload="metadata"
-                      onPlay={() => increaseViews(post)}
-                      style={styles.video}
-                      onError={(e) => {
-                        if (e.target.dataset.hasRecovered) return;
-                        e.target.dataset.hasRecovered = "true";
-                        console.warn("Video stream stalled, attempting recovery once.");
-                        setTimeout(() => {
-                          try { e.target.load(); } catch {}
-                        }, 1500);
-                      }}
-                    />
-                  ) : posterUrl ? (
-                    <img src={posterUrl} alt={post.caption || "Vezlivo post"} style={styles.imagePost} />
-                  ) : (
-                    <div style={styles.videoUnavailable}>
-                      <span style={styles.videoIcon}>▶</span>
-                      <span>Media unavailable</span>
-                    </div>
-                  )}
+           const isOwner = user && postOwnerUid === user.uid;
+           const isLiked = Boolean(likedIds[postIdKey]);
+
+           return (
+             <article
+               key={`${postOwnerUid || "user"}-${postIdKey}`}
+               style={styles.post}
+             >
+               <div
+                 style={styles.mediaFrame}
+                 onClick={(e) => {
+                   const videoEl = e.currentTarget.querySelector("video, mux-video");
+                   if (videoEl) {
+                     if (videoEl.paused) {
+                       videoEl.play();
+                     } else {
+                       videoEl.pause();
+                     }
+                   }
+                 }}
+               >
+               {videoUrl && typeof videoUrl === "string" && videoUrl.trim() !== "" ? (
+                   <video
+                     src={videoUrl.trim()}
+                     poster={posterUrl || undefined}
+                     muted
+                     loop
+                     playsInline
+                     preload="metadata"
+                     onPlay={() => increaseViews(post)}
+                     style={styles.video}
+                     onError={(e) => {
+                       if (e.target.dataset.hasRecovered) return;
+                       e.target.dataset.hasRecovered = "true";
+                       console.warn("Video stream stalled, attempting recovery once.");
+                       setTimeout(() => {
+                         try { e.target.load(); } catch {}
+                       }, 1500);
+                     }}
+                   />
+                 ) : posterUrl ? (
+                   <img src={posterUrl} alt={post.caption || "Vezlivo post"} style={styles.imagePost} />
+                 ) : (
+                   <div style={styles.videoUnavailable}>
+                     <span style={styles.videoIcon}>▶</span>
+                     <span>Media unavailable</span>
+                   </div>
+                 )}
                   {/* Right Action Buttons - Clean Vezlivo Style */}
                   <div style={styles.videoRightActions} onClick={(e) => e.stopPropagation()}>
                     {/* 1. Floating Avatar */}
