@@ -564,6 +564,21 @@ export default {
           )
         `;
 
+        let finalVideoUrl = videoUrl || mediaURL || "";
+        const finalMuxPlaybackId = muxPlaybackId || "";
+
+        if (!finalVideoUrl && finalMuxPlaybackId) {
+          finalVideoUrl = `https://stream.mux.com/${finalMuxPlaybackId}/high.mp4`;
+        }
+        if (!finalVideoUrl && finalMuxPlaybackId) {
+          finalVideoUrl = `https://stream.mux.com/${finalMuxPlaybackId}/high.mp4`;
+        }
+
+        let finalThumbnailUrl = thumbnailUrl || coverURL || "";
+        if (!finalThumbnailUrl && finalMuxPlaybackId) {
+          finalThumbnailUrl = `https://image.mux.com/${finalMuxPlaybackId}/thumbnail.jpg`;
+        }
+
         const result = await sql`
           INSERT INTO posts (
             user_id, display_name, username, profile_url, 
@@ -576,15 +591,17 @@ export default {
             ${effectiveUsername},
             ${effectiveProfileUrl},
             ${caption || ""},
-            ${videoUrl || mediaURL || ""},
+            ${finalVideoUrl},
             ${muxAssetId || ""},
-            ${muxPlaybackId || ""},
-            ${thumbnailUrl || coverURL || ""},
+            ${finalMuxPlaybackId},
+            ${finalThumbnailUrl},
             ${isMature || false},
             ${category || 'general'}
           )
           RETURNING *
         `;
+
+        
 
         return json({
           success: true,

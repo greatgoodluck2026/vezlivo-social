@@ -481,18 +481,18 @@ export default function Home({ onNavigate, onCreate, onProfile, onActivity, onDi
 
   return (
     <div style={styles.page}>
-      {/* Global CSS injection to force Mux & HTML videos to cover 100% screen with zero cutoff boxes */}
+      {/* Global CSS injection to make videos fit properly without extreme zooming */}
       <style>{`
         mux-video, video {
           width: 100% !important;
           height: 100% !important;
-          object-fit: cover !important;
+          object-fit: contain !important;
           background-color: #000000 !important;
         }
         mux-video::part(video) {
           width: 100% !important;
           height: 100% !important;
-          object-fit: cover !important;
+          object-fit: contain !important;
         }
         @keyframes spinner-rotate {
           0% { transform: rotate(0deg); }
@@ -1271,7 +1271,7 @@ const styles = {
     display: "block",
     width: "100%",
     height: "100%",
-    objectFit: "contain",
+    objectFit: "contain", // Changed from cover to contain
     backgroundColor: "#000000",
     position: "absolute",
     inset: 0,
