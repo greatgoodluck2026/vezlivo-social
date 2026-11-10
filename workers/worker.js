@@ -116,7 +116,7 @@ export default {
       }
     }
 
-    // COMMENTS ENDPOINT (POST)
+  // COMMENTS ENDPOINT (POST)
     if (url.pathname === "/comments" && request.method === "POST") {
       try {
         const body = await request.json();
@@ -125,6 +125,37 @@ export default {
         if (!postId || !userId || !text) {
           return json({ success: false, error: "Missing required fields" }, 400);
         }
+
+        // --- BACKEND COMMENT FILTER (Policy Protection) ---
+        const trimmedText = typeof text === "string" ? text.trim() : "";
+        if (!trimmedText || trimmedText.length > 500) {
+          return json({ success: false, error: "Invalid comment length." }, 400);
+        }
+
+        const cleanedText = trimmedText
+          .toLowerCase()
+          .replace(/[^\p{L}\p{N}\s]/gu, " ")
+          .replace(/\s+/g, " ")
+          .trim();
+
+        const blockedWords = ["badword", "badword2", "badword3", "idiot", "stupid", "fool", "dumb"];
+        const words = cleanedText.split(" ");
+        const hasBlockedWord = words.some((word) => blockedWords.includes(word));
+
+        if (hasBlockedWord) {
+          return json({ success: false, error: "This comment contains language that is not allowed on Vezlivo." }, 400);
+        }
+
+        const repeatedCharacters = /(.)\1{7,}/i;
+        if (repeatedCharacters.test(cleanedText)) {
+          return json({ success: false, error: "Please do not send repeated or spam characters." }, 400);
+        }
+
+        const repeatedWords = /\b(\w+)(?:\s+\1){4,}\b/i;
+        if (repeatedWords.test(cleanedText)) {
+          return json({ success: false, error: "Please do not spam the same word repeatedly." }, 400);
+        }
+        // --------------------------------------------------
 
         const { neon } = await import("@neondatabase/serverless");
         const sql = neon(env.DATABASE_URL);
@@ -147,7 +178,7 @@ export default {
 
         await sql`
           INSERT INTO comments (post_id, post_owner_id, user_id, text, created_at)
-          VALUES (${postId}, ${postOwnerId || ""}, ${userId}, ${text}, ${createdAt})
+          VALUES (${postId}, ${postOwnerId || ""}, ${userId}, ${trimmedText}, ${createdAt})
         `;
 
         if (!isNaN(postId)) {
@@ -196,7 +227,7 @@ export default {
 
           await sql`
             INSERT INTO activities (user_uid, type, actor_id, actor_name, comment_text, post_id, post_thumbnail, read, created_at)
-            VALUES (${postOwnerId}, 'comment', ${userId}, ${actorName}, ${text}, ${postId}, ${thumbnail}, FALSE, ${createdAt})
+            VALUES (${postOwnerId}, 'comment', ${userId}, ${actorName}, ${trimmedText}, ${postId}, ${thumbnail}, FALSE, ${createdAt})
           `;
         }
 
@@ -205,6 +236,7 @@ export default {
         return json({ success: false, error: err.message }, 500);
       }
     } 
+
     // SERVE MEDIA FROM R2
     if (url.pathname.startsWith("/media/")) {
       const filename = url.pathname.slice("/media/".length);
@@ -394,7 +426,6 @@ export default {
             console.error("Profile R2 upload failed:", err);
           }
         }
-
         // Handle Cover Picture R2 Upload
         if (coverImageBase64 && env.R2) {
           try {
