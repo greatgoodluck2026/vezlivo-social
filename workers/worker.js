@@ -231,11 +231,15 @@ export default {
         const {
           uid,
           displayName,
+          display_name,
           username,
           bio,
           isPrivate,
+          is_private,
           profileURL,
+          profile_url,
           coverURL,
+          cover_url,
           profileImageBase64,
           profileImageName,
           coverImageBase64,
@@ -256,8 +260,8 @@ export default {
           return json({ success: false, error: "Missing user UID" }, 400);
         }
 
-        let finalProfileURL = profileURL || "";
-        let finalCoverURL = coverURL || "";
+        let finalProfileURL = profile_url || profileURL || "";
+        let finalCoverURL = cover_url || coverURL || "";
 
         // Handle Profile Picture R2 Upload
         if (profileImageBase64 && env.R2) {
@@ -282,8 +286,11 @@ export default {
 
             finalProfileURL = `${url.origin}/media/${filename}`;
           } catch (err) {
-            console.error("Profile R2 upload failed:", err);
+            console.error("Profile R2 upload failed, falling back to direct URL/payload:", err);
           }
+        } else if (!finalProfileURL && profileImageBase64) {
+          // Fallback if R2 is not bound so it doesn't drop the image
+          finalProfileURL = profileImageBase64;
         }
         // Handle Cover Picture R2 Upload
         if (coverImageBase64 && env.R2) {
@@ -357,6 +364,8 @@ export default {
         const derivedCanGoLive = !derivedIsMinor;
         const derivedCanJoinLive = !derivedIsMinor;
         const derivedMaturityRating = derivedIsMinor ? 'teen' : 'mature';
+        const effectiveDisplayName = displayName || display_name || "";
+        const effectiveIsPrivate = isPrivate === true || is_private === true;
 
         await sql`
           INSERT INTO users (
@@ -366,7 +375,7 @@ export default {
             content_maturity_rating, onboarding_complete, onboarding_completed_at
           )
           VALUES (
-            ${uid}, ${displayName || ""}, ${username || ""}, ${bio || ""}, ${isPrivate || false},
+            ${uid}, ${effectiveDisplayName}, ${username || ""}, ${bio || ""}, ${effectiveIsPrivate},
             ${finalProfileURL}, ${finalCoverURL}, ${birthMonth || null}, ${birthDay || null},
             ${birthYear || null}, ${dateOfBirth || null}, ${calculatedAge}, ${derivedIsMinor},
             ${accountAgeGroup || (derivedIsMinor ? 'minor' : 'adult')}, ${canAccessMatureContent ?? !derivedIsMinor},
@@ -410,15 +419,15 @@ export default {
       }
     }
 
-    // GET USER PROFILE ROUTE
-    const userProfileMatch = url.pathname.match(/^\/users\/([^/]+)$/);
+   // GET USER PROFILE ROUTE (Auto-creates user row if missing to prevent 404)
+    const userProfileMatch = url.pathname.match(/^\/api\/users\/([^/]+)$/) || url.pathname.match(/^\/users\/([^/]+)$/);
     if (userProfileMatch && request.method === "GET") {
       try {
         const uid = decodeURIComponent(userProfileMatch[1]);
         const { neon } = await import("@neondatabase/serverless");
         const sql = neon(env.DATABASE_URL);
 
-        const users = await sql`
+        let users = await sql`
           SELECT uid, display_name, username, bio, 
                  COALESCE(profile_url, photo_url, '') AS profile_url, 
                  COALESCE(photo_url, profile_url, '') AS photo_url,
@@ -427,15 +436,29 @@ export default {
           WHERE uid = ${uid}
         `;
 
+        // If the user row does not exist in Neon yet, create it automatically
         if (users.length === 0) {
-          return json({ success: false, error: "User not found" }, 404);
+          await sql`
+            INSERT INTO users (uid, display_name, username, bio, profile_url, photo_url, created_at)
+            VALUES (${uid}, 'Vezlivo User', ${'user_' + uid.substring(0, 6)}, '', '', '', NOW())
+            ON CONFLICT (uid) DO NOTHING
+          `;
+          
+          users = await sql`
+            SELECT uid, display_name, username, bio, 
+                   COALESCE(profile_url, photo_url, '') AS profile_url, 
+                   COALESCE(photo_url, profile_url, '') AS photo_url,
+                   cover_url, followers_count, following_count, is_private 
+            FROM users 
+            WHERE uid = ${uid}
+          `;
         }
 
-        const u = users[0];
+        const u = users[0] || {};
         return json({
           success: true,
           profile: {
-            uid: u.uid,
+            uid: u.uid || uid,
             displayName: u.display_name || "Vezlivo User",
             username: u.username || "user",
             bio: u.bio || "",
