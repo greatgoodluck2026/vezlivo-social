@@ -553,6 +553,7 @@ function Login({ onBack }) {
         
         if (result && result.user) {
           const user = result.user;
+          localStorage.setItem("vezlivo_session_active", "true");
           const snapshot = await get(ref(database, `users/${user.uid}`));
           const existing = snapshot.exists() ? snapshot.val() : {};
 
@@ -567,7 +568,6 @@ function Login({ onBack }) {
         }
       } catch (error) {
         console.error("Redirect login error:", error);
-        showMessage(error.message || "Google sign-in failed.");
       }
     }
 
@@ -581,6 +581,14 @@ function Login({ onBack }) {
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: "select_account" });
 
+      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
+      if (isMobile) {
+        const { signInWithRedirect } = await import("firebase/auth");
+        await signInWithRedirect(auth, provider);
+        return;
+      }
+
       const result = await signInWithPopup(auth, provider);
       const user = result.user;
 
@@ -588,8 +596,7 @@ function Login({ onBack }) {
         throw new Error("No user returned from Google sign-in.");
       }
 
-      // CRITICAL FIX: Lock in the session flag instantly so mobile never bounces you
-      localStorage.setItem("vezlivo_logged_in", "true");
+      localStorage.setItem("vezlivo_session_active", "true");
 
       const snapshot = await get(ref(database, `users/${user.uid}`));
       const existing = snapshot.exists() ? snapshot.val() : {};
@@ -604,13 +611,7 @@ function Login({ onBack }) {
       }
     } catch (error) {
       console.error("Google login error:", error);
-      if (error.code === "auth/popup-closed-by-user") {
-        showMessage("Google sign-in was cancelled.");
-      } else if (error.code === "auth/popup-blocked" || error.code === "auth/cancelled-popup-request") {
-        showMessage("Pop-up blocked by mobile browser. Please allow pop-ups for Vezlivo.");
-      } else {
-        showMessage(error.message || "Google sign-in failed.");
-      }
+      showMessage(error.message || "Google sign-in failed.");
     } finally {
       setLoading(false);
     }
