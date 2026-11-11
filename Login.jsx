@@ -554,7 +554,11 @@ function Login({ onBack }) {
       const result = await signInWithPopup(auth, provider);
       const user = result.user;
 
-      // Check if user already completed onboarding in Neon/Firebase
+      if (!user) {
+        throw new Error("No user returned from Google sign-in.");
+      }
+
+      // Check if user already exists and completed onboarding in database
       const snapshot = await get(ref(database, `users/${user.uid}`));
       const existing = snapshot.exists() ? snapshot.val() : {};
 
@@ -562,12 +566,12 @@ function Login({ onBack }) {
         showMessage("Login successful.", "success");
         setTimeout(() => {
           onBack?.();
-        }, 500);
+        }, 300);
       } else {
-        // If new user, start onboarding setup
         await beginOnboarding(user);
       }
     } catch (error) {
+      console.error("Google login error:", error);
       if (error.code === "auth/popup-closed-by-user") {
         showMessage("Google sign-in was cancelled.");
       } else if (error.code === "auth/popup-blocked") {
