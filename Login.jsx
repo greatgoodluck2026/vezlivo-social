@@ -581,11 +581,36 @@ const handleGoogleLogin = async () => {
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: "select_account" });
 
-      const { signInWithRedirect } = await import("firebase/auth");
-      await signInWithRedirect(auth, provider);
+      const result = await signInWithPopup(auth, provider);
+      const user = result.user;
+
+      if (!user) {
+        throw new Error("No user returned from Google sign-in.");
+      }
+
+      localStorage.setItem("vezlivo_session_active", "true");
+
+      const snapshot = await get(ref(database, `users/${user.uid}`));
+      const existing = snapshot.exists() ? snapshot.val() : {};
+
+      if (snapshot.exists() && existing.onboardingComplete === true) {
+        showMessage("Login successful.", "success");
+        setTimeout(() => {
+          onBack?.();
+        }, 300);
+      } else {
+        await beginOnboarding(user);
+      }
     } catch (error) {
       console.error("Google login error:", error);
-      showMessage(error.message || "Google sign-in failed.");
+      if (error.code === "auth/popup-closed-by-user") {
+        showMessage("Sign-in cancelled.");
+      } else if (error.code === "auth/popup-blocked") {
+        showMessage("Pop-up was blocked by your browser. Please allow pop-ups for this site.");
+      } else {
+        showMessage(error.message || "Google sign-in failed.");
+      }
+    } finally {
       setLoading(false);
     }
   };
