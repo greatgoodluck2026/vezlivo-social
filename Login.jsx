@@ -545,41 +545,40 @@ function Login({ onBack }) {
     }
   };
 
-  const handleGoogleLogin = async () => {
+ const handleGoogleLogin = async () => {
     clearMessage();
     setLoading(true);
 
     try {
       const provider = new GoogleAuthProvider();
+      const result = await signInWithPopup(auth, provider);
+      const user = result.user;
 
-      const result = await signInWithPopup(
-        auth,
-        provider
-      );
+      // Check if user already completed onboarding in Neon/Firebase
+      const snapshot = await get(ref(database, `users/${user.uid}`));
+      const existing = snapshot.exists() ? snapshot.val() : {};
 
-      showMessage(
-        "Google sign-in successful.",
-        "success"
-      );
-
-      await beginOnboarding(result.user);
+      if (snapshot.exists() && existing.onboardingComplete === true) {
+        showMessage("Login successful.", "success");
+        setTimeout(() => {
+          onBack?.();
+        }, 500);
+      } else {
+        // If new user, start onboarding setup
+        await beginOnboarding(user);
+      }
     } catch (error) {
       if (error.code === "auth/popup-closed-by-user") {
         showMessage("Google sign-in was cancelled.");
       } else if (error.code === "auth/popup-blocked") {
-        showMessage(
-          "Your browser blocked the Google sign-in window."
-        );
+        showMessage("Your browser blocked the Google sign-in window.");
       } else {
-        showMessage(
-          error.message || "Google sign-in failed."
-        );
+        showMessage(error.message || "Google sign-in failed.");
       }
     } finally {
       setLoading(false);
     }
   };
-
   /* =========================================================
      PHONE AUTHENTICATION
      Firebase still uses reCAPTCHA for anti-abuse protection,
