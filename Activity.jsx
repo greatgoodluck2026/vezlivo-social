@@ -28,7 +28,7 @@ export default function Activity({ onBack }) {
   const [user, setUser] = useState(null);
   const [activities, setActivities] = useState([]);
   const [conversations, setConversations] = useState([]);
-  const [activeFilter, setActiveFilter] = useState("all");
+  const [activeFilter, setActiveFilter] = useState("likes"); // Default to likes, "all" removed
   const [activeChatPartner, setActiveChatPartner] = useState(null);
   const [messages, setMessages] = useState([]);
   const [replyText, setReplyText] = useState("");
@@ -122,7 +122,7 @@ export default function Activity({ onBack }) {
     if (activeFilter === "likes") return act.type === "like";
     if (activeFilter === "comments") return act.type === "comment";
     if (activeFilter === "follows") return act.type === "follow";
-    return true;
+    return false;
   });
 
   const unreadCount = conversations.filter((c) => !c.read && c.sender_id !== user?.uid).length;
@@ -222,7 +222,7 @@ export default function Activity({ onBack }) {
     );
   }
 
-  // 3. MAIN ACTIVITY SCREEN (With DM banner at top + All/Likes/Comments/Follows tabs)
+  // 3. MAIN ACTIVITY SCREEN (With DM banner at top + Likes, Comments, Follows tabs only)
   return (
     <div style={styles.page}>
       <header style={styles.header}>
@@ -232,7 +232,7 @@ export default function Activity({ onBack }) {
       </header>
 
       <main style={styles.content}>
-        {/* 🌟 VIBRANT DIRECT MESSAGES BANNER (NOW FULLY WORKING TO OPEN INBOX LIST) */}
+        {/* 🌟 VIBRANT DIRECT MESSAGES BANNER */}
         <div
           onClick={() => {
             if (conversations.length > 0) {
@@ -271,9 +271,9 @@ export default function Activity({ onBack }) {
           </div>
         )}
 
-        {/* 🎨 CATEGORY FILTER PILLS */}
+        {/* 🎨 CATEGORY FILTER PILLS (Likes, Comments, Follows - "All" removed) */}
         <div style={styles.filterRow}>
-          {["all", "likes", "comments", "follows"].map((filter) => (
+          {["likes", "comments", "follows"].map((filter) => (
             <button
               key={filter}
               type="button"
@@ -296,9 +296,9 @@ export default function Activity({ onBack }) {
         ) : filteredActivities.length === 0 ? (
           <div style={styles.emptyCard}>
             <div style={styles.emptyGlowIcon}>🔔</div>
-            <h2 style={styles.emptyTitle}>No {activeFilter !== "all" ? activeFilter : "activity"} yet</h2>
+            <h2 style={styles.emptyTitle}>No {activeFilter} yet</h2>
             <p style={styles.emptySub}>
-              When people interact with your content, their likes, comments, and follows will light up here.
+              When people interact with your content, their {activeFilter} will light up here.
             </p>
           </div>
         ) : (
@@ -456,6 +456,7 @@ const styles = {
   },
   filterRow: { display: "flex", gap: "8px", marginBottom: "16px", overflowX: "auto" },
   filterPill: {
+    flex: 1,
     padding: "8px 16px",
     borderRadius: "20px",
     border: "1px solid #27272a",
@@ -464,6 +465,7 @@ const styles = {
     fontSize: "13px",
     fontWeight: "600",
     cursor: "pointer",
+    textAlign: "center",
   },
   activeFilterPill: {
     background: "#ffffff",
