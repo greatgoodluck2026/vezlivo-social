@@ -649,18 +649,16 @@ function App() {
     useRef(0);
 
 
-  useEffect(() => {
+ useEffect(() => {
     const unsubscribe =
       onAuthStateChanged(
         auth,
         (currentUser) => {
-          setUser(
-            currentUser
-          );
-
+          setUser(currentUser);
           setAuthReady(true);
 
           if (currentUser) {
+            localStorage.setItem("vezlivo_session_active", "true");
             setPage(
               (currentPage) =>
                 currentPage ===
@@ -668,6 +666,8 @@ function App() {
                   ? "home"
                   : currentPage
             );
+          } else {
+            localStorage.removeItem("vezlivo_session_active");
           }
         }
       );
@@ -675,7 +675,6 @@ function App() {
     return () =>
       unsubscribe();
   }, []);
-
 
   useEffect(() => {
     const handleOpenUserProfile = (
