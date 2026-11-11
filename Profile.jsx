@@ -528,6 +528,7 @@ function Profile({ onBack, onOpenDraft }) {
       const profileRef = ref(database, `users/${user.uid}`);
       await update(profileRef, { photoURL: serverProfileUrl, profile_url: serverProfileUrl });
 
+      // 3. Immediately update local profile state so the profile page updates instantly!
       setProfile((previousProfile) => ({
         ...(previousProfile || {}),
         photoURL: serverProfileUrl,
