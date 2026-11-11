@@ -581,17 +581,7 @@ function Login({ onBack }) {
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: "select_account" });
 
-      // Detect if user is on a mobile device/browser
-      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-
-      if (isMobile) {
-        // Mobile browsers handle auth far more reliably with redirect than popups
-        const { signInWithRedirect } = await import("firebase/auth");
-        await signInWithRedirect(auth, provider);
-        return; 
-      }
-
-      // Desktop popup behavior
+      // Use signInWithPopup universally; modern mobile browsers support it cleanly when triggered directly by user tap
       const result = await signInWithPopup(auth, provider);
       const user = result.user;
 
@@ -614,8 +604,8 @@ function Login({ onBack }) {
       console.error("Google login error:", error);
       if (error.code === "auth/popup-closed-by-user") {
         showMessage("Google sign-in was cancelled.");
-      } else if (error.code === "auth/popup-blocked") {
-        showMessage("Your browser blocked the popup. Please try again.");
+      } else if (error.code === "auth/popup-blocked" || error.code === "auth/cancelled-popup-request") {
+        showMessage("Pop-up blocked by mobile browser. Please allow pop-ups for Vezlivo.");
       } else {
         showMessage(error.message || "Google sign-in failed.");
       }
