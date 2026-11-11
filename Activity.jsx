@@ -28,13 +28,13 @@ export default function Activity({ onBack }) {
   const [user, setUser] = useState(null);
   const [activities, setActivities] = useState([]);
   const [conversations, setConversations] = useState([]);
-  const [activeFilter, setActiveFilter] = useState("all");
+  const [activeFilter, setActiveFilter] = useState("likes"); // Default strictly to likes, no "all" mixing
   const [activeChatPartner, setActiveChatPartner] = useState(null);
-  const [messages, setMessages] = useState([]);
+  const [messages, setMessages] = useState("");
   const [replyText, setReplyText] = useState("");
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
-  const [showInboxNotice, setShowInboxNotice] = useState(false);
+  const [showInboxView, setShowInboxView] = useState(false); // Isolated DM view toggle
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, setUser);
@@ -117,15 +117,17 @@ export default function Activity({ onBack }) {
     }
   };
 
+  // Strictly filter items per tab so likes never mix with comments or follows
   const filteredActivities = activities.filter((act) => {
     if (activeFilter === "likes") return act.type === "like";
     if (activeFilter === "comments") return act.type === "comment";
     if (activeFilter === "follows") return act.type === "follow";
-    return true;
+    return false;
   });
 
   const unreadCount = conversations.filter((c) => !c.read && c.sender_id !== user?.uid).length;
 
+  // 1. CHAT CONVERSATION VIEW
   if (activeChatPartner) {
     return (
       <div style={styles.page}>
@@ -137,7 +139,7 @@ export default function Activity({ onBack }) {
 
         <div style={styles.chatContainer}>
           <div style={styles.messageList}>
-            {messages.length === 0 ? (
+            {!messages || messages.length === 0 ? (
               <div style={styles.centerChat}>
                 <p style={{ color: "#a1a1aa", fontSize: "14px" }}>No messages yet. Send a greeting! 👋</p>
               </div>
@@ -176,85 +178,91 @@ export default function Activity({ onBack }) {
     );
   }
 
+  // 2. ISOLATED DIRECT MESSAGES INBOX VIEW (Separated from activity)
+  if (showInboxView) {
+    return (
+      <div style={styles.page}>
+        <header style={styles.header}>
+          <button type="button" onClick={() => setShowInboxView(false)} style={styles.backButton}>‹</button>
+          <h1 style={styles.title}>Direct Messages</h1>
+          <div style={styles.headerSpacer} />
+        </header>
+        <main style={styles.content}>
+          {conversations.length === 0 ? (
+            <div style={styles.emptyCard}>
+              <div style={styles.emptyGlowIcon}>📬</div>
+              <h2 style={styles.emptyTitle}>No messages yet</h2>
+              <p style={styles.emptySub}>Visit any user profile and tap message to start chatting privately.</p>
+            </div>
+          ) : (
+            <div style={styles.list}>
+              {conversations.map((conv) => (
+                <div
+                  key={conv.partner_id}
+                  onClick={() => setActiveChatPartner({ id: conv.partner_id, name: `User ${conv.partner_id.substring(0, 6)}` })}
+                  style={styles.row}
+                >
+                  <div style={styles.body}>
+                    <div style={styles.message}>User {conv.partner_id.substring(0, 6)}</div>
+                    <div style={styles.comment}>{conv.text}</div>
+                    <div style={styles.time}>{timeAgo(conv.created_at)}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </main>
+      </div>
+    );
+  }
+
+  // 3. MAIN ACTIVITY SCREEN (Isolated Tabs for Likes, Comments, Follows with NO DM banner)
   return (
     <div style={styles.page}>
       <header style={styles.header}>
         <button type="button" onClick={onBack} style={styles.backButton}>‹</button>
         <h1 style={styles.title}>Activity</h1>
-        <div style={styles.headerSpacer} />
+        {/* Isolated DM Button on top right */}
+        <button type="button" onClick={() => setShowInboxView(true)} style={styles.dmHeaderBtn}>
+          💬 {unreadCount > 0 && <span style={styles.headerBadge}>{unreadCount}</span>}
+        </button>
       </header>
 
       <main style={styles.content}>
-        {/* 🌟 VIBRANT DIRECT MESSAGES BANNER */}
-        <div
-          onClick={() => {
-            if (conversations.length > 0) {
-              setActiveChatPartner({
-                id: conversations[0].partner_id,
-                name: `User ${conversations[0].partner_id.substring(0, 6)}`,
-              });
-            } else {
-              setShowInboxNotice(true);
-            }
-          }}
-          style={styles.inboxBanner}
-        >
-          <div style={styles.inboxBannerLeft}>
-            <div style={styles.inboxIconBox}>⚡</div>
-            <div>
-              <strong style={styles.inboxTitle}>Direct Messages</strong>
-              <span style={styles.inboxSub}>
-                {conversations.length > 0 ? conversations[0].text : "Tap to open your inbox"}
-              </span>
-            </div>
-          </div>
-          {unreadCount > 0 ? (
-            <span style={styles.badge}>{unreadCount} NEW</span>
-          ) : (
-            <span style={styles.arrowIcon}>›</span>
-          )}
-        </div>
-
-        {/* IN-APP NOTICE (REPLACES BROWSER ALERT) */}
-        {showInboxNotice && (
-          <div style={styles.noticeCard}>
-            <div style={{ fontSize: "22px" }}>📬</div>
-            <div>
-              <strong style={{ color: "#fff", display: "block", fontSize: "13px" }}>No active chats yet</strong>
-              <span style={{ color: "#a1a1aa", fontSize: "11px" }}>Visit any profile and tap message to start a conversation!</span>
-            </div>
-            <button type="button" onClick={() => setShowInboxNotice(false)} style={styles.noticeCloseBtn}>×</button>
-          </div>
-        )}
-
-        {/* 🎨 CATEGORY FILTER PILLS */}
+        {/* 🎨 CATEGORY TABS: Likes, Comments, Follows (Strictly separated) */}
         <div style={styles.filterRow}>
-          {["all", "likes", "comments", "follows"].map((filter) => (
+          {[
+            { key: "likes", label: "Likes" },
+            { key: "comments", label: "Comments" },
+            { key: "follows", label: "Follows" },
+          ].map((tab) => (
             <button
-              key={filter}
+              key={tab.key}
               type="button"
-              onClick={() => setActiveFilter(filter)}
+              onClick={() => setActiveFilter(tab.key)}
               style={{
                 ...styles.filterPill,
-                ...(activeFilter === filter ? styles.activeFilterPill : {}),
+                ...(activeFilter === tab.key ? styles.activeFilterPill : {}),
               }}
             >
-              {filter.charAt(0).toUpperCase() + filter.slice(1)}
+              {tab.label}
             </button>
           ))}
         </div>
 
-        {/* ACTIVITY LIST */}
+        {/* ACTIVITY LIST FOR CURRENT TAB */}
         {loading ? (
           <div style={styles.center}>
-            <span>Loading notifications...</span>
+            <span>Loading {activeFilter}s...</span>
           </div>
         ) : filteredActivities.length === 0 ? (
           <div style={styles.emptyCard}>
-            <div style={styles.emptyGlowIcon}>🔔</div>
-            <h2 style={styles.emptyTitle}>No {activeFilter !== "all" ? activeFilter : "activity"} yet</h2>
+            <div style={styles.emptyGlowIcon}>
+              {activeFilter === "likes" ? "❤️" : activeFilter === "comments" ? "💬" : "👤"}
+            </div>
+            <h2 style={styles.emptyTitle}>No {activeFilter} yet</h2>
             <p style={styles.emptySub}>
-              When people interact with your content, their likes, comments, and follows will light up here.
+              When users {activeFilter} your content or account, they will show up right here.
             </p>
           </div>
         ) : (
@@ -345,6 +353,24 @@ const styles = {
     fontSize: "30px",
     cursor: "pointer",
   },
+  dmHeaderBtn: {
+    background: "#18181b",
+    border: "1px solid #27272a",
+    borderRadius: "20px",
+    padding: "6px 12px",
+    color: "#fff",
+    fontSize: "14px",
+    cursor: "pointer",
+    position: "relative",
+  },
+  headerBadge: {
+    background: "#ef4444",
+    color: "#fff",
+    fontSize: "10px",
+    padding: "2px 6px",
+    borderRadius: "10px",
+    marginLeft: "4px",
+  },
   title: {
     margin: 0,
     fontSize: "18px",
@@ -352,74 +378,19 @@ const styles = {
     letterSpacing: "-0.3px",
   },
   headerSpacer: { width: "36px" },
-  content: { width: "100%", maxWidth: "600px", margin: "0 auto", padding: "12px 14px" },
-  inboxBanner: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    padding: "14px 16px",
-    background: "linear-gradient(135deg, #18181b 0%, #27272a 100%)",
-    border: "1px solid rgba(255, 255, 255, 0.1)",
-    borderRadius: "16px",
-    boxShadow: "0 8px 24px rgba(0, 0, 0, 0.4)",
-    cursor: "pointer",
-    marginBottom: "16px",
-  },
-  inboxBannerLeft: { display: "flex", alignItems: "center", gap: "14px" },
-  inboxIconBox: {
-    width: "44px",
-    height: "44px",
-    borderRadius: "12px",
-    background: "linear-gradient(135deg, #6366f1, #a855f7)",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontSize: "20px",
-    boxShadow: "0 4px 14px rgba(168, 85, 247, 0.4)",
-  },
-  inboxTitle: { display: "block", fontSize: "15px", fontWeight: "700", color: "#ffffff" },
-  inboxSub: { fontSize: "12px", color: "#a1a1aa" },
-  badge: {
-    background: "linear-gradient(135deg, #ef4444, #f43f5e)",
-    color: "#ffffff",
-    fontSize: "11px",
-    fontWeight: "800",
-    padding: "4px 10px",
-    borderRadius: "20px",
-    boxShadow: "0 2px 10px rgba(239, 68, 68, 0.5)",
-  },
-  arrowIcon: { fontSize: "22px", color: "#71717a" },
-  noticeCard: {
-    display: "flex",
-    alignItems: "center",
-    gap: "12px",
-    padding: "12px 16px",
-    background: "#1e1b4b",
-    border: "1px solid #6366f1",
-    borderRadius: "14px",
-    marginBottom: "16px",
-    position: "relative",
-  },
-  noticeCloseBtn: {
-    position: "absolute",
-    right: "12px",
-    top: "8px",
-    background: "none",
-    border: "none",
-    color: "#a1a1aa",
-    fontSize: "18px",
-    cursor: "pointer",
-  },
+  content: { width: "100%", maxWidth: "600px", margin: "0 auto", padding: "16px 14px" },
   filterRow: { display: "flex", gap: "8px", marginBottom: "16px", overflowX: "auto" },
   filterPill: {
-    padding: "8px 16px",
-    borderRadius: "20px",
+    flex: 1,
+    padding: "10px 16px",
+    borderRadius: "12px",
     border: "1px solid #27272a",
     background: "#18181b",
     color: "#a1a1aa",
-    fontSize: "13px",
+    fontSize: "14px",
     fontWeight: "600",
     cursor: "pointer",
+    textAlign: "center",
   },
   activeFilterPill: {
     background: "#ffffff",

@@ -419,7 +419,7 @@ export default {
       }
     }
 
-    // GET ACTIVITIES ROUTE
+   // GET ACTIVITIES ROUTE
     if (
       ["/activities", "/api/activities"].includes(url.pathname) &&
       request.method === "GET"
@@ -440,6 +440,7 @@ export default {
             type VARCHAR(50) NOT NULL,
             actor_id TEXT,
             actor_name TEXT,
+            actor_avatar TEXT,
             comment_text TEXT,
             post_id TEXT,
             post_thumbnail TEXT,
@@ -447,12 +448,20 @@ export default {
             created_at BIGINT
           )
         `;
+        await sql`ALTER TABLE activities ADD COLUMN IF NOT EXISTS actor_avatar TEXT`;
+        await sql`ALTER TABLE activities ADD COLUMN IF NOT EXISTS actor_name TEXT`;
+        await sql`ALTER TABLE activities ADD COLUMN IF NOT EXISTS post_thumbnail TEXT`;
 
-       const activities = await sql`
-          SELECT id, user_uid, type, actor_id, actor_name, actor_avatar, comment_text, post_id, post_thumbnail, read, created_at
-          FROM activities
-          WHERE user_uid = ${uid}
-          ORDER BY created_at DESC
+        // Fetch activities and join with users table to guarantee live profile pictures
+        const activities = await sql`
+          SELECT a.id, a.user_uid, a.type, a.actor_id, 
+                 COALESCE(u.display_name, u.username, a.actor_name, 'Someone') AS actor_name,
+                 COALESCE(u.profile_url, u.photo_url, a.actor_avatar, '') AS actor_avatar,
+                 a.comment_text, a.post_id, a.post_thumbnail, a.read, a.created_at
+          FROM activities a
+          LEFT JOIN users u ON a.actor_id = u.uid
+          WHERE a.user_uid = ${uid}
+          ORDER BY a.created_at DESC
           LIMIT 50
         `;
 
