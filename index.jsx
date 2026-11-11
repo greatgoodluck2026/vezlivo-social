@@ -659,13 +659,6 @@ function App() {
 
           if (currentUser) {
             localStorage.setItem("vezlivo_session_active", "true");
-            setPage(
-              (currentPage) =>
-                currentPage ===
-                "login"
-                  ? "home"
-                  : currentPage
-            );
           } else {
             localStorage.removeItem("vezlivo_session_active");
           }
