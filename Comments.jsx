@@ -175,6 +175,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           )}
         </div>
 
+        {/* INPUT AREA PERMANENTLY FIXED AT THE BOTTOM */}
         <div style={styles.inputArea}>
           <input
             type="text"
@@ -185,7 +186,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
                 sendComment();
               }
             }}
-            placeholder="Write a comment..."
+            placeholder="Add a comment..."
             maxLength={500}
             style={styles.input}
           />
@@ -199,7 +200,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
               ...(sending || !commentText.trim() ? styles.disabledButton : {}),
             }}
           >
-            {sending ? "..." : "Send"}
+            {sending ? "..." : "Post"}
           </button>
         </div>
       </div>
@@ -214,7 +215,7 @@ const styles = {
     left: 0,
     right: 0,
     bottom: 0,
-    background: "rgba(0, 0, 0, 0.7)",
+    background: "rgba(0, 0, 0, 0.55)",
     display: "flex",
     alignItems: "flex-end",
     justifyContent: "center",
@@ -225,66 +226,69 @@ const styles = {
     maxWidth: "600px",
     height: "75vh",
     maxHeight: "80vh",
-    background: "#09090b", // Dark theme background matching app
-    color: "#ffffff",
-    borderRadius: "22px 22px 0 0",
+    background: "#ffffff", // Standard professional white background
+    color: "#000000",
+    borderRadius: "24px 24px 0 0",
     display: "flex",
     flexDirection: "column",
     position: "relative",
     overflow: "hidden",
-    boxShadow: "0 -10px 40px rgba(0, 0, 0, 0.5)",
-    borderTop: "1px solid #27272a",
+    boxShadow: "0 -10px 40px rgba(0, 0, 0, 0.25)",
   },
   header: {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
-    padding: "16px 18px",
-    borderBottom: "1px solid #27272a",
+    padding: "16px 20px",
+    borderBottom: "1px solid #f0f0f0",
+    background: "#ffffff",
+    zIndex: 2,
   },
   title: {
     margin: 0,
-    fontSize: "18px",
+    fontSize: "17px",
     fontWeight: "800",
-    color: "#ffffff",
+    color: "#111111",
   },
   commentCount: {
     display: "block",
-    marginTop: "3px",
-    color: "#a1a1aa",
+    marginTop: "2px",
+    color: "#888888",
     fontSize: "12px",
   },
   closeButton: {
-    width: "36px",
-    height: "36px",
+    width: "34px",
+    height: "34px",
     border: "none",
     borderRadius: "50%",
-    background: "#27272a",
-    color: "#ffffff",
+    background: "#f1f1f4",
+    color: "#333333",
     fontSize: "22px",
     lineHeight: "1",
     cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
   },
   commentsArea: {
     flex: 1,
     overflowY: "auto",
-    padding: "14px 18px",
-    paddingBottom: "80px",
+    padding: "16px 20px",
+    paddingBottom: "90px", // Leaves space so comments don't hide behind the input bar
   },
   commentItem: {
     display: "flex",
     alignItems: "flex-start",
     gap: "12px",
-    marginBottom: "16px",
+    marginBottom: "18px",
   },
   avatar: {
     width: "40px",
     height: "40px",
     borderRadius: "50%",
     objectFit: "cover",
-    background: "#27272a",
+    background: "#eeeeee",
     flexShrink: 0,
-    border: "1px solid #3f3f46",
   },
   commentBody: {
     flex: 1,
@@ -293,28 +297,28 @@ const styles = {
   commentTop: {
     display: "flex",
     alignItems: "center",
-    gap: "7px",
+    gap: "8px",
     flexWrap: "wrap",
   },
   name: {
     fontSize: "13px",
-    fontWeight: "600",
-    color: "#ffffff",
+    fontWeight: "700",
+    color: "#111111",
   },
   username: {
     fontSize: "12px",
-    color: "#71717a",
+    color: "#888888",
   },
   commentText: {
-    margin: "4px 0 2px",
+    margin: "4px 0 3px",
     fontSize: "14px",
     lineHeight: "1.4",
-    color: "#d4d4d8",
+    color: "#222222",
     wordBreak: "break-word",
   },
   time: {
     fontSize: "11px",
-    color: "#71717a",
+    color: "#999999",
   },
   inputArea: {
     position: "absolute",
@@ -322,37 +326,39 @@ const styles = {
     left: 0,
     right: 0,
     display: "flex",
+    alignItems: "center",
     gap: "10px",
     padding: "12px 16px",
-    borderTop: "1px solid #27272a",
-    background: "#18181b",
+    borderTop: "1px solid #f0f0f0",
+    background: "#ffffff",
     zIndex: 10,
   },
   input: {
     flex: 1,
     minWidth: 0,
-    height: "44px",
-    border: "1px solid #3f3f46",
-    borderRadius: "22px",
+    height: "46px",
+    border: "1px solid #e2e2e8",
+    borderRadius: "24px",
     outline: "none",
-    padding: "0 16px",
+    padding: "0 18px",
     fontSize: "14px",
-    background: "#09090b",
-    color: "#ffffff",
+    background: "#f8f8f0",
+    color: "#111111",
     boxSizing: "border-box",
   },
   sendButton: {
-    height: "44px",
+    height: "46px",
     border: "none",
-    borderRadius: "22px",
-    padding: "0 20px",
-    background: "#6366f1",
+    borderRadius: "24px",
+    padding: "0 22px",
+    background: "#fe2c55", // TikTok style bright accent for commenting
     color: "#ffffff",
     fontWeight: "700",
+    fontSize: "14px",
     cursor: "pointer",
   },
   disabledButton: {
-    opacity: 0.5,
+    opacity: 0.4,
     cursor: "not-allowed",
   },
   centerMessage: {
@@ -362,15 +368,15 @@ const styles = {
     alignItems: "center",
     justifyContent: "center",
     gap: "8px",
-    color: "#a1a1aa",
+    color: "#666666",
     textAlign: "center",
   },
   emptyIcon: {
-    fontSize: "40px",
-    marginBottom: "5px",
+    fontSize: "42px",
+    marginBottom: "4px",
   },
   emptyText: {
-    color: "#71717a",
+    color: "#888888",
     fontSize: "13px",
   },
 };
