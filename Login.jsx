@@ -573,7 +573,7 @@ function Login({ onBack }) {
 
     handleRedirectResult();
   }, []);
- const handleGoogleLogin = async () => {
+const handleGoogleLogin = async () => {
     clearMessage();
     setLoading(true);
 
@@ -581,38 +581,11 @@ function Login({ onBack }) {
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: "select_account" });
 
-      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
-
-      if (isMobile) {
-        const { signInWithRedirect } = await import("firebase/auth");
-        await signInWithRedirect(auth, provider);
-        return;
-      }
-
-      const result = await signInWithPopup(auth, provider);
-      const user = result.user;
-
-      if (!user) {
-        throw new Error("No user returned from Google sign-in.");
-      }
-
-      localStorage.setItem("vezlivo_session_active", "true");
-
-      const snapshot = await get(ref(database, `users/${user.uid}`));
-      const existing = snapshot.exists() ? snapshot.val() : {};
-
-      if (snapshot.exists() && existing.onboardingComplete === true) {
-        showMessage("Login successful.", "success");
-        setTimeout(() => {
-          onBack?.();
-        }, 300);
-      } else {
-        await beginOnboarding(user);
-      }
+      const { signInWithRedirect } = await import("firebase/auth");
+      await signInWithRedirect(auth, provider);
     } catch (error) {
       console.error("Google login error:", error);
       showMessage(error.message || "Google sign-in failed.");
-    } finally {
       setLoading(false);
     }
   };
