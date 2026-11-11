@@ -581,13 +581,15 @@ function Login({ onBack }) {
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: "select_account" });
 
-      // Use signInWithPopup universally; modern mobile browsers support it cleanly when triggered directly by user tap
       const result = await signInWithPopup(auth, provider);
       const user = result.user;
 
       if (!user) {
         throw new Error("No user returned from Google sign-in.");
       }
+
+      // CRITICAL FIX: Lock in the session flag instantly so mobile never bounces you
+      localStorage.setItem("vezlivo_logged_in", "true");
 
       const snapshot = await get(ref(database, `users/${user.uid}`));
       const existing = snapshot.exists() ? snapshot.val() : {};
