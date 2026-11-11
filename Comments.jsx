@@ -17,7 +17,6 @@ export default function Comments({ postId, postOwnerId, onClose }) {
     return () => unsubscribe();
   }, []);
 
-  // Fetch comments from Cloudflare Worker / Neon PostgreSQL backend
   useEffect(() => {
     if (!postId) {
       setComments([]);
@@ -80,7 +79,6 @@ export default function Comments({ postId, postOwnerId, onClose }) {
 
       if (data.success) {
         setCommentText("");
-        // Optimistically update UI
         setComments((prev) => [
           ...prev,
           {
@@ -125,6 +123,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
   return (
     <div style={styles.overlay}>
       <div style={styles.panel}>
+        {/* Header */}
         <div style={styles.header}>
           <div>
             <h2 style={styles.title}>Comments</h2>
@@ -132,12 +131,12 @@ export default function Comments({ postId, postOwnerId, onClose }) {
               {comments.length} {comments.length === 1 ? "comment" : "comments"}
             </span>
           </div>
-
           <button type="button" onClick={onClose} style={styles.closeButton}>
             ×
           </button>
         </div>
 
+        {/* Scrollable Comments List */}
         <div style={styles.commentsArea}>
           {loading ? (
             <div style={styles.centerMessage}>Loading comments...</div>
@@ -155,7 +154,6 @@ export default function Comments({ postId, postOwnerId, onClose }) {
                   alt=""
                   style={styles.avatar}
                 />
-
                 <div style={styles.commentBody}>
                   <div style={styles.commentTop}>
                     <strong style={styles.name}>
@@ -165,9 +163,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
                       @{comment.username || "user"}
                     </span>
                   </div>
-
                   <p style={styles.commentText}>{comment.text}</p>
-
                   <span style={styles.time}>{formatTime(comment.createdAt || comment.created_at)}</span>
                 </div>
               </div>
@@ -175,7 +171,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           )}
         </div>
 
-        {/* INPUT AREA PERMANENTLY FIXED AT THE BOTTOM */}
+        {/* Input Bar (Fixed inside flex layout so it never gets cut off) */}
         <div style={styles.inputArea}>
           <input
             type="text"
@@ -190,7 +186,6 @@ export default function Comments({ postId, postOwnerId, onClose }) {
             maxLength={500}
             style={styles.input}
           />
-
           <button
             type="button"
             onClick={sendComment}
@@ -215,54 +210,53 @@ const styles = {
     left: 0,
     right: 0,
     bottom: 0,
-    background: "rgba(0, 0, 0, 0.55)",
+    background: "rgba(0, 0, 0, 0.6)",
     display: "flex",
     alignItems: "flex-end",
     justifyContent: "center",
-    zIndex: 9999,
+    zIndex: 99999,
   },
   panel: {
     width: "100%",
     maxWidth: "600px",
     height: "75vh",
     maxHeight: "80vh",
-    background: "#ffffff", // Standard professional white background
+    background: "#ffffff",
     color: "#000000",
     borderRadius: "24px 24px 0 0",
     display: "flex",
     flexDirection: "column",
-    position: "relative",
+    boxShadow: "0 -10px 40px rgba(0, 0, 0, 0.3)",
     overflow: "hidden",
-    boxShadow: "0 -10px 40px rgba(0, 0, 0, 0.25)",
   },
   header: {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
     padding: "16px 20px",
-    borderBottom: "1px solid #f0f0f0",
+    borderBottom: "1px solid #eee",
     background: "#ffffff",
-    zIndex: 2,
+    flexShrink: 0,
   },
   title: {
     margin: 0,
     fontSize: "17px",
     fontWeight: "800",
-    color: "#111111",
+    color: "#111",
   },
   commentCount: {
     display: "block",
     marginTop: "2px",
-    color: "#888888",
+    color: "#888",
     fontSize: "12px",
   },
   closeButton: {
-    width: "34px",
-    height: "34px",
+    width: "36px",
+    height: "36px",
     border: "none",
     borderRadius: "50%",
     background: "#f1f1f4",
-    color: "#333333",
+    color: "#333",
     fontSize: "22px",
     lineHeight: "1",
     cursor: "pointer",
@@ -274,7 +268,7 @@ const styles = {
     flex: 1,
     overflowY: "auto",
     padding: "16px 20px",
-    paddingBottom: "90px", // Leaves space so comments don't hide behind the input bar
+    background: "#ffffff",
   },
   commentItem: {
     display: "flex",
@@ -287,7 +281,7 @@ const styles = {
     height: "40px",
     borderRadius: "50%",
     objectFit: "cover",
-    background: "#eeeeee",
+    background: "#eee",
     flexShrink: 0,
   },
   commentBody: {
@@ -303,47 +297,43 @@ const styles = {
   name: {
     fontSize: "13px",
     fontWeight: "700",
-    color: "#111111",
+    color: "#111",
   },
   username: {
     fontSize: "12px",
-    color: "#888888",
+    color: "#888",
   },
   commentText: {
     margin: "4px 0 3px",
     fontSize: "14px",
     lineHeight: "1.4",
-    color: "#222222",
+    color: "#222",
     wordBreak: "break-word",
   },
   time: {
     fontSize: "11px",
-    color: "#999999",
+    color: "#999",
   },
   inputArea: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
     display: "flex",
     alignItems: "center",
     gap: "10px",
     padding: "12px 16px",
-    borderTop: "1px solid #f0f0f0",
+    borderTop: "1px solid #eee",
     background: "#ffffff",
-    zIndex: 10,
+    flexShrink: 0, // Keeps input permanently locked at the bottom without absolute clipping
   },
   input: {
     flex: 1,
     minWidth: 0,
     height: "46px",
-    border: "1px solid #e2e2e8",
+    border: "1px solid #ddd",
     borderRadius: "24px",
     outline: "none",
     padding: "0 18px",
     fontSize: "14px",
-    background: "#f8f8f0",
-    color: "#111111",
+    background: "#f9f9f9",
+    color: "#111",
     boxSizing: "border-box",
   },
   sendButton: {
@@ -351,11 +341,12 @@ const styles = {
     border: "none",
     borderRadius: "24px",
     padding: "0 22px",
-    background: "#fe2c55", // TikTok style bright accent for commenting
+    background: "#fe2c55",
     color: "#ffffff",
     fontWeight: "700",
     fontSize: "14px",
     cursor: "pointer",
+    flexShrink: 0,
   },
   disabledButton: {
     opacity: 0.4,
@@ -368,7 +359,7 @@ const styles = {
     alignItems: "center",
     justifyContent: "center",
     gap: "8px",
-    color: "#666666",
+    color: "#666",
     textAlign: "center",
   },
   emptyIcon: {
@@ -376,7 +367,7 @@ const styles = {
     marginBottom: "4px",
   },
   emptyText: {
-    color: "#888888",
+    color: "#888",
     fontSize: "13px",
   },
 };
