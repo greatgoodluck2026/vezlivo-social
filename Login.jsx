@@ -544,13 +544,54 @@ function Login({ onBack }) {
       setLoading(false);
     }
   };
+// Catch mobile Google Auth redirect result when the page reloads
+  useEffect(() => {
+    async function handleRedirectResult() {
+      try {
+        const { getRedirectResult } = await import("firebase/auth");
+        const result = await getRedirectResult(auth);
+        
+        if (result && result.user) {
+          const user = result.user;
+          const snapshot = await get(ref(database, `users/${user.uid}`));
+          const existing = snapshot.exists() ? snapshot.val() : {};
 
+          if (snapshot.exists() && existing.onboardingComplete === true) {
+            showMessage("Login successful.", "success");
+            setTimeout(() => {
+              onBack?.();
+            }, 300);
+          } else {
+            await beginOnboarding(user);
+          }
+        }
+      } catch (error) {
+        console.error("Redirect login error:", error);
+        showMessage(error.message || "Google sign-in failed.");
+      }
+    }
+
+    handleRedirectResult();
+  }, []);
  const handleGoogleLogin = async () => {
     clearMessage();
     setLoading(true);
 
     try {
       const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({ prompt: "select_account" });
+
+      // Detect if user is on a mobile device/browser
+      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+
+      if (isMobile) {
+        // Mobile browsers handle auth far more reliably with redirect than popups
+        const { signInWithRedirect } = await import("firebase/auth");
+        await signInWithRedirect(auth, provider);
+        return; 
+      }
+
+      // Desktop popup behavior
       const result = await signInWithPopup(auth, provider);
       const user = result.user;
 
@@ -558,7 +599,6 @@ function Login({ onBack }) {
         throw new Error("No user returned from Google sign-in.");
       }
 
-      // Check if user already exists and completed onboarding in database
       const snapshot = await get(ref(database, `users/${user.uid}`));
       const existing = snapshot.exists() ? snapshot.val() : {};
 
@@ -575,7 +615,7 @@ function Login({ onBack }) {
       if (error.code === "auth/popup-closed-by-user") {
         showMessage("Google sign-in was cancelled.");
       } else if (error.code === "auth/popup-blocked") {
-        showMessage("Your browser blocked the Google sign-in window.");
+        showMessage("Your browser blocked the popup. Please try again.");
       } else {
         showMessage(error.message || "Google sign-in failed.");
       }
