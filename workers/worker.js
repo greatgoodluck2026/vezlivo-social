@@ -419,6 +419,48 @@ export default {
       }
     }
 
+    // GET ACTIVITIES ROUTE
+    if (
+      ["/activities", "/api/activities"].includes(url.pathname) &&
+      request.method === "GET"
+    ) {
+      try {
+        const uid = url.searchParams.get("uid");
+        if (!uid) {
+          return json({ success: false, error: "Missing uid parameter" }, 400);
+        }
+
+        const { neon } = await import("@neondatabase/serverless");
+        const sql = neon(env.DATABASE_URL);
+
+        await sql`
+          CREATE TABLE IF NOT EXISTS activities (
+            id SERIAL PRIMARY KEY,
+            user_uid TEXT NOT NULL,
+            type VARCHAR(50) NOT NULL,
+            actor_id TEXT,
+            actor_name TEXT,
+            comment_text TEXT,
+            post_id TEXT,
+            post_thumbnail TEXT,
+            read BOOLEAN DEFAULT FALSE,
+            created_at BIGINT
+          )
+        `;
+
+       const activities = await sql`
+          SELECT id, user_uid, type, actor_id, actor_name, actor_avatar, comment_text, post_id, post_thumbnail, read, created_at
+          FROM activities
+          WHERE user_uid = ${uid}
+          ORDER BY created_at DESC
+          LIMIT 50
+        `;
+
+        return json({ success: true, activities });
+      } catch (err) {
+        return json({ success: false, error: err.message }, 500);
+      }
+    }
    // GET USER PROFILE ROUTE (Auto-creates user row if missing to prevent 404)
     const userProfileMatch = url.pathname.match(/^\/api\/users\/([^/]+)$/) || url.pathname.match(/^\/users\/([^/]+)$/);
     if (userProfileMatch && request.method === "GET") {
@@ -793,13 +835,14 @@ export default {
             WHERE id::text = ${postId}
           `;
 
-          // Automatically record like activity with correct Mux thumbnail for the video owner in Neon PostgreSQL
+        // Automatically record like activity with actor avatar and post thumbnail in Neon PostgreSQL
           const postRes = await sql`SELECT user_id, thumbnail_url, video_url, mux_playback_id FROM posts WHERE id::text = ${postId}`;
           if (postRes.length > 0) {
             const ownerId = postRes[0].user_id;
             if (ownerId && ownerId !== userId) {
-              const userRes = await sql`SELECT display_name, username FROM users WHERE uid = ${userId}`;
+              const userRes = await sql`SELECT display_name, username, profile_url, photo_url FROM users WHERE uid = ${userId}`;
               const actorName = userRes[0]?.display_name || userRes[0]?.username || "Someone";
+              const actorAvatar = userRes[0]?.profile_url || userRes[0]?.photo_url || "";
 
               const playbackId = postRes[0].mux_playback_id;
               const thumbnail = playbackId 
@@ -813,6 +856,7 @@ export default {
                   type VARCHAR(50) NOT NULL,
                   actor_id TEXT,
                   actor_name TEXT,
+                  actor_avatar TEXT,
                   comment_text TEXT,
                   post_id TEXT,
                   post_thumbnail TEXT,
@@ -821,8 +865,8 @@ export default {
                 )
               `;
               await sql`
-                INSERT INTO activities (user_uid, type, actor_id, actor_name, post_id, post_thumbnail, read, created_at)
-                VALUES (${ownerId}, 'like', ${userId}, ${actorName}, ${postId}, ${thumbnail}, FALSE, ${Date.now()})
+                INSERT INTO activities (user_uid, type, actor_id, actor_name, actor_avatar, post_id, post_thumbnail, read, created_at)
+                VALUES (${ownerId}, 'like', ${userId}, ${actorName}, ${actorAvatar}, ${postId}, ${thumbnail}, FALSE, ${Date.now()})
               `;
             }
           }

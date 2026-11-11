@@ -24,40 +24,6 @@ function timeAgo(timestamp) {
   return new Date(value).toLocaleDateString();
 }
 
-function activityText(item) {
-  const actor = item.actorName || "Someone";
-
-  switch (item.type) {
-    case "like":
-      return `${actor} liked your video`;
-    case "comment":
-      return `${actor} commented on your video`;
-    case "follow":
-      return `${actor} started following you`;
-    case "share":
-      return `${actor} shared your video`;
-    case "favorite":
-      return `${actor} saved your video`;
-    default:
-      return `${actor} interacted with your account`;
-  }
-}
-
-function activityIcon(type) {
-  switch (type) {
-    case "like":
-      return { symbol: "❤️", bg: "linear-gradient(135deg, #ff4b2b, #ff416c)", glow: "rgba(255, 65, 108, 0.4)" };
-    case "comment":
-      return { symbol: "💬", bg: "linear-gradient(135deg, #00c6ff, #0072ff)", glow: "rgba(0, 114, 255, 0.4)" };
-    case "follow":
-      return { symbol: "👤", bg: "linear-gradient(135deg, #8a2be2, #4a00e0)", glow: "rgba(138, 43, 226, 0.4)" };
-    case "share":
-      return { symbol: "🚀", bg: "linear-gradient(135deg, #f7971e, #ffd200)", glow: "rgba(247, 151, 30, 0.4)" };
-    default:
-      return { symbol: "🔔", bg: "linear-gradient(135deg, #6366f1, #8b5cf6)", glow: "rgba(99, 102, 241, 0.4)" };
-  }
-}
-
 export default function Activity({ onBack }) {
   const [user, setUser] = useState(null);
   const [activities, setActivities] = useState([]);
@@ -294,16 +260,23 @@ export default function Activity({ onBack }) {
         ) : (
           <div style={styles.list}>
             {filteredActivities.map((item) => {
-              const iconInfo = activityIcon(item.type);
-              const thumbnailSrc = item.postThumbnail;
+              const thumbnailSrc = item.post_thumbnail || item.postThumbnail;
+              const avatarSrc = item.actor_avatar || item.actorAvatar;
+              const actor = item.actor_name || item.actorName || "Someone";
+
+              let actionText = "interacted with your account";
+              if (item.type === "like") actionText = "liked your video.";
+              if (item.type === "comment") actionText = "commented on your video.";
+              if (item.type === "follow") actionText = "started following you.";
 
               return (
                 <div
                   key={item.id}
                   onClick={() => {
-                    if (item.postId) {
+                    const targetPostId = item.postId || item.post_id;
+                    if (targetPostId) {
                       window.dispatchEvent(
-                        new CustomEvent("vezlivo:open-post", { detail: { postId: item.postId } })
+                        new CustomEvent("vezlivo:open-post", { detail: { postId: targetPostId } })
                       );
                     }
                   }}
@@ -312,18 +285,25 @@ export default function Activity({ onBack }) {
                     ...(item.read === false ? styles.unread : {}),
                   }}
                 >
-                  <div style={{ ...styles.iconBox, background: iconInfo.bg, boxShadow: `0 4px 12px ${iconInfo.glow}` }}>
-                    {iconInfo.symbol}
-                  </div>
+                  {/* ACTUAL USER PROFILE AVATAR */}
+                  <img
+                    src={avatarSrc || "/default-avatar.png"}
+                    alt={actor}
+                    style={styles.actorAvatar}
+                    onError={(e) => { e.target.src = "/default-avatar.png"; }}
+                  />
 
                   <div style={styles.body}>
-                    <div style={styles.message}>{activityText(item)}</div>
+                    <div style={styles.message}>
+                      <span style={{ fontWeight: "700", color: "#fff" }}>{actor}</span> {actionText}
+                    </div>
                     {item.commentText && <div style={styles.comment}>“{item.commentText}”</div>}
-                    <div style={styles.time}>{timeAgo(item.createdAt)}</div>
+                    <div style={styles.time}>{timeAgo(item.createdAt || item.created_at)}</div>
                   </div>
 
+                  {/* VIDEO THUMBNAIL ON THE RIGHT */}
                   {thumbnailSrc && (
-                    <img src={thumbnailSrc} alt="" style={styles.thumbnail} />
+                    <img src={thumbnailSrc} alt="Post Thumbnail" style={styles.thumbnail} />
                   )}
                 </div>
               );
@@ -485,15 +465,13 @@ const styles = {
     cursor: "pointer",
   },
   unread: { background: "#27272a", border: "1px solid #3f3f46" },
-  iconBox: {
-    width: "40px",
-    height: "40px",
+  actorAvatar: {
+    width: "44px",
+    height: "44px",
     borderRadius: "50%",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontSize: "18px",
+    objectFit: "cover",
     flexShrink: 0,
+    border: "1px solid #3f3f46",
   },
   body: { flex: 1, minWidth: 0 },
   message: { fontSize: "14px", fontWeight: "600", color: "#ffffff", lineHeight: 1.3 },
