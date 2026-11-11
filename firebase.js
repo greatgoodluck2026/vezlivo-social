@@ -4,7 +4,7 @@
 // Database and Storage are migrated to the new backend.
 
 import { initializeApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
+import { getAuth, initializeAuth, browserLocalPersistence } from "firebase/auth";
 import { getDatabase } from "firebase/database";
 import { getStorage } from "firebase/storage";
 
@@ -21,7 +21,11 @@ const firebaseConfig = {
 
 const app = initializeApp(firebaseConfig);
 
-const auth = getAuth(app);
+// FORCE LOCAL STORAGE PERSISTENCE FOR MOBILE BROWSERS
+const auth = initializeAuth(app, {
+  persistence: browserLocalPersistence,
+});
+
 const database = getDatabase(app);
 const storage = getStorage(app);
 
