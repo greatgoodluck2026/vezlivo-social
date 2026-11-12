@@ -121,8 +121,8 @@ export default function Comments({ postId, postOwnerId, onClose }) {
   };
 
   return (
-    <div style={styles.overlay}>
-      <div style={styles.panel}>
+    <div style={styles.overlay} onClick={onClose}>
+      <div style={styles.panel} onClick={(e) => e.stopPropagation()}>
         {/* Header */}
         <div style={styles.header}>
           <div>
@@ -171,7 +171,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           )}
         </div>
 
-        {/* Input Bar (Fixed inside flex layout so it never gets cut off) */}
+        {/* Input Bar pinned cleanly inside the fixed panel */}
         <div style={styles.inputArea}>
           <input
             type="text"
@@ -210,33 +210,33 @@ const styles = {
     left: 0,
     right: 0,
     bottom: 0,
-    background: "rgba(0, 0, 0, 0.6)",
+    background: "rgba(0, 0, 0, 0.65)",
     display: "flex",
     alignItems: "flex-end",
     justifyContent: "center",
-    zIndex: 99999,
+    zIndex: 999999,
   },
   panel: {
     width: "100%",
     maxWidth: "600px",
-    height: "75vh",
-    maxHeight: "80vh",
+    height: "70vh",
     background: "#ffffff",
     color: "#000000",
     borderRadius: "24px 24px 0 0",
     display: "flex",
     flexDirection: "column",
-    boxShadow: "0 -10px 40px rgba(0, 0, 0, 0.3)",
-    overflow: "hidden",
+    boxShadow: "0 -10px 40px rgba(0, 0, 0, 0.4)",
+    position: "relative",
   },
   header: {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
     padding: "16px 20px",
-    borderBottom: "1px solid #eee",
+    borderBottom: "1px solid #f0f0f0",
     background: "#ffffff",
-    flexShrink: 0,
+    borderTopLeftRadius: "24px",
+    borderTopRightRadius: "24px",
   },
   title: {
     margin: 0,
@@ -268,6 +268,7 @@ const styles = {
     flex: 1,
     overflowY: "auto",
     padding: "16px 20px",
+    paddingBottom: "80px",
     background: "#ffffff",
   },
   commentItem: {
@@ -315,13 +316,16 @@ const styles = {
     color: "#999",
   },
   inputArea: {
+    position: "absolute",
+    bottom: 0,
+    left: 0,
+    right: 0,
     display: "flex",
     alignItems: "center",
     gap: "10px",
     padding: "12px 16px",
     borderTop: "1px solid #eee",
     background: "#ffffff",
-    flexShrink: 0, // Keeps input permanently locked at the bottom without absolute clipping
   },
   input: {
     flex: 1,
@@ -353,7 +357,7 @@ const styles = {
     cursor: "not-allowed",
   },
   centerMessage: {
-    minHeight: "220px",
+    minHeight: "180px",
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
