@@ -359,12 +359,9 @@ export default function Home({ onNavigate, onCreate, onProfile, onActivity, onDi
     })
   );
 };
-
-  const closeComments = () => {
-    setShowComments(false);
-    setSelectedPost(null);
+const closeComments = () => {
+    window.dispatchEvent(new CustomEvent("vezlivo:close-comments"));
   };
-
   const openSection = (section) => {
     setActiveSection(section);
 
