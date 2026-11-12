@@ -16,7 +16,7 @@ import "./style.css";
 
 import { auth } from "./firebase.js";
 import UserProfile from "./UserProfile.jsx";
-
+import Comments from "./Comments.jsx";
 import SplashScreen from "./SplashScreen.jsx";
 import Login from "./Login.jsx";
 import Profile from "./Profile.jsx";
@@ -629,7 +629,19 @@ function HomePage({
 function App() {
   const [page, setPage] =
     useState("home");
+const [commentsData, setCommentsData] = useState(null);
 
+  useEffect(() => {
+    const handleOpenComments = (event) => {
+      const { postId, postOwnerId } = event.detail || {};
+      if (postId) {
+        setCommentsData({ postId, postOwnerId });
+      }
+    };
+
+    window.addEventListener("vezlivo:open-comments", handleOpenComments);
+    return () => window.removeEventListener("vezlivo:open-comments", handleOpenComments);
+  }, []);
   const [user, setUser] =
     useState(null);
 
@@ -1053,7 +1065,13 @@ function App() {
     </div>
   );
 }
-
+{commentsData && (
+        <Comments
+          postId={commentsData.postId}
+          postOwnerId={commentsData.postOwnerId}
+          onClose={() => setCommentsData(null)}
+        />
+      )}
 
 /* =========================================================
    START VEZLIVO

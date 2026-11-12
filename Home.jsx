@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "./firebase.js";
-import Comments from "./Comments";
 import Report from "./Report.jsx";
 import SoundFeed from "./SoundFeed.jsx";
 import { apiGet, apiPost } from "./apiClient.js"; 
@@ -14,8 +13,6 @@ export default function Home({ onNavigate, onCreate, onProfile, onActivity, onDi
   const [search, setSearch] = useState("");
   const [showSearch, setShowSearch] = useState(false);
   const [activeTab, setActiveTab] = useState("For You");
-  const [showComments, setShowComments] = useState(false);
-  const [selectedPost, setSelectedPost] = useState(null);
   const [activeSection, setActiveSection] = useState("Home");
   const [users, setUsers] = useState([]);
   const [searchingUsers, setSearchingUsers] = useState(false);
@@ -353,10 +350,15 @@ export default function Home({ onNavigate, onCreate, onProfile, onActivity, onDi
     setTimeout(() => setToastMessage(""), 3000);
   };
 
-  const openComments = (post) => {
-    setSelectedPost(post);
-    setShowComments(true);
-  };
+ const openComments = (post) => {
+  const postId = post.postId || post.id;
+  const postOwnerId = post.user_id || post.uid;
+  window.dispatchEvent(
+    new CustomEvent("vezlivo:open-comments", {
+      detail: { postId, postOwnerId }
+    })
+  );
+};
 
   const closeComments = () => {
     setShowComments(false);
