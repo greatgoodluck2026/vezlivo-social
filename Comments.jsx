@@ -3,6 +3,8 @@ import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "./firebase.js";
 import { checkComment } from "./CommentFilter";
 
+const API_URL = "https://vezlivo-api.vezlivo-api.workers.dev";
+
 export default function Comments({ postId, postOwnerId, onClose }) {
   const [currentUser, setCurrentUser] = useState(null);
   const [comments, setComments] = useState([]);
@@ -26,7 +28,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
 
     const fetchComments = async () => {
       try {
-        const response = await fetch(`/comments?postId=${postId}`);
+        const response = await fetch(`${API_URL}/comments?postId=${postId}`);
         const data = await response.json();
         if (data.success) {
           setComments(data.comments || []);
@@ -64,7 +66,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
     setSending(true);
 
     try {
-      const response = await fetch("/comments", {
+      const response = await fetch(`${API_URL}/comments`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -219,7 +221,8 @@ const styles = {
   panel: {
     width: "100%",
     maxWidth: "600px",
-    height: "70vh",
+    height: "75vh",
+    maxHeight: "80dvh",
     background: "#ffffff",
     color: "#000000",
     borderRadius: "24px 24px 0 0",
@@ -227,6 +230,7 @@ const styles = {
     flexDirection: "column",
     boxShadow: "0 -10px 40px rgba(0, 0, 0, 0.4)",
     position: "relative",
+    overflow: "hidden",
   },
   header: {
     display: "flex",
@@ -237,6 +241,7 @@ const styles = {
     background: "#ffffff",
     borderTopLeftRadius: "24px",
     borderTopRightRadius: "24px",
+    flexShrink: 0,
   },
   title: {
     margin: 0,
@@ -268,7 +273,6 @@ const styles = {
     flex: 1,
     overflowY: "auto",
     padding: "16px 20px",
-    paddingBottom: "80px",
     background: "#ffffff",
   },
   commentItem: {
@@ -316,16 +320,13 @@ const styles = {
     color: "#999",
   },
   inputArea: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
     display: "flex",
     alignItems: "center",
     gap: "10px",
-    padding: "12px 16px",
+    padding: "12px 16px 20px 16px",
     borderTop: "1px solid #eee",
     background: "#ffffff",
+    flexShrink: 0,
   },
   input: {
     flex: 1,
