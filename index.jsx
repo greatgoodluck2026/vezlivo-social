@@ -520,7 +520,6 @@ function PostCard({
           </span>
         </button>
 
-
         <button
           type="button"
           className="post-action"
@@ -530,8 +529,13 @@ function PostCard({
               return;
             }
 
-            alert(
-              "Comments will be connected next."
+            window.dispatchEvent(
+              new CustomEvent("vezlivo:open-comments", {
+                detail: {
+                  postId: post.id || post.postId,
+                  postOwnerId: post.uid || post.user_id,
+                },
+              })
             );
           }}
         >
@@ -540,7 +544,6 @@ function PostCard({
             Comment
           </span>
         </button>
-
 
         <button
           type="button"
