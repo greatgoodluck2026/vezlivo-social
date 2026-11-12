@@ -221,8 +221,8 @@ const styles = {
   panel: {
     width: "100%",
     maxWidth: "600px",
-    height: "75vh",
-    maxHeight: "80dvh",
+    height: "65vh",
+    maxHeight: "70dvh",
     background: "#ffffff",
     color: "#000000",
     borderRadius: "24px 24px 0 0",
@@ -231,6 +231,7 @@ const styles = {
     boxShadow: "0 -10px 40px rgba(0, 0, 0, 0.4)",
     position: "relative",
     overflow: "hidden",
+    paddingBottom: "68px",
   },
   header: {
     display: "flex",
@@ -320,13 +321,17 @@ const styles = {
     color: "#999",
   },
   inputArea: {
+    position: "absolute",
+    bottom: "68px",
+    left: 0,
+    right: 0,
     display: "flex",
     alignItems: "center",
     gap: "10px",
-    padding: "12px 16px 20px 16px",
+    padding: "12px 16px",
     borderTop: "1px solid #eee",
     background: "#ffffff",
-    flexShrink: 0,
+    zIndex: 10,
   },
   input: {
     flex: 1,
