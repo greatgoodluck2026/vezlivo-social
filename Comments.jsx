@@ -351,16 +351,18 @@ const styles = {
     border: "none",
     borderRadius: "24px",
     padding: "0 22px",
-    background: "#fe2c55",
+    background: "linear-gradient(135deg, #6366f1, #38bdf8)", // <-- Changed to Vezlivo Blue Theme!
     color: "#ffffff",
     fontWeight: "700",
     fontSize: "14px",
     cursor: "pointer",
     flexShrink: 0,
+    boxShadow: "0 4px 12px rgba(99, 102, 241, 0.3)",
   },
   disabledButton: {
     opacity: 0.4,
     cursor: "not-allowed",
+    boxShadow: "none",
   },
   centerMessage: {
     minHeight: "180px",
