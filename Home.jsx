@@ -359,9 +359,7 @@ export default function Home({ onNavigate, onCreate, onProfile, onActivity, onDi
     })
   );
 };
-const closeComments = () => {
-    window.dispatchEvent(new CustomEvent("vezlivo:close-comments"));
-  };
+
   const openSection = (section) => {
     setActiveSection(section);
 
@@ -1070,14 +1068,6 @@ const closeComments = () => {
           <span>Profile</span>
         </button>
       </nav>
-
-      {showComments && selectedPost && (
-        <Comments
-          postId={selectedPost.postId || selectedPost.id}
-          postOwnerId={selectedPost.user_id || selectedPost.uid}
-          onClose={closeComments}
-        />
-      )}
 
       {reportPost && (
         <Report
