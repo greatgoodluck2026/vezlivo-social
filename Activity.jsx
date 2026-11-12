@@ -30,7 +30,7 @@ export default function Activity({ onBack }) {
   const [conversations, setConversations] = useState([]);
   const [activeFilter, setActiveFilter] = useState("likes");
   const [activeChatPartner, setActiveChatPartner] = useState(null);
-  const [messages, setMessages] = useState([]);
+  const [messages, setMessages] = useState("");
   const [replyText, setReplyText] = useState("");
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
@@ -118,11 +118,11 @@ export default function Activity({ onBack }) {
     }
   };
 
-  // Count totals for each filter category
+  // Only count UNREAD items for the notification badges so they clear when read!
   const counts = {
-    likes: activities.filter((act) => act.type === "like").length,
-    comments: activities.filter((act) => act.type === "comment").length,
-    follows: activities.filter((act) => act.type === "follow").length,
+    likes: activities.filter((act) => act.type === "like" && act.read !== true).length,
+    comments: activities.filter((act) => act.type === "comment" && act.read !== true).length,
+    follows: activities.filter((act) => act.type === "follow" && act.read !== true).length,
   };
 
   const filteredActivities = activities.filter((act) => {
@@ -131,6 +131,20 @@ export default function Activity({ onBack }) {
     if (activeFilter === "follows") return act.type === "follow";
     return false;
   });
+
+  const markAsRead = async (activityId) => {
+    // Instantly update local state so the badge count clears right away
+    setActivities((prev) =>
+      prev.map((item) => (item.id === activityId ? { ...item, read: true } : item))
+    );
+
+    // Optional backend sync if your worker supports it
+    try {
+      await apiPost(`/api/activities/${activityId}/read`, { userId: user?.uid });
+    } catch (err) {
+      console.error("Failed to mark activity as read:", err);
+    }
+  };
 
   const unreadCount = conversations.filter((c) => !c.read && c.sender_id !== user?.uid).length;
 
@@ -229,7 +243,7 @@ export default function Activity({ onBack }) {
     );
   }
 
-  // 3. MAIN ACTIVITY SCREEN WITH TOTAL COUNTS & SIGNATURE BLUE HIGHLIGHTS
+  // 3. MAIN ACTIVITY SCREEN
   return (
     <div style={styles.page}>
       <header style={styles.header}>
@@ -278,7 +292,7 @@ export default function Activity({ onBack }) {
           </div>
         )}
 
-        {/* CATEGORY FILTER PILLS WITH TOTAL COUNTS */}
+        {/* CATEGORY FILTER PILLS WITH UNREAD COUNTERS */}
         <div style={styles.filterRow}>
           {["likes", "comments", "follows"].map((filter) => (
             <button
@@ -291,9 +305,11 @@ export default function Activity({ onBack }) {
               }}
             >
               {filter.charAt(0).toUpperCase() + filter.slice(1)}{" "}
-              <span style={{ color: activeFilter === filter ? "#38bdf8" : "#38bdf8", fontWeight: "800" }}>
-                ({counts[filter]})
-              </span>
+              {counts[filter] > 0 && (
+                <span style={{ color: "#38bdf8", fontWeight: "800" }}>
+                  ({counts[filter]})
+                </span>
+              )}
             </button>
           ))}
         </div>
@@ -327,6 +343,7 @@ export default function Activity({ onBack }) {
                 <div
                   key={item.id}
                   onClick={() => {
+                    markAsRead(item.id); // Tapping clears the unread count badge instantly!
                     const targetPostId = item.postId || item.post_id;
                     if (targetPostId) {
                       window.dispatchEvent(
@@ -336,7 +353,7 @@ export default function Activity({ onBack }) {
                   }}
                   style={{
                     ...styles.row,
-                    ...(item.read === false ? styles.unread : {}),
+                    ...(item.read === false || item.read === undefined ? styles.unread : {}),
                   }}
                 >
                   <img
