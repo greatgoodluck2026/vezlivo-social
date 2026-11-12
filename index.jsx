@@ -170,27 +170,6 @@ function PostCard({
     checkLikeStatus();
   }, [post.id, user]);
 
-  // ❌ DELETE THIS ENTIRE useEffect BLOCK:
-  useEffect(() => {
-    if (!user || !post.id) {
-      return;
-    }
-
-    const saveRef = ref(
-      db,
-      `savedPosts/${user.uid}/${post.id}`
-    );
-
-    const unsubscribe = onValue(
-      saveRef,
-      (snapshot) => {
-        setSaved(snapshot.exists());
-      }
-    );
-
-    return () => unsubscribe();
-  }, [post.id, user]);
-
   const handleLike = async () => {
     if (!user) {
       onLogin();
@@ -989,7 +968,7 @@ const [commentsData, setCommentsData] = useState(null);
         {content}
       </div>
 
-      {/* Global Permanent Bottom Navigation Bar */}
+    {/* Global Permanent Bottom Navigation Bar */}
       <nav className="bottom-navigation" style={{ zIndex: 99999, pointerEvents: "auto", position: "fixed", bottom: 0, left: 0, right: 0, display: "flex", justifyContent: "space-around", background: "rgba(15,15,18,0.97)", borderTop: "1px solid #27272a", height: "68px", alignItems: "center", padding: "0 8px" }}>
         <button
           type="button"
@@ -1062,16 +1041,17 @@ const [commentsData, setCommentsData] = useState(null);
           <small>Profile</small>
         </button>
       </nav>
-    </div>
-  );
-}
-{commentsData && (
+
+      {commentsData && (
         <Comments
           postId={commentsData.postId}
           postOwnerId={commentsData.postOwnerId}
           onClose={() => setCommentsData(null)}
         />
       )}
+    </div>
+  );
+}
 
 /* =========================================================
    START VEZLIVO
