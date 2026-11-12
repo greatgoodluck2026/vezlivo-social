@@ -28,13 +28,13 @@ export default function Activity({ onBack }) {
   const [user, setUser] = useState(null);
   const [activities, setActivities] = useState([]);
   const [conversations, setConversations] = useState([]);
-  const [activeFilter, setActiveFilter] = useState("likes"); // Default to likes, "all" removed
+  const [activeFilter, setActiveFilter] = useState("likes");
   const [activeChatPartner, setActiveChatPartner] = useState(null);
   const [messages, setMessages] = useState([]);
   const [replyText, setReplyText] = useState("");
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
-  const [showInboxList, setShowInboxList] = useState(false); // Controls opening the message conversations list
+  const [showInboxList, setShowInboxList] = useState(false);
   const [showInboxNotice, setShowInboxNotice] = useState(false);
 
   useEffect(() => {
@@ -118,6 +118,13 @@ export default function Activity({ onBack }) {
     }
   };
 
+  // Count totals for each filter category
+  const counts = {
+    likes: activities.filter((act) => act.type === "like").length,
+    comments: activities.filter((act) => act.type === "comment").length,
+    follows: activities.filter((act) => act.type === "follow").length,
+  };
+
   const filteredActivities = activities.filter((act) => {
     if (activeFilter === "likes") return act.type === "like";
     if (activeFilter === "comments") return act.type === "comment";
@@ -127,7 +134,7 @@ export default function Activity({ onBack }) {
 
   const unreadCount = conversations.filter((c) => !c.read && c.sender_id !== user?.uid).length;
 
-  // 1. CHAT CONVERSATION VIEW (Inside a specific chat)
+  // 1. CHAT CONVERSATION VIEW
   if (activeChatPartner) {
     return (
       <div style={styles.page}>
@@ -178,7 +185,7 @@ export default function Activity({ onBack }) {
     );
   }
 
-  // 2. CONVERSATIONS LIST VIEW (Opens when clicking the Direct Messages banner)
+  // 2. CONVERSATIONS LIST VIEW
   if (showInboxList) {
     return (
       <div style={styles.page}>
@@ -222,7 +229,7 @@ export default function Activity({ onBack }) {
     );
   }
 
-  // 3. MAIN ACTIVITY SCREEN (With DM banner at top + Likes, Comments, Follows tabs only)
+  // 3. MAIN ACTIVITY SCREEN WITH TOTAL COUNTS & SIGNATURE BLUE HIGHLIGHTS
   return (
     <div style={styles.page}>
       <header style={styles.header}>
@@ -232,11 +239,11 @@ export default function Activity({ onBack }) {
       </header>
 
       <main style={styles.content}>
-        {/* 🌟 VIBRANT DIRECT MESSAGES BANNER */}
+        {/* DIRECT MESSAGES BANNER */}
         <div
           onClick={() => {
             if (conversations.length > 0) {
-              setShowInboxList(true); // Opens the list of conversations when clicked!
+              setShowInboxList(true);
             } else {
               setShowInboxNotice(true);
             }
@@ -271,7 +278,7 @@ export default function Activity({ onBack }) {
           </div>
         )}
 
-        {/* 🎨 CATEGORY FILTER PILLS (Likes, Comments, Follows - "All" removed) */}
+        {/* CATEGORY FILTER PILLS WITH TOTAL COUNTS */}
         <div style={styles.filterRow}>
           {["likes", "comments", "follows"].map((filter) => (
             <button
@@ -283,7 +290,10 @@ export default function Activity({ onBack }) {
                 ...(activeFilter === filter ? styles.activeFilterPill : {}),
               }}
             >
-              {filter.charAt(0).toUpperCase() + filter.slice(1)}
+              {filter.charAt(0).toUpperCase() + filter.slice(1)}{" "}
+              <span style={{ color: activeFilter === filter ? "#38bdf8" : "#38bdf8", fontWeight: "800" }}>
+                ({counts[filter]})
+              </span>
             </button>
           ))}
         </div>
@@ -329,7 +339,6 @@ export default function Activity({ onBack }) {
                     ...(item.read === false ? styles.unread : {}),
                   }}
                 >
-                  {/* ACTUAL USER PROFILE AVATAR */}
                   <img
                     src={avatarSrc || "/default-avatar.png"}
                     alt={actor}
@@ -339,13 +348,13 @@ export default function Activity({ onBack }) {
 
                   <div style={styles.body}>
                     <div style={styles.message}>
-                      <span style={{ fontWeight: "700", color: "#fff" }}>{actor}</span> {actionText}
+                      <span style={{ fontWeight: "700", color: "#fff" }}>{actor}</span>{" "}
+                      <span style={{ color: "#38bdf8", fontWeight: "600" }}>{actionText}</span>
                     </div>
                     {item.commentText && <div style={styles.comment}>“{item.commentText}”</div>}
                     <div style={styles.time}>{timeAgo(item.createdAt || item.created_at)}</div>
                   </div>
 
-                  {/* VIDEO THUMBNAIL ON THE RIGHT */}
                   {thumbnailSrc && (
                     <img src={thumbnailSrc} alt="Post Thumbnail" style={styles.thumbnail} />
                   )}
@@ -457,7 +466,7 @@ const styles = {
   filterRow: { display: "flex", gap: "8px", marginBottom: "16px", overflowX: "auto" },
   filterPill: {
     flex: 1,
-    padding: "8px 16px",
+    padding: "8px 12px",
     borderRadius: "20px",
     border: "1px solid #27272a",
     background: "#18181b",
@@ -468,9 +477,9 @@ const styles = {
     textAlign: "center",
   },
   activeFilterPill: {
-    background: "#ffffff",
-    color: "#000000",
-    border: "1px solid #ffffff",
+    background: "#1e1b4b",
+    color: "#ffffff",
+    border: "1px solid #6366f1",
     fontWeight: "700",
   },
   center: {
