@@ -13,7 +13,8 @@ export default function Comments({ postId, postOwnerId, onClose }) {
   const [sending, setSending] = useState(false);
   const [viewportHeight, setViewportHeight] = useState(null);
   const [keyboardOffset, setKeyboardOffset] = useState(0);
-
+  const [replyingTo, setReplyingTo] = useState(null); // stores { commentId, displayName }
+  
   // Lock background body scroll completely so the browser cannot pan the feed
   useEffect(() => {
     const originalOverflow = document.body.style.overflow;
