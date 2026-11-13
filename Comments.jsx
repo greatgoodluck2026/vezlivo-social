@@ -173,7 +173,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           )}
         </div>
 
-        {/* Input Bar pinned cleanly inside the fixed panel */}
+        {/* Input Bar docked cleanly inside flex flow */}
         <div style={styles.inputArea}>
           <input
             type="text"
@@ -231,7 +231,6 @@ const styles = {
     boxShadow: "0 -10px 40px rgba(0, 0, 0, 0.4)",
     position: "relative",
     overflow: "hidden",
-    paddingBottom: "68px",
   },
   header: {
     display: "flex",
@@ -321,17 +320,13 @@ const styles = {
     color: "#999",
   },
   inputArea: {
-    position: "absolute",
-    bottom: "68px",
-    left: 0,
-    right: 0,
     display: "flex",
     alignItems: "center",
     gap: "10px",
-    padding: "12px 16px",
+    padding: "12px 16px 20px 16px",
     borderTop: "1px solid #eee",
     background: "#ffffff",
-    zIndex: 10,
+    flexShrink: 0,
   },
   input: {
     flex: 1,
