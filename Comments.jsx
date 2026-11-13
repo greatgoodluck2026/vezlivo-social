@@ -373,8 +373,8 @@ const styles = {
     color: "#999",
   },
   inputArea: {
-    position: "sticky",
-    bottom: 0,
+    position: "absolute",
+    bottom: "68px",
     left: 0,
     right: 0,
     display: "flex",
@@ -384,7 +384,6 @@ const styles = {
     borderTop: "1px solid #eee",
     background: "#ffffff",
     zIndex: 10,
-    flexShrink: 0,
   },
   input: {
     flex: 1,
