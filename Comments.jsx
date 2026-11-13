@@ -17,6 +17,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
   const [expandedThreads, setExpandedThreads] = useState({}); // tracks which threads have their replies shown
 
   const inputRef = useRef(null); // Reference to auto-focus input on reply click
+  const fileInputRef = useRef(null); // Reference for sticker/image uploads
   
   // Lock background body scroll completely so the browser cannot pan the feed
   useEffect(() => {
@@ -91,27 +92,17 @@ export default function Comments({ postId, postOwnerId, onClose }) {
   }, [postId]);
 
   const sendComment = async (textToSend) => {
-    if (!currentUser) {
-      alert("Please log in first.");
-      return;
-    }
+    if (!currentUser) return;
 
     const text = (textToSend !== undefined ? textToSend : commentText).trim();
-    if (!text) {
-      alert("Comment cannot be empty.");
-      return;
-    }
+    if (!text) return;
 
     const filterResult = checkComment(text);
     if (!filterResult.allowed) {
-      alert(filterResult.reason);
       return;
     }
 
-    if (!postId || !postOwnerId) {
-      alert("This post cannot receive comments yet.");
-      return;
-    }
+    if (!postId || !postOwnerId) return;
 
     setSending(true);
 
@@ -157,10 +148,23 @@ export default function Comments({ postId, postOwnerId, onClose }) {
       }
     } catch (error) {
       console.error("Could not send comment:", error);
-      alert("Could not send comment. Please try again.");
     } finally {
       setSending(false);
     }
+  };
+
+  // Handle Sticker / Image file selection
+  const handleStickerSelect = async (e) => {
+    const file = e.target.files[0];
+    if (!file || !currentUser) return;
+
+    // Convert local sticker/image to object URL or base64 text representation for chat/comments
+    const reader = new FileReader();
+    reader.onload = async (uploadEvent) => {
+      const stickerDataUrl = uploadEvent.target.result;
+      await sendComment(stickerDataUrl);
+    };
+    reader.readAsDataURL(file);
   };
 
   const formatTime = (timestamp) => {
@@ -240,6 +244,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
                 const commentReplies = repliesMap[commentId] || [];
                 const hasReplies = commentReplies.length > 0;
                 const isExpanded = !!expandedThreads[commentId];
+                const isSticker = comment.text && comment.text.startsWith("data:image");
 
                 return (
                   <div key={commentId || index} style={styles.commentThreadWrapper}>
@@ -254,7 +259,11 @@ export default function Comments({ postId, postOwnerId, onClose }) {
                         <div style={styles.commentTop}>
                           <strong style={styles.name}>{currentDisplayName}</strong>
                         </div>
-                        <p style={styles.commentText}>{comment.text}</p>
+                        {isSticker ? (
+                          <img src={comment.text} alt="sticker" style={styles.commentStickerImage} />
+                        ) : (
+                          <p style={styles.commentText}>{comment.text}</p>
+                        )}
                         <div style={styles.commentFooterRow}>
                           <span style={styles.time}>{formatTime(comment.createdAt || comment.created_at)}</span>
                           <button
@@ -298,6 +307,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
                       <div style={styles.repliesContainer}>
                         {commentReplies.map((reply, rIndex) => {
                           const replyDisplayName = reply.displayName || reply.display_name || "Vezlivo User";
+                          const isReplySticker = reply.text && reply.text.startsWith("data:image");
                           return (
                             <div key={reply.id || reply.commentId || rIndex} style={styles.replyItem}>
                               <img
@@ -309,7 +319,11 @@ export default function Comments({ postId, postOwnerId, onClose }) {
                                 <div style={styles.commentTop}>
                                   <strong style={styles.name}>{replyDisplayName}</strong>
                                 </div>
-                                <p style={styles.commentText}>{reply.text}</p>
+                                {isReplySticker ? (
+                                  <img src={reply.text} alt="sticker" style={styles.commentStickerImage} />
+                                ) : (
+                                  <p style={styles.commentText}>{reply.text}</p>
+                                )}
                                 <div style={styles.commentFooterRow}>
                                   <span style={styles.time}>{formatTime(reply.createdAt || reply.created_at)}</span>
                                   <button
@@ -377,14 +391,25 @@ export default function Comments({ postId, postOwnerId, onClose }) {
 
         {/* Input Bar pinned cleanly inside the fixed panel */}
         <div style={styles.inputArea}>
-          {/* Sticker / Media attachment slot for phone users */}
+          {/* Hidden file input for stickers/images */}
+          <input
+            type="file"
+            ref={fileInputRef}
+            style={{ display: "none" }}
+            accept="image/*"
+            onChange={handleStickerSelect}
+          />
+
+          {/* Sticker / Media attachment button */}
           <button
             type="button"
             style={styles.stickerBtn}
             onClick={() => {
-              alert("Sticker picker coming soon!");
+              if (fileInputRef.current) {
+                fileInputRef.current.click();
+              }
             }}
-            title="Add sticker"
+            title="Send sticker or image"
           >
             🖼️
           </button>
@@ -529,6 +554,13 @@ const styles = {
     lineHeight: "1.4",
     color: "#222",
     wordBreak: "break-word",
+  },
+  commentStickerImage: {
+    maxWidth: "120px",
+    maxHeight: "120px",
+    borderRadius: "8px",
+    marginTop: "4px",
+    objectFit: "cover",
   },
   commentFooterRow: {
     display: "flex",
