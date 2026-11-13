@@ -268,6 +268,10 @@ const styles = {
     zIndex: 999999,
   },
   panel: {
+    position: "fixed",
+    bottom: 0,
+    left: "50%",
+    transform: "translateX(-50%)",
     width: "100%",
     maxWidth: "600px",
     height: "65vh",
@@ -278,9 +282,8 @@ const styles = {
     display: "flex",
     flexDirection: "column",
     boxShadow: "0 -10px 40px rgba(0, 0, 0, 0.4)",
-    position: "relative",
     overflow: "hidden",
-    paddingBottom: "68px",
+    zIndex: 1000000,
   },
   header: {
     display: "flex",
@@ -370,8 +373,8 @@ const styles = {
     color: "#999",
   },
   inputArea: {
-    position: "absolute",
-    bottom: "68px",
+    position: "sticky",
+    bottom: 0,
     left: 0,
     right: 0,
     display: "flex",
