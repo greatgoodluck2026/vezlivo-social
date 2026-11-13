@@ -971,8 +971,8 @@ const [commentsData, setCommentsData] = useState(null);
         {content}
       </div>
 
-    {/* Global Permanent Bottom Navigation Bar */}
-      <nav className="bottom-navigation" style={{ zIndex: 99999, pointerEvents: "auto", position: "fixed", bottom: 0, left: 0, right: 0, display: "flex", justifyContent: "space-around", background: "rgba(15,15,18,0.97)", borderTop: "1px solid #27272a", height: "68px", alignItems: "center", padding: "0 8px" }}>
+   {/* Global Permanent Bottom Navigation Bar */}
+      <nav className="bottom-navigation" style={{ zIndex: 99999, pointerEvents: "auto", position: "fixed", bottom: 0, left: 0, right: 0, display: commentsData ? "none" : "flex", justifyContent: "space-around", background: "rgba(15,15,18,0.97)", borderTop: "1px solid #27272a", height: "68px", alignItems: "center", padding: "0 8px" }}>
         <button
           type="button"
           className={`nav-item ${page === "home" ? "active" : ""}`}
