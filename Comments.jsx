@@ -79,7 +79,6 @@ export default function Comments({ postId, postOwnerId, onClose }) {
         const response = await fetch(`${API_URL}/comments?postId=${postId}`);
         const data = await response.json();
         if (data.success) {
-          // Sort fetched comments so newest are at the top
           const sorted = (data.comments || []).sort((a, b) => {
             const timeA = Number(a.createdAt || a.created_at || 0);
             const timeB = Number(b.createdAt || b.created_at || 0);
@@ -125,13 +124,19 @@ export default function Comments({ postId, postOwnerId, onClose }) {
 
       if (data.success) {
         const targetParentId = replyingTo ? replyingTo.commentId : null;
+        
+        // Ensure immediate profile data capture from currentUser
+        const userDisplayName = currentUser.displayName || currentUser.email?.split("@")[0] || "Vezlivo User";
+        const userPhotoURL = currentUser.photoURL || "";
+
         const newCommentObj = {
           id: Date.now().toString(),
           user_id: currentUser.uid,
-          displayName: currentUser.displayName || "Vezlivo User",
-          display_name: currentUser.displayName || "Vezlivo User",
-          photoURL: currentUser.photoURL || "",
-          profile_url: currentUser.photoURL || "",
+          userId: currentUser.uid,
+          displayName: userDisplayName,
+          display_name: userDisplayName,
+          photoURL: userPhotoURL,
+          profile_url: userPhotoURL,
           text,
           createdAt: Date.now(),
           parentId: targetParentId,
@@ -143,7 +148,6 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           setExpandedThreads((prev) => ({ ...prev, [replyingTo.commentId]: true }));
         }
         setReplyingTo(null);
-        // Add new comment directly to the TOP of the list
         setComments((prev) => [newCommentObj, ...prev]);
       } else {
         throw new Error(data.error || "Failed to post comment.");
@@ -155,7 +159,6 @@ export default function Comments({ postId, postOwnerId, onClose }) {
     }
   };
 
-  // Handle Sticker / Image file selection & upload posting
   const handleStickerSelect = async (e) => {
     const file = e.target.files[0];
     if (!file || !currentUser) return;
@@ -166,7 +169,6 @@ export default function Comments({ postId, postOwnerId, onClose }) {
       await sendComment(stickerDataUrl);
     };
     reader.readAsDataURL(file);
-    // Reset file input so selecting the same file triggers again if needed
     e.target.value = "";
   };
 
@@ -244,6 +246,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
               return topLevelComments.map((comment, index) => {
                 const commentId = comment.id || comment.commentId;
                 const currentDisplayName = comment.displayName || comment.display_name || "Vezlivo User";
+                const userPhoto = comment.photoURL || comment.profile_url;
                 const commentReplies = repliesMap[commentId] || [];
                 const hasReplies = commentReplies.length > 0;
                 const isExpanded = !!expandedThreads[commentId];
@@ -253,11 +256,13 @@ export default function Comments({ postId, postOwnerId, onClose }) {
                   <div key={commentId || index} style={styles.commentThreadWrapper}>
                     {/* Top Level Comment Item */}
                     <div style={styles.commentItem}>
-                      <img
-                        src={comment.photoURL || comment.profile_url || "https://via.placeholder.com/50"}
-                        alt=""
-                        style={styles.avatar}
-                      />
+                      {userPhoto ? (
+                        <img src={userPhoto} alt="" style={styles.avatar} />
+                      ) : (
+                        <div style={styles.avatarFallback}>
+                          {currentDisplayName.charAt(0).toUpperCase()}
+                        </div>
+                      )}
                       <div style={styles.commentBody}>
                         <div style={styles.commentTop}>
                           <strong style={styles.name}>{currentDisplayName}</strong>
@@ -310,14 +315,17 @@ export default function Comments({ postId, postOwnerId, onClose }) {
                       <div style={styles.repliesContainer}>
                         {commentReplies.map((reply, rIndex) => {
                           const replyDisplayName = reply.displayName || reply.display_name || "Vezlivo User";
+                          const replyPhoto = reply.photoURL || reply.profile_url;
                           const isReplySticker = reply.text && reply.text.startsWith("data:image");
                           return (
                             <div key={reply.id || reply.commentId || rIndex} style={styles.replyItem}>
-                              <img
-                                src={reply.photoURL || reply.profile_url || "https://via.placeholder.com/40"}
-                                alt=""
-                                style={styles.replyAvatar}
-                              />
+                              {replyPhoto ? (
+                                <img src={replyPhoto} alt="" style={styles.replyAvatar} />
+                              ) : (
+                                <div style={styles.replyAvatarFallback}>
+                                  {replyDisplayName.charAt(0).toUpperCase()}
+                                </div>
+                              )}
                               <div style={styles.commentBody}>
                                 <div style={styles.commentTop}>
                                   <strong style={styles.name}>{replyDisplayName}</strong>
@@ -394,7 +402,6 @@ export default function Comments({ postId, postOwnerId, onClose }) {
 
         {/* Input Bar pinned cleanly inside the fixed panel */}
         <div style={styles.inputArea}>
-          {/* Hidden file input for stickers/images */}
           <input
             type="file"
             ref={fileInputRef}
@@ -403,7 +410,6 @@ export default function Comments({ postId, postOwnerId, onClose }) {
             onChange={handleStickerSelect}
           />
 
-          {/* Sticker / Media attachment button */}
           <button
             type="button"
             style={styles.stickerBtn}
@@ -536,6 +542,19 @@ const styles = {
     background: "#eee",
     flexShrink: 0,
   },
+  avatarFallback: {
+    width: "40px",
+    height: "40px",
+    borderRadius: "50%",
+    background: "#3b82f6",
+    color: "#ffffff",
+    fontWeight: "700",
+    fontSize: "16px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  },
   commentBody: {
     flex: 1,
     minWidth: 0,
@@ -651,7 +670,7 @@ const styles = {
     fontSize: "20px",
     cursor: "pointer",
     padding: "0 2px",
-    flexShrink: 0,
+    flexShrink: "0",
   },
   input: {
     flex: 1,
@@ -725,6 +744,19 @@ const styles = {
     borderRadius: "50%",
     objectFit: "cover",
     background: "#eee",
+    flexShrink: 0,
+  },
+  replyAvatarFallback: {
+    width: "32px",
+    height: "32px",
+    borderRadius: "50%",
+    background: "#3b82f6",
+    color: "#ffffff",
+    fontWeight: "700",
+    fontSize: "13px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
     flexShrink: 0,
   },
 };
