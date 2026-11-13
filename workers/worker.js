@@ -176,7 +176,19 @@ export default {
             `;
           }
 
-          if (postOwnerId && postOwnerId !== userId) {
+         // Determine who should receive the notification (Post Owner or Parent Comment Author)
+          let targetUserId = postOwnerId;
+          let activityType = "comment";
+
+          if (parentId) {
+            const parentRes = await sql`SELECT user_id FROM comments WHERE id::text = ${parentId} OR id = ${parentId}`;
+            if (parentRes.length > 0 && parentRes[0].user_id) {
+              targetUserId = parentRes[0].user_id;
+              activityType = "reply";
+            }
+          }
+
+          if (targetUserId && targetUserId !== userId) {
             const userRes = await sql`SELECT display_name, username FROM users WHERE uid = ${userId}`;
             const actorName = userRes[0]?.display_name || userRes[0]?.username || "Someone";
 
@@ -206,7 +218,7 @@ export default {
 
             await sql`
               INSERT INTO activities (user_uid, type, actor_id, actor_name, comment_text, post_id, post_thumbnail, read, created_at)
-              VALUES (${postOwnerId}, 'comment', ${userId}, ${actorName}, ${trimmedText}, ${postId}, ${thumbnail}, FALSE, ${createdAt})
+              VALUES (${targetUserId}, ${activityType}, ${userId}, ${actorName}, ${trimmedText}, ${postId}, ${thumbnail}, FALSE, ${createdAt})
             `;
           }
 

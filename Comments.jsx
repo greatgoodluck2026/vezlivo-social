@@ -202,45 +202,102 @@ export default function Comments({ postId, postOwnerId, onClose }) {
               <span style={styles.emptyText}>Be the first person to comment.</span>
             </div>
           ) : (
-            comments.map((comment, index) => {
-              const currentDisplayName = comment.displayName || comment.display_name || "Vezlivo User";
-              return (
-                <div key={comment.id || comment.commentId || index} style={styles.commentItem}>
-                  <img
-                    src={comment.photoURL || comment.profile_url || "https://via.placeholder.com/50"}
-                    alt=""
-                    style={styles.avatar}
-                  />
-                  <div style={styles.commentBody}>
-                    <div style={styles.commentTop}>
-                      <strong style={styles.name}>
-                        {currentDisplayName}
-                      </strong>
-                      <span style={styles.username}>
-                        @{comment.username || "user"}
-                      </span>
+            (() => {
+              // Separate top-level comments and replies
+              const topLevelComments = comments.filter(c => !c.parentId && !c.parent_id);
+              const repliesMap = {};
+              comments.forEach(c => {
+                const pId = c.parentId || c.parent_id;
+                if (pId) {
+                  if (!repliesMap[pId]) repliesMap[pId] = [];
+                  repliesMap[pId].push(c);
+                }
+              });
+
+              return topLevelComments.map((comment, index) => {
+                const commentId = comment.id || comment.commentId;
+                const currentDisplayName = comment.displayName || comment.display_name || "Vezlivo User";
+                const commentReplies = repliesMap[commentId] || [];
+                const hasReplies = commentReplies.length > 0;
+
+                return (
+                  <div key={commentId || index} style={styles.commentThreadWrapper}>
+                    {/* Top Level Comment Item */}
+                    <div style={styles.commentItem}>
+                      <img
+                        src={comment.photoURL || comment.profile_url || "https://via.placeholder.com/50"}
+                        alt=""
+                        style={styles.avatar}
+                      />
+                      <div style={styles.commentBody}>
+                        <div style={styles.commentTop}>
+                          <strong style={styles.name}>{currentDisplayName}</strong>
+                          <span style={styles.username}>@{comment.username || "user"}</span>
+                        </div>
+                        <p style={styles.commentText}>{comment.text}</p>
+                        <div style={styles.commentFooterRow}>
+                          <span style={styles.time}>{formatTime(comment.createdAt || comment.created_at)}</span>
+                          <button
+                            type="button"
+                            style={styles.replyTriggerBtn}
+                            onClick={() => {
+                              setReplyingTo({
+                                commentId: commentId,
+                                displayName: currentDisplayName,
+                              });
+                              setCommentText(`@${currentDisplayName} `);
+                            }}
+                          >
+                            Reply
+                          </button>
+                        </div>
+                      </div>
                     </div>
-                    <p style={styles.commentText}>{comment.text}</p>
-                    <div style={styles.commentFooterRow}>
-                      <span style={styles.time}>{formatTime(comment.createdAt || comment.created_at)}</span>
-                      <button
-                        type="button"
-                        style={styles.replyTriggerBtn}
-                        onClick={() => {
-                          setReplyingTo({
-                            commentId: comment.id || comment.commentId,
-                            displayName: currentDisplayName,
-                          });
-                          setCommentText(`@${currentDisplayName} `);
-                        }}
-                      >
-                        Reply
-                      </button>
-                    </div>
+
+                    {/* Nested Replies Section */}
+                    {hasReplies && (
+                      <div style={styles.repliesContainer}>
+                        {commentReplies.map((reply, rIndex) => {
+                          const replyDisplayName = reply.displayName || reply.display_name || "Vezlivo User";
+                          return (
+                            <div key={reply.id || reply.commentId || rIndex} style={styles.replyItem}>
+                              <img
+                                src={reply.photoURL || reply.profile_url || "https://via.placeholder.com/40"}
+                                alt=""
+                                style={styles.replyAvatar}
+                              />
+                              <div style={styles.commentBody}>
+                                <div style={styles.commentTop}>
+                                  <strong style={styles.name}>{replyDisplayName}</strong>
+                                  <span style={styles.username}>@{reply.username || "user"}</span>
+                                </div>
+                                <p style={styles.commentText}>{reply.text}</p>
+                                <div style={styles.commentFooterRow}>
+                                  <span style={styles.time}>{formatTime(reply.createdAt || reply.created_at)}</span>
+                                  <button
+                                    type="button"
+                                    style={styles.replyTriggerBtn}
+                                    onClick={() => {
+                                      setReplyingTo({
+                                        commentId: commentId,
+                                        displayName: replyDisplayName,
+                                      });
+                                      setCommentText(`@${replyDisplayName} `);
+                                    }}
+                                  >
+                                    Reply
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
-                </div>
-              );
-            })
+                );
+              });
+            })()
           )}
         </div>
 
@@ -503,5 +560,30 @@ const styles = {
   emptyText: {
     color: "#888",
     fontSize: "13px",
+  },
+  commentThreadWrapper: {
+    marginBottom: "18px",
+  },
+  repliesContainer: {
+    marginTop: "12px",
+    marginLeft: "32px",
+    paddingLeft: "12px",
+    borderLeft: "2px solid #f0f0f0",
+    display: "flex",
+    flexDirection: "column",
+    gap: "14px",
+  },
+  replyItem: {
+    display: "flex",
+    alignItems: "flex-start",
+    gap: "10px",
+  },
+  replyAvatar: {
+    width: "32px",
+    height: "32px",
+    borderRadius: "50%",
+    objectFit: "cover",
+    background: "#eee",
+    flexShrink: 0,
   },
 };
