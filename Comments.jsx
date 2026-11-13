@@ -11,6 +11,29 @@ export default function Comments({ postId, postOwnerId, onClose }) {
   const [commentText, setCommentText] = useState("");
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  const [viewportHeight, setViewportHeight] = useState(null);
+
+  // Visual Viewport listener to anchor smoothly to mobile keyboard without shifting the layout
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.visualViewport) {
+        setViewportHeight(window.visualViewport.height);
+      }
+    };
+
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener("resize", handleResize);
+      window.visualViewport.addEventListener("scroll", handleResize);
+      setViewportHeight(window.visualViewport.height);
+    }
+
+    return () => {
+      if (window.visualViewport) {
+        window.visualViewport.removeEventListener("resize", handleResize);
+        window.visualViewport.removeEventListener("scroll", handleResize);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
@@ -123,7 +146,13 @@ export default function Comments({ postId, postOwnerId, onClose }) {
   };
 
   return (
-    <div style={styles.overlay} onClick={onClose}>
+    <div 
+      style={{
+        ...styles.overlay,
+        ...(viewportHeight ? { height: `${viewportHeight}px` } : {})
+      }} 
+      onClick={onClose}
+    >
       <div style={styles.panel} onClick={(e) => e.stopPropagation()}>
         {/* Header */}
         <div style={styles.header}>
