@@ -118,6 +118,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           postOwnerId: postOwnerId,
           userId: currentUser.uid,
           text: text,
+          parentId: replyingTo ? replyingTo.commentId : null,
         }),
       });
 
@@ -125,6 +126,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
 
       if (data.success) {
         setCommentText("");
+        setReplyingTo(null);
         setComments((prev) => [
           ...prev,
           {
@@ -135,6 +137,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
             photoURL: currentUser.photoURL || "",
             text,
             createdAt: Date.now(),
+            parentId: replyingTo ? replyingTo.commentId : null,
           },
         ]);
       } else {
@@ -199,29 +202,64 @@ export default function Comments({ postId, postOwnerId, onClose }) {
               <span style={styles.emptyText}>Be the first person to comment.</span>
             </div>
           ) : (
-            comments.map((comment, index) => (
-              <div key={comment.id || comment.commentId || index} style={styles.commentItem}>
-                <img
-                  src={comment.photoURL || comment.profile_url || "https://via.placeholder.com/50"}
-                  alt=""
-                  style={styles.avatar}
-                />
-                <div style={styles.commentBody}>
-                  <div style={styles.commentTop}>
-                    <strong style={styles.name}>
-                      {comment.displayName || comment.display_name || "Vezlivo User"}
-                    </strong>
-                    <span style={styles.username}>
-                      @{comment.username || "user"}
-                    </span>
+            comments.map((comment, index) => {
+              const currentDisplayName = comment.displayName || comment.display_name || "Vezlivo User";
+              return (
+                <div key={comment.id || comment.commentId || index} style={styles.commentItem}>
+                  <img
+                    src={comment.photoURL || comment.profile_url || "https://via.placeholder.com/50"}
+                    alt=""
+                    style={styles.avatar}
+                  />
+                  <div style={styles.commentBody}>
+                    <div style={styles.commentTop}>
+                      <strong style={styles.name}>
+                        {currentDisplayName}
+                      </strong>
+                      <span style={styles.username}>
+                        @{comment.username || "user"}
+                      </span>
+                    </div>
+                    <p style={styles.commentText}>{comment.text}</p>
+                    <div style={styles.commentFooterRow}>
+                      <span style={styles.time}>{formatTime(comment.createdAt || comment.created_at)}</span>
+                      <button
+                        type="button"
+                        style={styles.replyTriggerBtn}
+                        onClick={() => {
+                          setReplyingTo({
+                            commentId: comment.id || comment.commentId,
+                            displayName: currentDisplayName,
+                          });
+                          setCommentText(`@${currentDisplayName} `);
+                        }}
+                      >
+                        Reply
+                      </button>
+                    </div>
                   </div>
-                  <p style={styles.commentText}>{comment.text}</p>
-                  <span style={styles.time}>{formatTime(comment.createdAt || comment.created_at)}</span>
                 </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
+
+        {/* Replying Banner */}
+        {replyingTo && (
+          <div style={styles.replyingBanner}>
+            <span>Replying to <strong>{replyingTo.displayName}</strong></span>
+            <button
+              type="button"
+              onClick={() => {
+                setReplyingTo(null);
+                setCommentText("");
+              }}
+              style={styles.cancelReplyBtn}
+            >
+              ×
+            </button>
+          </div>
+        )}
 
         {/* Input Bar pinned cleanly inside the fixed panel */}
         <div style={styles.inputArea}>
@@ -234,7 +272,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
                 sendComment();
               }
             }}
-            placeholder="Add a comment..."
+            placeholder={replyingTo ? `Replying to ${replyingTo.displayName}...` : "Add a comment..."}
             maxLength={500}
             style={styles.input}
           />
@@ -369,13 +407,46 @@ const styles = {
     color: "#222",
     wordBreak: "break-word",
   },
+  commentFooterRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: "12px",
+    marginTop: "2px",
+  },
   time: {
     fontSize: "11px",
     color: "#999",
   },
- inputArea: {
-    position: "relative", // Change from absolute to relative
-    marginTop: "auto",     // Push it naturally to the bottom of the flex container
+  replyTriggerBtn: {
+    background: "transparent",
+    border: "none",
+    color: "#6366f1",
+    fontSize: "12px",
+    fontWeight: "600",
+    cursor: "pointer",
+    padding: 0,
+  },
+  replyingBanner: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    padding: "8px 16px",
+    background: "#f0f4f8",
+    borderTop: "1px solid #e2e8f0",
+    fontSize: "13px",
+    color: "#333",
+  },
+  cancelReplyBtn: {
+    background: "transparent",
+    border: "none",
+    fontSize: "16px",
+    fontWeight: "bold",
+    cursor: "pointer",
+    color: "#555",
+  },
+  inputArea: {
+    position: "relative",
+    marginTop: "auto",
     display: "flex",
     alignItems: "center",
     gap: "10px",
