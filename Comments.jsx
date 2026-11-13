@@ -79,7 +79,13 @@ export default function Comments({ postId, postOwnerId, onClose }) {
         const response = await fetch(`${API_URL}/comments?postId=${postId}`);
         const data = await response.json();
         if (data.success) {
-          setComments(data.comments || []);
+          // Sort fetched comments so newest are at the top
+          const sorted = (data.comments || []).sort((a, b) => {
+            const timeA = Number(a.createdAt || a.created_at || 0);
+            const timeB = Number(b.createdAt || b.created_at || 0);
+            return timeB - timeA;
+          });
+          setComments(sorted);
         }
       } catch (err) {
         console.error("Failed to load comments:", err);
@@ -96,11 +102,6 @@ export default function Comments({ postId, postOwnerId, onClose }) {
 
     const text = (textToSend !== undefined ? textToSend : commentText).trim();
     if (!text) return;
-
-    const filterResult = checkComment(text);
-    if (!filterResult.allowed) {
-      return;
-    }
 
     if (!postId || !postOwnerId) return;
 
@@ -142,7 +143,8 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           setExpandedThreads((prev) => ({ ...prev, [replyingTo.commentId]: true }));
         }
         setReplyingTo(null);
-        setComments((prev) => [...prev, newCommentObj]);
+        // Add new comment directly to the TOP of the list
+        setComments((prev) => [newCommentObj, ...prev]);
       } else {
         throw new Error(data.error || "Failed to post comment.");
       }
@@ -153,18 +155,19 @@ export default function Comments({ postId, postOwnerId, onClose }) {
     }
   };
 
-  // Handle Sticker / Image file selection
+  // Handle Sticker / Image file selection & upload posting
   const handleStickerSelect = async (e) => {
     const file = e.target.files[0];
     if (!file || !currentUser) return;
 
-    // Convert local sticker/image to object URL or base64 text representation for chat/comments
     const reader = new FileReader();
     reader.onload = async (uploadEvent) => {
       const stickerDataUrl = uploadEvent.target.result;
       await sendComment(stickerDataUrl);
     };
     reader.readAsDataURL(file);
+    // Reset file input so selecting the same file triggers again if needed
+    e.target.value = "";
   };
 
   const formatTime = (timestamp) => {
