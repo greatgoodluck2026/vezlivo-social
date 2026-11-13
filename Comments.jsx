@@ -372,11 +372,9 @@ const styles = {
     fontSize: "11px",
     color: "#999",
   },
-  inputArea: {
-    position: "absolute",
-    bottom: "68px",
-    left: 0,
-    right: 0,
+ inputArea: {
+    position: "relative", // Change from absolute to relative
+    marginTop: "auto",     // Push it naturally to the bottom of the flex container
     display: "flex",
     alignItems: "center",
     gap: "10px",
