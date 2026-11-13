@@ -85,25 +85,53 @@ export default {
           )
         `;
 
-        // GET Comments
-        if (request.method === "GET") {
+       // GET Comments for a post (with dynamic user profile joining)
+        if (request.method === "GET" && url.pathname === "/comments") {
           const postId = url.searchParams.get("postId");
           if (!postId) {
             return json({ success: false, error: "Missing postId" }, 400);
           }
 
+          // Ensure parent_id column exists
+          await sql`ALTER TABLE comments ADD COLUMN IF NOT EXISTS parent_id TEXT;`;
+
+          // Fetch comments joined with users table to get live profile pictures and usernames
           const comments = await sql`
-            SELECT c.*, 
-                   COALESCE(u.display_name, 'Vezlivo User') AS display_name, 
-                   COALESCE(u.username, 'user') AS username, 
-                   COALESCE(u.profile_url, u.photo_url, '') AS profile_url
+            SELECT 
+              c.id, 
+              c.post_id, 
+              c.user_id, 
+              COALESCE(u.display_name, c.display_name, 'Vezlivo User') AS display_name,
+              COALESCE(u.username, c.username, 'user') AS username,
+              COALESCE(u.profile_url, u.photo_url, c.profile_url, c.photo_url, '') AS photo_url,
+              c.text, 
+              c.parent_id, 
+              c.created_at 
             FROM comments c
             LEFT JOIN users u ON c.user_id = u.uid
-            WHERE c.post_id = ${postId}
+            WHERE c.post_id = ${postId} 
             ORDER BY c.created_at ASC
           `;
 
-          return json({ success: true, comments });
+          // Map fields to match frontend property expectations seamlessly
+          const formattedComments = comments.map(c => ({
+            id: c.id,
+            commentId: c.id,
+            postId: c.post_id,
+            userId: c.user_id,
+            user_id: c.user_id,
+            displayName: c.display_name,
+            display_name: c.display_name,
+            username: c.username,
+            photoURL: c.photo_url,
+            profile_url: c.photo_url,
+            text: c.text,
+            parentId: c.parent_id,
+            parent_id: c.parent_id,
+            createdAt: c.created_at
+          }));
+
+          return json({ success: true, comments: formattedComments });
         }
 
         // POST Comments

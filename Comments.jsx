@@ -134,7 +134,6 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           id: Date.now().toString(),
           user_id: currentUser.uid,
           displayName: currentUser.displayName || "Vezlivo User",
-          username: "user",
           photoURL: currentUser.photoURL || "",
           text,
           createdAt: Date.now(),
@@ -251,7 +250,6 @@ export default function Comments({ postId, postOwnerId, onClose }) {
                       <div style={styles.commentBody}>
                         <div style={styles.commentTop}>
                           <strong style={styles.name}>{currentDisplayName}</strong>
-                          <span style={styles.username}>@{comment.username || "user"}</span>
                         </div>
                         <p style={styles.commentText}>{comment.text}</p>
                         <div style={styles.commentFooterRow}>
@@ -307,7 +305,6 @@ export default function Comments({ postId, postOwnerId, onClose }) {
                               <div style={styles.commentBody}>
                                 <div style={styles.commentTop}>
                                   <strong style={styles.name}>{replyDisplayName}</strong>
-                                  <span style={styles.username}>@{reply.username || "user"}</span>
                                 </div>
                                 <p style={styles.commentText}>{reply.text}</p>
                                 <div style={styles.commentFooterRow}>
@@ -494,10 +491,6 @@ const styles = {
     fontSize: "13px",
     fontWeight: "700",
     color: "#111",
-  },
-  username: {
-    fontSize: "12px",
-    color: "#888",
   },
   commentText: {
     margin: "4px 0 3px",
