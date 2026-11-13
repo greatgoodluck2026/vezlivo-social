@@ -1082,10 +1082,10 @@ export default function Home({ onNavigate, onCreate, onProfile, onActivity, onDi
 }
 
 const styles = {
-  page: {
+ page: {
     position: "relative",
     width: "100vw",
-    height: "100vh",
+    height: "100dvh", // <--- Change this
     background: "#000000",
     color: "#ffffff",
     fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
@@ -1228,9 +1228,9 @@ const styles = {
     fontSize: "18px",
   },
 
-  feed: {
+ feed: {
     width: "100vw",
-    height: "calc(100vh - 68px)",
+    height: "calc(100dvh - 68px)", // <--- Change this
     overflowY: "scroll",
     scrollSnapType: "y mandatory",
     scrollbarWidth: "none",
@@ -1238,11 +1238,10 @@ const styles = {
     position: "relative",
     background: "#000000",
   },
-
   post: {
     position: "relative",
     width: "100vw",
-    height: "calc(100vh - 68px)",
+    height: "calc(100dvh - 68px)", // <--- Change this
     scrollSnapAlign: "start",
     scrollSnapStop: "always",
     background: "#000000",
