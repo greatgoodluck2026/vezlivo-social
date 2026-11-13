@@ -14,6 +14,23 @@ export default function Comments({ postId, postOwnerId, onClose }) {
   const [viewportHeight, setViewportHeight] = useState(null);
   const [keyboardOffset, setKeyboardOffset] = useState(0);
 
+  // Lock background body scroll completely so the browser cannot pan the feed
+  useEffect(() => {
+    const originalOverflow = document.body.style.overflow;
+    const originalPosition = document.body.style.position;
+    const originalWidth = document.body.style.width;
+
+    document.body.style.overflow = "hidden";
+    document.body.style.position = "fixed";
+    document.body.style.width = "100%";
+
+    return () => {
+      document.body.style.overflow = originalOverflow;
+      document.body.style.position = originalPosition;
+      document.body.style.width = originalWidth;
+    };
+  }, []);
+
   // Visual Viewport listener to anchor smoothly to mobile keyboard without shifting the layout
   useEffect(() => {
     const handleResize = () => {
