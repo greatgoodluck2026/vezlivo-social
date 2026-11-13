@@ -122,12 +122,14 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           userId: currentUser.uid,
           text: text,
           parentId: replyingTo ? replyingTo.commentId : null,
+          parent_id: replyingTo ? replyingTo.commentId : null,
         }),
       });
 
       const data = await response.json();
 
       if (data.success) {
+        const targetParentId = replyingTo ? replyingTo.commentId : null;
         const newCommentObj = {
           id: Date.now().toString(),
           user_id: currentUser.uid,
@@ -136,8 +138,8 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           photoURL: currentUser.photoURL || "",
           text,
           createdAt: Date.now(),
-          parentId: replyingTo ? replyingTo.commentId : null,
-          parent_id: replyingTo ? replyingTo.commentId : null,
+          parentId: targetParentId,
+          parent_id: targetParentId,
         };
 
         setCommentText("");
@@ -190,8 +192,8 @@ export default function Comments({ postId, postOwnerId, onClose }) {
             <h2 style={styles.title}>Comments</h2>
             <span style={styles.commentCount}>
               {comments.filter(c => {
-                const p = c.parentId || c.parent_id;
-                return !p || p === "" || p === null;
+                const p = c.parent_id || c.parentId;
+                return !p || p === "" || p === null || p === "null" || p === undefined;
               }).length} comments
             </span>
           </div>
@@ -212,20 +214,19 @@ export default function Comments({ postId, postOwnerId, onClose }) {
             </div>
           ) : (
             (() => {
-              // Strictly isolate top-level comments (must have NO parent_id or parentId whatsoever)
+              // Strictly isolate top-level comments using parent_id and parentId check
               const topLevelComments = comments.filter((c) => {
-                const pId = c.parentId || c.parent_id;
-                return !pId || pId === "" || pId === null || pId === undefined;
+                const pId = c.parent_id || c.parentId;
+                return !pId || pId === "" || pId === null || pId === "null" || pId === undefined;
               });
 
               // Build a clean map of all replies grouped by their parent comment ID
               const repliesMap = {};
               comments.forEach((c) => {
-                const pId = c.parentId || c.parent_id;
-                if (pId && pId !== "" && pId !== null) {
+                const pId = c.parent_id || c.parentId;
+                if (pId && pId !== "" && pId !== null && pId !== "null" && pId !== undefined) {
                   if (!repliesMap[pId]) repliesMap[pId] = [];
-                  // Prevent duplicate entries
-                  if (!repliesMap[pId].some((existing) => (existing.id || existing.commentId) === (c.id || c.commentId))) {
+                  if (!repliesMap[pId].some((existing) => String(existing.id || existing.commentId) === String(c.id || c.commentId))) {
                     repliesMap[pId].push(c);
                   }
                 }

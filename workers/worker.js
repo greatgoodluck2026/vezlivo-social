@@ -109,7 +109,8 @@ export default {
         // POST Comments
         if (request.method === "POST") {
           const body = await request.json();
-          const { postId, postOwnerId, userId, text, parentId } = body;
+          const { postId, postOwnerId, userId, text, parentId, parent_id } = body;
+          const effectiveParentId = parentId || parent_id || null;
 
           if (!postId || !userId || !text) {
             return json({ success: false, error: "Missing required fields" }, 400);
@@ -157,7 +158,7 @@ export default {
 
           await sql`
             INSERT INTO comments (post_id, post_owner_id, user_id, text, parent_id, created_at)
-            VALUES (${postId}, ${postOwnerId || ""}, ${userId}, ${trimmedText}, ${parentId || null}, ${createdAt})
+            VALUES (${postId}, ${postOwnerId || ""}, ${userId}, ${trimmedText}, ${effectiveParentId}, ${createdAt})
           `;
 
           if (!isNaN(postId)) {
