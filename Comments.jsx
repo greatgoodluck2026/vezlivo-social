@@ -134,7 +134,9 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           id: Date.now().toString(),
           user_id: currentUser.uid,
           displayName: currentUser.displayName || "Vezlivo User",
+          display_name: currentUser.displayName || "Vezlivo User",
           photoURL: currentUser.photoURL || "",
+          profile_url: currentUser.photoURL || "",
           text,
           createdAt: Date.now(),
           parentId: targetParentId,
@@ -262,7 +264,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
                                 commentId: commentId,
                                 displayName: currentDisplayName,
                               });
-                              setCommentText(`@${currentDisplayName} `);
+                              setCommentText(""); // Clean input without forcing raw handle prefix if desired, or keep clean
                               if (inputRef.current) {
                                 inputRef.current.focus();
                               }
@@ -317,7 +319,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
                                         commentId: commentId,
                                         displayName: replyDisplayName,
                                       });
-                                      setCommentText(`@${replyDisplayName} `);
+                                      setCommentText("");
                                       if (inputRef.current) {
                                         inputRef.current.focus();
                                       }
