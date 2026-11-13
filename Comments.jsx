@@ -283,6 +283,7 @@ const styles = {
     flexDirection: "column",
     boxShadow: "0 -10px 40px rgba(0, 0, 0, 0.4)",
     overflow: "hidden",
+    paddingBottom: "68px",
     zIndex: 1000000,
   },
   header: {
@@ -373,8 +374,8 @@ const styles = {
     color: "#999",
   },
   inputArea: {
-    position: "sticky",
-    bottom: 0,
+    position: "absolute",
+    bottom: "68px",
     left: 0,
     right: 0,
     display: "flex",
