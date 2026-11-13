@@ -12,12 +12,14 @@ export default function Comments({ postId, postOwnerId, onClose }) {
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [viewportHeight, setViewportHeight] = useState(null);
+  const [keyboardOffset, setKeyboardOffset] = useState(0);
 
   // Visual Viewport listener to anchor smoothly to mobile keyboard without shifting the layout
   useEffect(() => {
     const handleResize = () => {
       if (window.visualViewport) {
         setViewportHeight(window.visualViewport.height);
+        setKeyboardOffset(window.visualViewport.offsetTop);
       }
     };
 
@@ -25,6 +27,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
       window.visualViewport.addEventListener("resize", handleResize);
       window.visualViewport.addEventListener("scroll", handleResize);
       setViewportHeight(window.visualViewport.height);
+      setKeyboardOffset(window.visualViewport.offsetTop);
     }
 
     return () => {
@@ -149,7 +152,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
     <div 
       style={{
         ...styles.overlay,
-        ...(viewportHeight ? { height: `${viewportHeight}px` } : {})
+        ...(viewportHeight ? { height: `${viewportHeight}px`, top: `${keyboardOffset}px` } : {})
       }} 
       onClick={onClose}
     >
