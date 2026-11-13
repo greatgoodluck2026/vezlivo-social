@@ -6,7 +6,7 @@ import SoundFeed from "./SoundFeed.jsx";
 import { apiGet, apiPost } from "./apiClient.js"; 
 import '@mux/mux-video';
 
-export default function Home({ onNavigate, onCreate, onProfile, onActivity, onDiscover }) {
+export default function Home({ commentsOpen, onNavigate, onCreate, onProfile, onActivity, onDiscover }) {
   const [user, setUser] = useState(null);
   const [posts, setPosts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1016,58 +1016,61 @@ export default function Home({ onNavigate, onCreate, onProfile, onActivity, onDi
         </div>
       )}
 
-      <nav style={styles.bottomNav} aria-label="Main navigation">
-        <button
-          type="button"
-          style={{
-            ...styles.navButton,
-            ...(activeSection === "Home" ? styles.navButtonActive : {}),
-          }}
-          onClick={() => {
-            setActiveSection("Home");
-            window.scrollTo({ top: 0, behavior: "smooth" });
-          }}
-        >
-          <span style={styles.navIcon}>🏠</span>
-          <span>Home</span>
-        </button>
+     {/* Main navigation - only show when comments are closed */}
+      {!commentsOpen && (
+        <nav style={styles.bottomNav} aria-label="Main navigation">
+          <button
+            type="button"
+            style={{
+              ...styles.navButton,
+              ...(activeSection === "Home" ? styles.navButtonActive : {}),
+            }}
+            onClick={() => {
+              setActiveSection("Home");
+              window.scrollTo({ top: 0, behavior: "smooth" });
+            }}
+          >
+            <span style={styles.navIcon}>🏠</span>
+            <span>Home</span>
+          </button>
 
-        <button
-          type="button"
-          style={styles.navButton}
-          onClick={() => openSection("Discover")}
-        >
-          <span style={styles.navIcon}>🔎</span>
-          <span>Discover</span>
-        </button>
+          <button
+            type="button"
+            style={styles.navButton}
+            onClick={() => openSection("Discover")}
+          >
+            <span style={styles.navIcon}>🔎</span>
+            <span>Discover</span>
+          </button>
 
-        <button
-          type="button"
-          style={styles.createButton}
-          onClick={() => openSection("Create")}
-          aria-label="Create"
-        >
-          ＋
-        </button>
+          <button
+            type="button"
+            style={styles.createButton}
+            onClick={() => openSection("Create")}
+            aria-label="Create"
+          >
+            ＋
+          </button>
 
-        <button
-          type="button"
-          style={styles.navButton}
-          onClick={() => openSection("Activity")}
-        >
-          <span style={styles.navIcon}>🔔</span>
-          <span>Activity</span>
-        </button>
+          <button
+            type="button"
+            style={styles.navButton}
+            onClick={() => openSection("Activity")}
+          >
+            <span style={styles.navIcon}>🔔</span>
+            <span>Activity</span>
+          </button>
 
-        <button
-          type="button"
-          style={styles.navButton}
-          onClick={() => openSection("Profile")}
-        >
-          <span style={styles.navIcon}>👤</span>
-          <span>Profile</span>
-        </button>
-      </nav>
+          <button
+            type="button"
+            style={styles.navButton}
+            onClick={() => openSection("Profile")}
+          >
+            <span style={styles.navIcon}>👤</span>
+            <span>Profile</span>
+          </button>
+        </nav>
+      )}
 
       {reportPost && (
         <Report

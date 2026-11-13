@@ -585,6 +585,7 @@ function PostCard({
 
 function HomePage({
   user,
+  commentsOpen,
   onLogin,
   onCreate,
   onDiscover,
@@ -594,6 +595,7 @@ function HomePage({
   return (
     <Home
       user={user}
+      commentsOpen={commentsOpen}
       onLogin={onLogin}
       onCreate={onCreate}
       onDiscover={onDiscover}
@@ -602,7 +604,6 @@ function HomePage({
     />
   );
 }
-
 
 /* =========================================================
    APP
@@ -925,10 +926,11 @@ const [commentsData, setCommentsData] = useState(null);
         }}
       />
     );
-  } else {
+} else {
     content = (
       <HomePage
         user={user}
+        commentsOpen={Boolean(commentsData)}
         onLogin={() => navigate("login")}
         onCreate={() => {
           if (!user) {
