@@ -971,79 +971,81 @@ const [commentsData, setCommentsData] = useState(null);
         {content}
       </div>
 
-   {/* Global Permanent Bottom Navigation Bar */}
-      <nav className="bottom-navigation" style={{ zIndex: 99999, pointerEvents: "auto", position: "fixed", bottom: 0, left: 0, right: 0, display: commentsData ? "none" : "flex", justifyContent: "space-around", background: "rgba(15,15,18,0.97)", borderTop: "1px solid #27272a", height: "68px", alignItems: "center", padding: "0 8px" }}>
-        <button
-          type="button"
-          className={`nav-item ${page === "home" ? "active" : ""}`}
-          onClick={() => {
-            navigate("home");
-            window.scrollTo({ top: 0, behavior: "smooth" });
-          }}
-          style={{ background: "transparent", border: "none", color: page === "home" ? "#fff" : "#71717a", display: "flex", flexDirection: "column", alignItems: "center", cursor: "pointer", fontSize: "11px", fontWeight: "600" }}
-        >
-          <span style={{ fontSize: "18px" }}>🏠</span>
-          <small>Home</small>
-        </button>
+   {/* Global Permanent Bottom Navigation Bar - Only show when comments are closed */}
+      {!commentsData && (
+        <nav className="bottom-navigation" style={{ zIndex: 99999, pointerEvents: "auto", position: "fixed", bottom: 0, left: 0, right: 0, display: "flex", justifyContent: "space-around", background: "rgba(15,15,18,0.97)", borderTop: "1px solid #27272a", height: "68px", alignItems: "center", padding: "0 8px" }}>
+          <button
+            type="button"
+            className={`nav-item ${page === "home" ? "active" : ""}`}
+            onClick={() => {
+              navigate("home");
+              window.scrollTo({ top: 0, behavior: "smooth" });
+            }}
+            style={{ background: "transparent", border: "none", color: page === "home" ? "#fff" : "#71717a", display: "flex", flexDirection: "column", alignItems: "center", cursor: "pointer", fontSize: "11px", fontWeight: "600" }}
+          >
+            <span style={{ fontSize: "18px" }}>🏠</span>
+            <small>Home</small>
+          </button>
 
-        <button
-          type="button"
-          className={`nav-item ${page === "discover" ? "active" : ""}`}
-          onClick={() => navigate("discover")}
-          style={{ background: "transparent", border: "none", color: page === "discover" ? "#fff" : "#71717a", display: "flex", flexDirection: "column", alignItems: "center", cursor: "pointer", fontSize: "11px", fontWeight: "600" }}
-        >
-          <span style={{ fontSize: "18px" }}>🔎</span>
-          <small>Discover</small>
-        </button>
+          <button
+            type="button"
+            className={`nav-item ${page === "discover" ? "active" : ""}`}
+            onClick={() => navigate("discover")}
+            style={{ background: "transparent", border: "none", color: page === "discover" ? "#fff" : "#71717a", display: "flex", flexDirection: "column", alignItems: "center", cursor: "pointer", fontSize: "11px", fontWeight: "600" }}
+          >
+            <span style={{ fontSize: "18px" }}>🔎</span>
+            <small>Discover</small>
+          </button>
 
-        <button
-          type="button"
-          className="nav-item"
-          onClick={() => {
-            if (!user) {
-              navigate("login");
-              return;
-            }
-            setDraftToOpen("");
-            navigate("create");
-          }}
-          style={{ background: "linear-gradient(135deg, #6366f1, #38bdf8)", border: "none", color: "#fff", width: "44px", height: "32px", borderRadius: "8px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", fontSize: "22px", fontWeight: "800" }}
-        >
-          ＋
-        </button>
+          <button
+            type="button"
+            className="nav-item"
+            onClick={() => {
+              if (!user) {
+                navigate("login");
+                return;
+              }
+              setDraftToOpen("");
+              navigate("create");
+            }}
+            style={{ background: "linear-gradient(135deg, #6366f1, #38bdf8)", border: "none", color: "#fff", width: "44px", height: "32px", borderRadius: "8px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", fontSize: "22px", fontWeight: "800" }}
+          >
+            ＋
+          </button>
 
-        <button
-          type="button"
-          className={`nav-item ${page === "activity" ? "active" : ""}`}
-          onClick={() => {
-            if (!user) {
-              navigate("login");
-              return;
-            }
-            navigate("activity");
-          }}
-          style={{ background: "transparent", border: "none", color: page === "activity" ? "#fff" : "#71717a", display: "flex", flexDirection: "column", alignItems: "center", cursor: "pointer", fontSize: "11px", fontWeight: "600" }}
-        >
-          <span style={{ fontSize: "18px" }}>🔔</span>
-          <small>Activity</small>
-        </button>
+          <button
+            type="button"
+            className={`nav-item ${page === "activity" ? "active" : ""}`}
+            onClick={() => {
+              if (!user) {
+                navigate("login");
+                return;
+              }
+              navigate("activity");
+            }}
+            style={{ background: "transparent", border: "none", color: page === "activity" ? "#fff" : "#71717a", display: "flex", flexDirection: "column", alignItems: "center", cursor: "pointer", fontSize: "11px", fontWeight: "600" }}
+          >
+            <span style={{ fontSize: "18px" }}>🔔</span>
+            <small>Activity</small>
+          </button>
 
-        <button
-          type="button"
-          className={`nav-item ${page === "profile" ? "active" : ""}`}
-          onClick={() => {
-            if (!user) {
-              navigate("login");
-              return;
-            }
-            navigate("profile");
-          }}
-          style={{ background: "transparent", border: "none", color: page === "profile" ? "#fff" : "#71717a", display: "flex", flexDirection: "column", alignItems: "center", cursor: "pointer", fontSize: "11px", fontWeight: "600" }}
-        >
-          <span style={{ fontSize: "18px" }}>👤</span>
-          <small>Profile</small>
-        </button>
-      </nav>
+          <button
+            type="button"
+            className={`nav-item ${page === "profile" ? "active" : ""}`}
+            onClick={() => {
+              if (!user) {
+                navigate("login");
+                return;
+              }
+              navigate("profile");
+            }}
+            style={{ background: "transparent", border: "none", color: page === "profile" ? "#fff" : "#71717a", display: "flex", flexDirection: "column", alignItems: "center", cursor: "pointer", fontSize: "11px", fontWeight: "600" }}
+          >
+            <span style={{ fontSize: "18px" }}>👤</span>
+            <small>Profile</small>
+          </button>
+        </nav>
+      )}
 
       {commentsData && (
         <Comments
