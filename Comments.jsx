@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "./firebase.js";
 import { checkComment } from "./CommentFilter";
@@ -14,6 +14,9 @@ export default function Comments({ postId, postOwnerId, onClose }) {
   const [viewportHeight, setViewportHeight] = useState(null);
   const [keyboardOffset, setKeyboardOffset] = useState(0);
   const [replyingTo, setReplyingTo] = useState(null); // stores { commentId, displayName }
+  const [expandedThreads, setExpandedThreads] = useState({}); // tracks which threads have their replies shown
+
+  const inputRef = useRef(null); // Reference to auto-focus input on reply click
   
   // Lock background body scroll completely so the browser cannot pan the feed
   useEffect(() => {
@@ -125,21 +128,23 @@ export default function Comments({ postId, postOwnerId, onClose }) {
       const data = await response.json();
 
       if (data.success) {
+        const newCommentObj = {
+          id: Date.now().toString(),
+          user_id: currentUser.uid,
+          displayName: currentUser.displayName || "Vezlivo User",
+          username: "user",
+          photoURL: currentUser.photoURL || "",
+          text,
+          createdAt: Date.now(),
+          parentId: replyingTo ? replyingTo.commentId : null,
+        };
+
         setCommentText("");
+        if (replyingTo) {
+          setExpandedThreads((prev) => ({ ...prev, [replyingTo.commentId]: true }));
+        }
         setReplyingTo(null);
-        setComments((prev) => [
-          ...prev,
-          {
-            id: Date.now().toString(),
-            user_id: currentUser.uid,
-            displayName: currentUser.displayName || "Vezlivo User",
-            username: "user",
-            photoURL: currentUser.photoURL || "",
-            text,
-            createdAt: Date.now(),
-            parentId: replyingTo ? replyingTo.commentId : null,
-          },
-        ]);
+        setComments((prev) => [...prev, newCommentObj]);
       } else {
         throw new Error(data.error || "Failed to post comment.");
       }
@@ -219,6 +224,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
                 const currentDisplayName = comment.displayName || comment.display_name || "Vezlivo User";
                 const commentReplies = repliesMap[commentId] || [];
                 const hasReplies = commentReplies.length > 0;
+                const isExpanded = !!expandedThreads[commentId];
 
                 return (
                   <div key={commentId || index} style={styles.commentThreadWrapper}>
@@ -246,16 +252,35 @@ export default function Comments({ postId, postOwnerId, onClose }) {
                                 displayName: currentDisplayName,
                               });
                               setCommentText(`@${currentDisplayName} `);
+                              if (inputRef.current) {
+                                inputRef.current.focus();
+                              }
                             }}
                           >
                             Reply
                           </button>
                         </div>
+
+                        {/* Snapchat Style Show/Hide Replies Toggle */}
+                        {hasReplies && (
+                          <button
+                            type="button"
+                            style={styles.toggleRepliesBtn}
+                            onClick={() => {
+                              setExpandedThreads(prev => ({
+                                ...prev,
+                                [commentId]: !prev[commentId]
+                              }));
+                            }}
+                          >
+                            <span style={styles.replyArrow}>↳</span> {isExpanded ? "Hide replies" : `Show ${commentReplies.length} ${commentReplies.length === 1 ? "reply" : "replies"}`}
+                          </button>
+                        )}
                       </div>
                     </div>
 
-                    {/* Nested Replies Section */}
-                    {hasReplies && (
+                    {/* Nested Replies Section (Only visible when toggled open) */}
+                    {hasReplies && isExpanded && (
                       <div style={styles.repliesContainer}>
                         {commentReplies.map((reply, rIndex) => {
                           const replyDisplayName = reply.displayName || reply.display_name || "Vezlivo User";
@@ -283,6 +308,9 @@ export default function Comments({ postId, postOwnerId, onClose }) {
                                         displayName: replyDisplayName,
                                       });
                                       setCommentText(`@${replyDisplayName} `);
+                                      if (inputRef.current) {
+                                        inputRef.current.focus();
+                                      }
                                     }}
                                   >
                                     Reply
@@ -321,6 +349,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
         {/* Input Bar pinned cleanly inside the fixed panel */}
         <div style={styles.inputArea}>
           <input
+            ref={inputRef}
             type="text"
             value={commentText}
             onChange={(event) => setCommentText(event.target.value)}
@@ -483,6 +512,22 @@ const styles = {
     cursor: "pointer",
     padding: 0,
   },
+  toggleRepliesBtn: {
+    background: "transparent",
+    border: "none",
+    color: "#3b82f6",
+    fontSize: "12px",
+    fontWeight: "600",
+    cursor: "pointer",
+    padding: 0,
+    marginTop: "6px",
+    display: "flex",
+    alignItems: "center",
+    gap: "4px",
+  },
+  replyArrow: {
+    fontSize: "13px",
+  },
   replyingBanner: {
     display: "flex",
     alignItems: "center",
@@ -565,8 +610,8 @@ const styles = {
     marginBottom: "18px",
   },
   repliesContainer: {
-    marginTop: "12px",
-    marginLeft: "32px",
+    marginTop: "10px",
+    marginLeft: "28px",
     paddingLeft: "12px",
     borderLeft: "2px solid #f0f0f0",
     display: "flex",
