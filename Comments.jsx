@@ -97,7 +97,10 @@ export default function Comments({ postId, postOwnerId, onClose }) {
     }
 
     const text = (textToSend !== undefined ? textToSend : commentText).trim();
-    if (!text) return;
+    if (!text) {
+      alert("Comment cannot be empty.");
+      return;
+    }
 
     const filterResult = checkComment(text);
     if (!filterResult.allowed) {
@@ -215,13 +218,11 @@ export default function Comments({ postId, postOwnerId, onClose }) {
             </div>
           ) : (
             (() => {
-              // Strictly isolate top-level comments using parent_id and parentId check
               const topLevelComments = comments.filter((c) => {
                 const pId = c.parent_id || c.parentId;
                 return !pId || pId === "" || pId === null || pId === "null" || pId === undefined;
               });
 
-              // Build a clean map of all replies grouped by their parent comment ID
               const repliesMap = {};
               comments.forEach((c) => {
                 const pId = c.parent_id || c.parentId;
@@ -292,7 +293,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
                       </div>
                     </div>
 
-                    {/* Nested Replies Section (Only visible when toggled open) */}
+                    {/* Nested Replies Section */}
                     {hasReplies && isExpanded && (
                       <div style={styles.repliesContainer}>
                         {commentReplies.map((reply, rIndex) => {
@@ -358,7 +359,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           </div>
         )}
 
-        {/* Quick Reaction Emoji Bar (Vezlivo Quick Actions) */}
+        {/* Quick Reaction Emoji Bar */}
         <div style={styles.quickEmojiBar}>
           {["❤️", "🥰", "😂", "😭", "🔥", "🙏", "😊"].map((emoji) => (
             <button
@@ -366,7 +367,6 @@ export default function Comments({ postId, postOwnerId, onClose }) {
               type="button"
               style={styles.quickEmojiBtn}
               onClick={() => {
-                // Tapping an emoji instantly populates or sends it
                 setCommentText((prev) => prev + emoji);
               }}
             >
@@ -377,6 +377,18 @@ export default function Comments({ postId, postOwnerId, onClose }) {
 
         {/* Input Bar pinned cleanly inside the fixed panel */}
         <div style={styles.inputArea}>
+          {/* Sticker / Media attachment slot for phone users */}
+          <button
+            type="button"
+            style={styles.stickerBtn}
+            onClick={() => {
+              alert("Sticker picker coming soon!");
+            }}
+            title="Add sticker"
+          >
+            🖼️
+          </button>
+
           <input
             ref={inputRef}
             type="text"
@@ -597,6 +609,14 @@ const styles = {
     borderTop: "1px solid #eee",
     background: "#ffffff",
     zIndex: 10,
+  },
+  stickerBtn: {
+    background: "transparent",
+    border: "none",
+    fontSize: "20px",
+    cursor: "pointer",
+    padding: "0 2px",
+    flexShrink: 0,
   },
   input: {
     flex: 1,
