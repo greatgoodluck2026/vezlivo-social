@@ -137,6 +137,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           text,
           createdAt: Date.now(),
           parentId: replyingTo ? replyingTo.commentId : null,
+          parent_id: replyingTo ? replyingTo.commentId : null,
         };
 
         setCommentText("");
@@ -188,7 +189,10 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           <div>
             <h2 style={styles.title}>Comments</h2>
             <span style={styles.commentCount}>
-              {comments.length} {comments.length === 1 ? "comment" : "comments"}
+              {comments.filter(c => {
+                const p = c.parentId || c.parent_id;
+                return !p || p === "" || p === null;
+              }).length} comments
             </span>
           </div>
           <button type="button" onClick={onClose} style={styles.closeButton}>
@@ -208,14 +212,22 @@ export default function Comments({ postId, postOwnerId, onClose }) {
             </div>
           ) : (
             (() => {
-              // Separate top-level comments and replies
-              const topLevelComments = comments.filter(c => !c.parentId && !c.parent_id);
-              const repliesMap = {};
-              comments.forEach(c => {
+              // Strictly isolate top-level comments (must have NO parent_id or parentId whatsoever)
+              const topLevelComments = comments.filter((c) => {
                 const pId = c.parentId || c.parent_id;
-                if (pId) {
+                return !pId || pId === "" || pId === null || pId === undefined;
+              });
+
+              // Build a clean map of all replies grouped by their parent comment ID
+              const repliesMap = {};
+              comments.forEach((c) => {
+                const pId = c.parentId || c.parent_id;
+                if (pId && pId !== "" && pId !== null) {
                   if (!repliesMap[pId]) repliesMap[pId] = [];
-                  repliesMap[pId].push(c);
+                  // Prevent duplicate entries
+                  if (!repliesMap[pId].some((existing) => (existing.id || existing.commentId) === (c.id || c.commentId))) {
+                    repliesMap[pId].push(c);
+                  }
                 }
               });
 
@@ -261,15 +273,15 @@ export default function Comments({ postId, postOwnerId, onClose }) {
                           </button>
                         </div>
 
-                        {/* Snapchat Style Show/Hide Replies Toggle */}
+                        {/* Vezlivo Show/Hide Replies Toggle */}
                         {hasReplies && (
                           <button
                             type="button"
                             style={styles.toggleRepliesBtn}
                             onClick={() => {
-                              setExpandedThreads(prev => ({
+                              setExpandedThreads((prev) => ({
                                 ...prev,
-                                [commentId]: !prev[commentId]
+                                [commentId]: !prev[commentId],
                               }));
                             }}
                           >
