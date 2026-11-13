@@ -90,13 +90,13 @@ export default function Comments({ postId, postOwnerId, onClose }) {
     fetchComments();
   }, [postId]);
 
-  const sendComment = async () => {
+  const sendComment = async (textToSend) => {
     if (!currentUser) {
       alert("Please log in first.");
       return;
     }
 
-    const text = commentText.trim();
+    const text = (textToSend !== undefined ? textToSend : commentText).trim();
     if (!text) return;
 
     const filterResult = checkComment(text);
@@ -264,7 +264,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
                                 commentId: commentId,
                                 displayName: currentDisplayName,
                               });
-                              setCommentText(""); // Clean input without forcing raw handle prefix if desired, or keep clean
+                              setCommentText(""); 
                               if (inputRef.current) {
                                 inputRef.current.focus();
                               }
@@ -358,6 +358,23 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           </div>
         )}
 
+        {/* Quick Reaction Emoji Bar (Vezlivo Quick Actions) */}
+        <div style={styles.quickEmojiBar}>
+          {["❤️", "🥰", "😂", "😭", "🔥", "🙏", "😊"].map((emoji) => (
+            <button
+              key={emoji}
+              type="button"
+              style={styles.quickEmojiBtn}
+              onClick={() => {
+                // Tapping an emoji instantly populates or sends it
+                setCommentText((prev) => prev + emoji);
+              }}
+            >
+              {emoji}
+            </button>
+          ))}
+        </div>
+
         {/* Input Bar pinned cleanly inside the fixed panel */}
         <div style={styles.inputArea}>
           <input
@@ -376,7 +393,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           />
           <button
             type="button"
-            onClick={sendComment}
+            onClick={() => sendComment()}
             disabled={sending || !commentText.trim()}
             style={{
               ...styles.sendButton,
@@ -553,6 +570,22 @@ const styles = {
     fontWeight: "bold",
     cursor: "pointer",
     color: "#555",
+  },
+  quickEmojiBar: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-around",
+    padding: "10px 16px",
+    background: "#ffffff",
+    borderTop: "1px solid #f0f0f0",
+  },
+  quickEmojiBtn: {
+    background: "transparent",
+    border: "none",
+    fontSize: "22px",
+    cursor: "pointer",
+    padding: "4px",
+    transition: "transform 0.1s ease",
   },
   inputArea: {
     position: "relative",
