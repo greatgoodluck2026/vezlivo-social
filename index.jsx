@@ -965,9 +965,9 @@ const [commentsData, setCommentsData] = useState(null);
   }
 
   return (
-    <div style={{ position: "relative", width: "100vw", height: "100vh", overflow: "hidden", background: "#000000" }}>
+    <div style={{ position: "fixed", inset: 0, width: "100vw", height: "100dvh", overflow: "hidden", background: "#000000" }}>
       {/* Active Screen Content with Scrolling Enabled */}
-      <div style={{ width: "100%", height: "calc(100vh - 68px)", overflowY: "auto" }}>
+      <div style={{ width: "100%", height: "calc(100dvh - 68px)", overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
         {content}
       </div>
 
@@ -1055,7 +1055,6 @@ const [commentsData, setCommentsData] = useState(null);
     </div>
   );
 }
-
 /* =========================================================
    START VEZLIVO
 ========================================================= */
