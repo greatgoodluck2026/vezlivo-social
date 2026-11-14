@@ -19,7 +19,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
   const [likedComments, setLikedComments] = useState({});
   const [dislikedComments, setDislikedComments] = useState({});
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
-  const [fullscreenImage, setFullscreenImage] = useState(null); // Lightbox state
+  const [fullscreenImage, setFullscreenImage] = useState(null);
 
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -339,7 +339,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           </div>
         </div>
 
-        {/* Clean SVG Line Art Action Buttons (WriteThisCode Blue Theme) */}
+        {/* Properly Aligned Action Buttons (WriteThisCode Blue Theme) */}
         <div style={styles.rightActionsContainer}>
           <div style={styles.actionButtonWrapper}>
             <button
@@ -706,14 +706,15 @@ const styles = {
   },
   commentItem: {
     display: "flex",
-    alignItems: "flex-start",
+    alignItems: "center", // Perfectly centers avatar with body and right actions
     gap: "12px",
     marginBottom: "16px",
   },
   replyItem: {
     display: "flex",
-    alignItems: "flex-start",
+    alignItems: "center", // Perfectly centers reply rows
     gap: "10px",
+    marginBottom: "12px",
   },
   avatar: {
     width: "38px",
@@ -722,6 +723,7 @@ const styles = {
     objectFit: "cover",
     background: "#eee",
     flexShrink: 0,
+    alignSelf: "flex-start", // Keep avatar pinned to the top of the comment block
   },
   avatarFallback: {
     width: "38px",
@@ -735,6 +737,7 @@ const styles = {
     alignItems: "center",
     justifyContent: "center",
     flexShrink: 0,
+    alignSelf: "flex-start",
   },
   replyAvatar: {
     width: "30px",
@@ -743,6 +746,7 @@ const styles = {
     objectFit: "cover",
     background: "#eee",
     flexShrink: 0,
+    alignSelf: "flex-start",
   },
   replyAvatarFallback: {
     width: "30px",
@@ -756,6 +760,7 @@ const styles = {
     alignItems: "center",
     justifyContent: "center",
     flexShrink: 0,
+    alignSelf: "flex-start",
   },
   commentBody: {
     flex: 1,
@@ -818,6 +823,7 @@ const styles = {
     gap: "12px",
     marginLeft: "8px",
     flexShrink: 0,
+    alignSelf: "center", // Centers the like/dislike buttons vertically alongside the comment block
   },
   actionButtonWrapper: {
     display: "flex",
@@ -944,6 +950,7 @@ const styles = {
     gap: "8px",
     padding: "10px 16px",
     borderTop: "1px solid #eee",
+/**********************************************************************************************************/
     background: "#ffffff",
     zIndex: 10,
   },
