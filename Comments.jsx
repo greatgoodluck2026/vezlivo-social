@@ -198,6 +198,8 @@ export default function Comments({ postId, postOwnerId, onClose }) {
       }
 
       const targetParentId = replyingTo ? replyingTo.commentId : null;
+      const userDisplayName = currentUser.displayName || currentUser.email?.split("@")[0] || "WriteThisCode User";
+      const userPhotoURL = currentUser.photoURL || "";
 
       const response = await fetch(`${API_URL}/comments`, {
         method: "POST",
@@ -209,6 +211,10 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           post_owner_id: postOwnerId,
           userId: currentUser.uid,
           user_id: currentUser.uid,
+          displayName: userDisplayName,
+          display_name: userDisplayName,
+          photoURL: userPhotoURL,
+          profile_url: userPhotoURL,
           text: text,
           mediaUrls: selectedImages,
           media_urls: selectedImages,
@@ -220,9 +226,6 @@ export default function Comments({ postId, postOwnerId, onClose }) {
       const data = await response.json();
 
       if (data.success) {
-        const userDisplayName = currentUser.displayName || currentUser.email?.split("@")[0] || "WriteThisCode User";
-        const userPhotoURL = currentUser.photoURL || "";
-
         const newCommentObj = {
           id: data.commentId || Date.now().toString(),
           user_id: currentUser.uid,

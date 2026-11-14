@@ -26,7 +26,8 @@ export default {
         return json({ success: false, error: err.message }, 500);
       }
     }
-// SERVE FILES FROM CLOUDFARE R2 (/media/*)
+
+    // SERVE FILES FROM CLOUDFARE R2 (/media/*)
     const mediaMatch = url.pathname.match(/^\/media\/(.+)$/);
     if (mediaMatch && request.method === "GET") {
       try {
@@ -67,13 +68,12 @@ export default {
       });
     }
 
-// COMMENTS ENDPOINT (GET & POST)
+   // COMMENTS ENDPOINT (GET & POST)
     if (url.pathname === "/comments") {
       try {
         const { neon } = await import("@neondatabase/serverless");
         const sql = neon(env.DATABASE_URL);
 
-        // Ensure comments table exists with media_urls column
         await sql`
           CREATE TABLE IF NOT EXISTS comments (
             id SERIAL PRIMARY KEY,
@@ -87,65 +87,90 @@ export default {
           )
         `;
 
-        // Ensure columns exist if table was already created previously
         await sql`ALTER TABLE comments ADD COLUMN IF NOT EXISTS parent_id TEXT;`;
         await sql`ALTER TABLE comments ADD COLUMN IF NOT EXISTS media_urls TEXT[];`;
 
-        // GET Comments for a post (with dynamic user profile joining)
-        if (request.method === "GET" && url.pathname === "/comments") {
+        if (request.method === "GET") {
           const postId = url.searchParams.get("postId");
+          const currentUserId = url.searchParams.get("userId");
           if (!postId) {
             return json({ success: false, error: "Missing postId" }, 400);
           }
 
-          const comments = await sql`
-            SELECT 
-              c.id, 
-              c.post_id, 
-              c.user_id, 
-              COALESCE(u.display_name, c.display_name, 'Vezlivo User') AS display_name,
-              COALESCE(u.username, c.username, 'user') AS username,
-              COALESCE(u.profile_url, u.photo_url, c.profile_url, c.photo_url, '') AS photo_url,
-              c.text, 
-              c.media_urls,
-              c.parent_id, 
-              c.created_at 
-            FROM comments c
-            LEFT JOIN users u ON c.user_id = u.uid
-            WHERE c.post_id = ${postId} 
-            ORDER BY c.created_at ASC
-          `;
+          try {
+            await sql`
+              CREATE TABLE IF NOT EXISTS comment_likes (
+                user_id TEXT NOT NULL,
+                comment_id INT NOT NULL,
+                reaction_type VARCHAR(20) NOT NULL,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                PRIMARY KEY (user_id, comment_id)
+              )
+            `;
+          } catch (e) {}
 
-          const formattedComments = comments.map(c => ({
-            id: c.id,
-            commentId: c.id,
-            postId: c.post_id,
-            userId: c.user_id,
-            user_id: c.user_id,
-            displayName: c.display_name,
-            display_name: c.display_name,
-            username: c.username,
-            photoURL: c.photo_url,
-            profile_url: c.photo_url,
-            text: c.text,
-            mediaUrls: c.media_urls || [],
-            media_urls: c.media_urls || [],
-            parentId: c.parent_id,
-            parent_id: c.parent_id,
-            createdAt: c.created_at
-          }));
+          let comments = [];
+          try {
+            comments = await sql`
+              SELECT 
+                c.id, 
+                c.post_id, 
+                c.user_id, 
+                COALESCE(u.display_name, c.display_name, 'WriteThisCode User') AS display_name,
+                COALESCE(u.username, c.username, 'user') AS username,
+                COALESCE(u.profile_url, u.photo_url, '') AS user_photo,
+                c.text, 
+                c.media_urls,
+                c.parent_id, 
+                c.created_at,
+                cl.reaction_type
+              FROM comments c
+              LEFT JOIN users u ON c.user_id = u.uid
+              LEFT JOIN comment_likes cl ON c.id = cl.comment_id AND cl.user_id = ${currentUserId || ''}
+              WHERE c.post_id = ${postId} 
+              ORDER BY c.created_at ASC
+            `;
+          } catch (innerErr) {
+            comments = await sql`
+              SELECT id, post_id, user_id, display_name, username, text, media_urls, parent_id, created_at, NULL AS reaction_type, '' AS user_photo
+              FROM comments 
+              WHERE post_id = ${postId} 
+              ORDER BY created_at ASC
+            `;
+          }
+
+          const formattedComments = comments.map(c => {
+            const avatarUrl = c.user_photo || '';
+            return {
+              id: c.id,
+              commentId: c.id,
+              postId: c.post_id,
+              userId: c.user_id,
+              user_id: c.user_id,
+              displayName: c.display_name || 'WriteThisCode User',
+              display_name: c.display_name || 'WriteThisCode User',
+              username: c.username || 'user',
+              photoURL: avatarUrl,
+              profile_url: avatarUrl,
+              text: c.text || '',
+              mediaUrls: c.media_urls || [],
+              media_urls: c.media_urls || [],
+              parentId: c.parent_id || null,
+              parent_id: c.parent_id || null,
+              createdAt: c.created_at || Date.now(),
+              userReaction: c.reaction_type || null
+            };
+          });
 
           return json({ success: true, comments: formattedComments });
         }
 
-        // POST Comments
         if (request.method === "POST") {
           const body = await request.json();
           const { postId, postOwnerId, userId, text, mediaUrls, media_urls, parentId, parent_id } = body;
           const effectiveParentId = parentId || parent_id || null;
           const imagesArray = mediaUrls || media_urls || [];
 
-          // Fixed: Allow comment if either text OR images are provided!
           if (!postId || !userId || (!text && imagesArray.length === 0)) {
             return json({ success: false, error: "Missing required fields (text or image required)" }, 400);
           }
@@ -179,7 +204,6 @@ export default {
 
           const createdAt = Date.now();
 
-          // Save comment with media URLs into Neon PostgreSQL
           const insertRes = await sql`
             INSERT INTO comments (post_id, post_owner_id, user_id, text, media_urls, parent_id, created_at)
             VALUES (${postId}, ${postOwnerId || ""}, ${userId}, ${trimmedText}, ${imagesArray}, ${effectiveParentId}, ${createdAt})
@@ -255,6 +279,58 @@ export default {
         return json({ success: false, error: err.message }, 500);
       }
     }
+
+    // COMMENT LIKE / DISLIKE ENDPOINT
+    if (
+      url.pathname === "/comments/like" ||
+      url.pathname === "/api/comments/like" ||
+      url.pathname.endsWith("/comments/like")
+    ) {
+      if (request.method !== "POST") {
+        return json({ success: false, error: "Method not allowed" }, 405);
+      }
+
+      try {
+        const body = await request.json();
+        const { userId, commentId, action } = body;
+
+        if (!userId || !commentId) {
+          return json({ success: false, error: "Missing userId or commentId" }, 400);
+        }
+
+        const { neon } = await import("@neondatabase/serverless");
+        const sql = neon(env.DATABASE_URL);
+
+        await sql`
+          CREATE TABLE IF NOT EXISTS comment_likes (
+            user_id TEXT NOT NULL,
+            comment_id INT NOT NULL,
+            reaction_type VARCHAR(20) NOT NULL,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            PRIMARY KEY (user_id, comment_id)
+          )
+        `;
+
+        if (action === "none" || !action) {
+          await sql`
+            DELETE FROM comment_likes 
+            WHERE user_id = ${userId} AND comment_id = ${parseInt(commentId, 10)}
+          `;
+        } else {
+          await sql`
+            INSERT INTO comment_likes (user_id, comment_id, reaction_type) 
+            VALUES (${userId}, ${parseInt(commentId, 10)}, ${action}) 
+            ON CONFLICT (user_id, comment_id) 
+            DO UPDATE SET reaction_type = EXCLUDED.reaction_type
+          `;
+        }
+
+        return json({ success: true, message: "Comment reaction updated successfully" });
+      } catch (err) {
+        return json({ success: false, error: err.message }, 500);
+      }
+    }
+
     // SYNC USER PROFILE & IMAGES
     if (
       [
@@ -305,7 +381,6 @@ export default {
         let finalProfileURL = profile_url || profileURL || "";
         let finalCoverURL = cover_url || coverURL || "";
 
-        // Handle Profile Picture R2 Upload
         if (profileImageBase64 && env.R2) {
           try {
             const base64Data = profileImageBase64.includes(",")
@@ -328,13 +403,12 @@ export default {
 
             finalProfileURL = `${url.origin}/media/${filename}`;
           } catch (err) {
-            console.error("Profile R2 upload failed, falling back to direct URL/payload:", err);
+            console.error("Profile R2 upload failed:", err);
           }
         } else if (!finalProfileURL && profileImageBase64) {
-          // Fallback if R2 is not bound so it doesn't drop the image
           finalProfileURL = profileImageBase64;
         }
-        // Handle Cover Picture R2 Upload
+
         if (coverImageBase64 && env.R2) {
           try {
             const base64Data = coverImageBase64.includes(",")
@@ -461,7 +535,7 @@ export default {
       }
     }
 
-   // GET USER PROFILE ROUTE (Auto-creates user row if missing to prevent 404)
+    // GET USER PROFILE ROUTE
     const userProfileMatch = url.pathname.match(/^\/api\/users\/([^/]+)$/) || url.pathname.match(/^\/users\/([^/]+)$/);
     if (userProfileMatch && request.method === "GET") {
       try {
@@ -478,11 +552,10 @@ export default {
           WHERE uid = ${uid}
         `;
 
-        // If the user row does not exist in Neon yet, create it automatically
         if (users.length === 0) {
           await sql`
             INSERT INTO users (uid, display_name, username, bio, profile_url, photo_url, created_at)
-            VALUES (${uid}, 'Vezlivo User', ${'user_' + uid.substring(0, 6)}, '', '', '', NOW())
+            VALUES (${uid}, 'WriteThisCode User', ${'user_' + uid.substring(0, 6)}, '', '', '', NOW())
             ON CONFLICT (uid) DO NOTHING
           `;
           
@@ -501,7 +574,7 @@ export default {
           success: true,
           profile: {
             uid: u.uid || uid,
-            displayName: u.display_name || "Vezlivo User",
+            displayName: u.display_name || "WriteThisCode User",
             username: u.username || "user",
             bio: u.bio || "",
             profileURL: u.profile_url || u.photo_url || "",
@@ -516,6 +589,7 @@ export default {
         return json({ success: false, error: err.message }, 500);
       }
     }
+
     // SEARCH USERS
     if (
       (url.pathname === "/search/users" ||
@@ -557,7 +631,7 @@ export default {
 
         const posts = await sql`
           SELECT p.*, 
-                 COALESCE(u.display_name, p.display_name, 'Vezlivo User') AS display_name, 
+                 COALESCE(u.display_name, p.display_name, 'WriteThisCode User') AS display_name, 
                  COALESCE(u.username, p.username, '@user') AS username, 
                  COALESCE(u.profile_url, u.photo_url, p.profile_url, '') AS profile_url,
                  COALESCE(u.profile_url, u.photo_url, p.profile_url, '') AS "profileURL"
@@ -625,7 +699,7 @@ export default {
         const dbUser = userQuery[0] || {};
 
         const effectiveProfileUrl = dbUser.profile_url || profileURL || userPhotoURL || "";
-        const effectiveDisplayName = dbUser.display_name || displayName || "Vezlivo User";
+        const effectiveDisplayName = dbUser.display_name || displayName || "WriteThisCode User";
         const effectiveUsername = dbUser.username || username || "@user";
 
         await sql`
@@ -682,8 +756,6 @@ export default {
           )
           RETURNING *
         `;
-
-        
 
         return json({
           success: true,
@@ -750,7 +822,6 @@ export default {
             WHERE uid = ${followingId}
           `;
 
-          // Record follow activity in Neon PostgreSQL
           const userRes = await sql`SELECT display_name, username FROM users WHERE uid = ${followerId}`;
           const actorName = userRes[0]?.display_name || userRes[0]?.username || "Someone";
           
@@ -780,7 +851,7 @@ export default {
       }
     }
 
-    // TOGGLE LIKE / UNLIKE ENDPOINT (Automatically triggers activity notification in Neon)
+    // TOGGLE LIKE / UNLIKE ENDPOINT
     if (
       url.pathname === "/like" ||
       url.pathname === "/api/like" ||
@@ -835,7 +906,6 @@ export default {
             WHERE id::text = ${postId}
           `;
 
-          // Automatically record like activity with correct Mux thumbnail for the video owner in Neon PostgreSQL
           const postRes = await sql`SELECT user_id, thumbnail_url, video_url, mux_playback_id FROM posts WHERE id::text = ${postId}`;
           if (postRes.length > 0) {
             const ownerId = postRes[0].user_id;
@@ -873,6 +943,42 @@ export default {
         return json({ success: true, message: "Like updated successfully" });
       } catch (err) {
         return json({ success: false, error: err.message }, 500);
+      }
+    }
+
+   // USER LIKES FETCH ENDPOINT (Safe fallback for 400/404)
+    if (
+      url.pathname === "/likes" ||
+      url.pathname === "/api/likes" ||
+      url.pathname.endsWith("/likes")
+    ) {
+      try {
+        const { neon } = await import("@neondatabase/serverless");
+        const sql = neon(env.DATABASE_URL);
+
+        await sql`
+          CREATE TABLE IF NOT EXISTS likes (
+            user_id VARCHAR(128) NOT NULL,
+            post_id VARCHAR(128) NOT NULL,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            PRIMARY KEY (user_id, post_id)
+          )
+        `;
+
+        if (request.method === "GET") {
+          const userId = url.searchParams.get("userId");
+          if (!userId || userId === "null" || userId === "undefined") {
+            return json({ success: true, likes: {} }); // Return empty map instead of failing 400
+          }
+          const userLikes = await sql`SELECT post_id FROM likes WHERE user_id = ${userId}`;
+          const likedMap = {};
+          userLikes.forEach(row => { likedMap[row.post_id] = true; });
+          return json({ success: true, likes: likedMap });
+        }
+
+        return json({ success: true, message: "Likes endpoint ready" });
+      } catch (err) {
+        return json({ success: true, likes: {} }); // Fallback success to prevent frontend crash
       }
     }
 
@@ -927,7 +1033,7 @@ export default {
       }
     }
 
-   // CREATE MUX DIRECT UPLOAD
+    // CREATE MUX DIRECT UPLOAD
     if (
       ["/mux/uploads", "/api/mux/uploads"].includes(url.pathname) &&
       request.method === "POST"
@@ -982,54 +1088,6 @@ export default {
     }
 
     // MUX PROXY UPLOAD ROUTE
-    if (
-      ["/mux/proxy-upload", "/api/mux/proxy-upload"].includes(url.pathname) &&
-      ["GET", "POST", "PUT", "PATCH", "HEAD", "OPTIONS"].includes(request.method)
-    ) {
-      try {
-        const targetUrl = url.searchParams.get("target");
-        if (!targetUrl) {
-          return json({ success: false, error: "Missing target URL" }, 400);
-        }
-
-        const forwardHeaders = {
-          "Content-Type": request.headers.get("Content-Type") || "application/offset+octet-stream",
-        };
-
-        const optionalHeaderKeys = [
-          "upload-length",
-          "upload-offset",
-          "tus-resumable",
-          "upload-metadata",
-          "upload-concat",
-          "x-http-method-override",
-        ];
-
-        for (const key of optionalHeaderKeys) {
-          const val = request.headers.get(key);
-          if (val) {
-            forwardHeaders[key] = val;
-          }
-        }
-
-        const proxyRes = await fetch(targetUrl, {
-          method: request.method,
-          headers: forwardHeaders,
-          body: ["GET", "HEAD"].includes(request.method) ? undefined : request.body,
-        });
-
-        const responseHeaders = new Headers(corsHeaders());
-        proxyRes.headers.forEach((val, key) => responseHeaders.set(key, val));
-
-        return new Response(proxyRes.body, {
-          status: proxyRes.status,
-          headers: responseHeaders,
-        });
-      } catch (err) {
-        return json({ success: false, error: err.message }, 500);
-      }
-    }
-// MUX PROXY UPLOAD ROUTE
     if (
       ["/mux/proxy-upload", "/api/mux/proxy-upload"].includes(url.pathname) &&
       ["GET", "POST", "PUT", "PATCH", "HEAD", "OPTIONS"].includes(request.method)
@@ -1197,7 +1255,8 @@ export default {
         return json({ success: false, error: err.message }, 500);
       }
     }
-// GET USER FOLLOWING LIST
+
+    // GET USER FOLLOWING LIST
     const userFollowingMatch = url.pathname.match(/^\/users\/([^/]+)\/following$/);
     if (userFollowingMatch && request.method === "GET") {
       try {
