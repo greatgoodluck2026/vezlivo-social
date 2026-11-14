@@ -9,7 +9,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
   const [currentUser, setCurrentUser] = useState(null);
   const [comments, setComments] = useState([]);
   const [commentText, setCommentText] = useState("");
-  const [selectedImage, setSelectedImage] = useState(null);
+  const [selectedImages, setSelectedImages] = useState([]); // Array to support multiple image/sticker previews
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [viewportHeight, setViewportHeight] = useState(null);
@@ -99,14 +99,15 @@ export default function Comments({ postId, postOwnerId, onClose }) {
     if (!currentUser) return;
 
     const text = commentText.trim();
-    if (!text && !selectedImage) return;
+    if (!text && selectedImages.length === 0) return;
     if (!postId || !postOwnerId) return;
 
     setSending(true);
 
     try {
-      const finalContent = selectedImage 
-        ? JSON.stringify({ text: text, image: selectedImage }) 
+      // Package text and multiple images safely
+      const finalContent = selectedImages.length > 0 
+        ? JSON.stringify({ text: text, images: selectedImages }) 
         : text;
 
       const response = await fetch(`${API_URL}/comments`, {
@@ -144,7 +145,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
         };
 
         setCommentText("");
-        setSelectedImage(null);
+        setSelectedImages([]);
         if (replyingTo) {
           setExpandedThreads((prev) => ({ ...prev, [replyingTo.commentId]: true }));
         }
@@ -161,15 +162,21 @@ export default function Comments({ postId, postOwnerId, onClose }) {
   };
 
   const handleStickerSelect = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
 
-    const reader = new FileReader();
-    reader.onload = (uploadEvent) => {
-      setSelectedImage(uploadEvent.target.result);
-    };
-    reader.readAsDataURL(file);
+    files.forEach((file) => {
+      const reader = new FileReader();
+      reader.onload = (uploadEvent) => {
+        setSelectedImages((prev) => [...prev, uploadEvent.target.result]);
+      };
+      reader.readAsDataURL(file);
+    });
     e.target.value = "";
+  };
+
+  const removeImage = (indexToRemove) => {
+    setSelectedImages((prev) => prev.filter((_, idx) => idx !== indexToRemove));
   };
 
   const formatTime = (timestamp) => {
@@ -193,11 +200,18 @@ export default function Comments({ postId, postOwnerId, onClose }) {
   const renderCommentContent = (rawText) => {
     if (!rawText) return null;
     try {
-      if (rawText.startsWith("{") && rawText.includes("image")) {
+      if (rawText.startsWith("{") && (rawText.includes("image") || rawText.includes("images"))) {
         const parsed = JSON.parse(rawText);
+        const imgArray = parsed.images || (parsed.image ? [parsed.image] : []);
         return (
           <div>
-            {parsed.image && <img src={parsed.image} alt="attachment" style={styles.commentStickerImage} />}
+            {imgArray.length > 0 && (
+              <div style={styles.commentImagesGrid}>
+                {imgArray.map((imgSrc, i) => (
+                  <img key={i} src={imgSrc} alt="attachment" style={styles.commentStickerImage} />
+                ))}
+              </div>
+            )}
             {parsed.text && <p style={styles.commentText}>{parsed.text}</p>}
           </div>
         );
@@ -391,17 +405,21 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           </div>
         )}
 
-        {/* Selected Image Preview Box */}
-        {selectedImage && (
+        {/* Selected Images Previews Container */}
+        {selectedImages.length > 0 && (
           <div style={styles.imagePreviewContainer}>
-            <img src={selectedImage} alt="Preview" style={styles.previewThumbnail} />
-            <button
-              type="button"
-              onClick={() => setSelectedImage(null)}
-              style={styles.removePreviewBtn}
-            >
-              ×
-            </button>
+            {selectedImages.map((imgSrc, idx) => (
+              <div key={idx} style={styles.previewThumbWrapper}>
+                <img src={imgSrc} alt="Preview" style={styles.previewThumbnail} />
+                <button
+                  type="button"
+                  onClick={() => removeImage(idx)}
+                  style={styles.removePreviewBtn}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
           </div>
         )}
 
@@ -428,6 +446,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
             ref={fileInputRef}
             style={{ display: "none" }}
             accept="image/*"
+            multiple
             onChange={handleStickerSelect}
           />
 
@@ -439,7 +458,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
                 fileInputRef.current.click();
               }
             }}
-            title="Attach image or sticker"
+            title="Attach images or stickers"
           >
             🖼️
           </button>
@@ -461,10 +480,10 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           <button
             type="button"
             onClick={sendComment}
-            disabled={sending || (!commentText.trim() && !selectedImage)}
+            disabled={sending || (!commentText.trim() && selectedImages.length === 0)}
             style={{
               ...styles.sendButton,
-              ...(sending || (!commentText.trim() && !selectedImage) ? styles.disabledButton : {}),
+              ...(sending || (!commentText.trim() && selectedImages.length === 0) ? styles.disabledButton : {}),
             }}
           >
             {sending ? "..." : "Post"}
@@ -598,11 +617,16 @@ const styles = {
     color: "#222",
     wordBreak: "break-word",
   },
-  commentStickerImage: {
-    maxWidth: "140px",
-    maxHeight: "140px",
-    borderRadius: "8px",
+  commentImagesGrid: {
+    display: "flex",
+    flexWrap: "wrap",
+    gap: "6px",
     marginTop: "4px",
+  },
+  commentStickerImage: {
+    maxWidth: "130px",
+    maxHeight: "130px",
+    borderRadius: "8px",
     objectFit: "cover",
     display: "block",
   },
@@ -660,11 +684,16 @@ const styles = {
     color: "#555",
   },
   imagePreviewContainer: {
-    position: "relative",
-    display: "inline-block",
+    display: "flex",
+    gap: "8px",
     padding: "8px 16px",
     background: "#f9f9f9",
     borderTop: "1px solid #eee",
+    overflowX: "auto",
+  },
+  previewThumbWrapper: {
+    position: "relative",
+    flexShrink: 0,
   },
   previewThumbnail: {
     width: "60px",
@@ -675,8 +704,8 @@ const styles = {
   },
   removePreviewBtn: {
     position: "absolute",
-    top: "4px",
-    left: "64px",
+    top: "-6px",
+    right: "-6px",
     background: "#333",
     color: "#fff",
     border: "none",
