@@ -9,7 +9,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
   const [currentUser, setCurrentUser] = useState(null);
   const [comments, setComments] = useState([]);
   const [commentText, setCommentText] = useState("");
-  const [selectedImages, setSelectedImages] = useState([]);
+  const [selectedImages, setSelectedImages] = useState([]); // Base64 data strings for R2 storage processing via Cloudflare Workers
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [errorMessage, setErrorMessage] = useState(null);
@@ -120,14 +120,13 @@ export default function Comments({ postId, postOwnerId, onClose }) {
     setErrorMessage(null);
 
     try {
-      // Validate text length if text is present
       if (text && text.length > 500) {
         setErrorMessage("Comment is too long (maximum 500 characters).");
         setSending(false);
         return;
       }
 
-      // Send payload cleanly to Cloudflare Worker API
+      // Connect through Cloudflare Workers backend API to process R2 storage & save records to Neon PostgreSQL
       const response = await fetch(`${API_URL}/comments`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -136,7 +135,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           postOwnerId: postOwnerId,
           userId: currentUser.uid,
           text: text,
-          mediaUrls: selectedImages, // Sent as dedicated media array for R2 storage handling
+          mediaUrls: selectedImages, // Passed cleanly to backend for R2 storage routing
           parentId: replyingTo ? replyingTo.commentId : null,
           parent_id: replyingTo ? replyingTo.commentId : null,
         }),
@@ -150,7 +149,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
         const userPhotoURL = currentUser.photoURL || "";
 
         const newCommentObj = {
-          id: Date.now().toString(),
+          id: data.commentId || Date.now().toString(),
           user_id: currentUser.uid,
           userId: currentUser.uid,
           displayName: userDisplayName,
@@ -187,26 +186,22 @@ export default function Comments({ postId, postOwnerId, onClose }) {
     if (files.length === 0) return;
 
     if (selectedImages.length >= 2) {
-      setErrorMessage("You can only attach a maximum of 2 pictures.");
+      setErrorMessage("You can only attach a maximum of 2 images.");
       return;
     }
 
-    const combinedFiles = [...selectedImages, ...files].slice(0, 2);
-    
-    setSelectedImages([]); 
-    combinedFiles.forEach((file) => {
-      if (typeof file === "string") {
-        setSelectedImages((prev) => [...prev, file]);
-      } else {
-        const reader = new FileReader();
-        reader.onload = (uploadEvent) => {
-          setSelectedImages((prev) => {
-            if (prev.length >= 2) return prev;
-            return [...prev, uploadEvent.target.result];
-          });
-        };
-        reader.readAsDataURL(file);
-      }
+    const remainingSlots = 2 - selectedImages.length;
+    const filesToProcess = files.slice(0, remainingSlots);
+
+    filesToProcess.forEach((file) => {
+      const reader = new FileReader();
+      reader.onload = (uploadEvent) => {
+        setSelectedImages((prev) => {
+          if (prev.length >= 2) return prev;
+          return [...prev, uploadEvent.target.result];
+        });
+      };
+      reader.readAsDataURL(file);
     });
 
     e.target.value = "";
@@ -235,7 +230,6 @@ export default function Comments({ postId, postOwnerId, onClose }) {
   };
 
   const renderCommentContent = (comment) => {
-    // Support both new mediaUrls array and fallback legacy formats
     const media = comment.mediaUrls || comment.media_urls || [];
     let parsedImages = [];
 
