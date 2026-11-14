@@ -12,7 +12,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
   const [selectedImages, setSelectedImages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
-  const [errorMessage, setErrorMessage] = useState(null); // State for error pop-up alerts
+  const [errorMessage, setErrorMessage] = useState(null);
   const [viewportHeight, setViewportHeight] = useState(null);
   const [keyboardOffset, setKeyboardOffset] = useState(0);
   const [replyingTo, setReplyingTo] = useState(null);
@@ -117,9 +117,18 @@ export default function Comments({ postId, postOwnerId, onClose }) {
     }
 
     setSending(true);
-    setErrorMessage(null); // Clear previous errors
+    setErrorMessage(null);
 
     try {
+      // If there are images, format payload. If text exists, validate length.
+      if (!text && selectedImages.length > 0) {
+        // Skip text length check if only sending images
+      } else if (text.length > 500) {
+        setErrorMessage("Comment is too long (maximum 500 characters).");
+        setSending(false);
+        return;
+      }
+
       const finalContent = selectedImages.length > 0 
         ? JSON.stringify({ text: text, images: selectedImages }) 
         : text;
@@ -265,7 +274,6 @@ export default function Comments({ postId, postOwnerId, onClose }) {
       onClick={onClose}
     >
       <div style={styles.panel} onClick={(e) => e.stopPropagation()}>
-        {/* Error Pop-up Banner */}
         {errorMessage && (
           <div style={styles.errorPopup}>
             <span>⚠️ {errorMessage}</span>
@@ -275,7 +283,6 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           </div>
         )}
 
-        {/* Header */}
         <div style={styles.header}>
           <div>
             <h2 style={styles.title}>Comments</h2>
@@ -291,7 +298,6 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           </button>
         </div>
 
-        {/* Scrollable Comments List */}
         <div style={styles.commentsArea}>
           {loading ? (
             <div style={styles.centerMessage}>Loading comments...</div>
@@ -446,7 +452,6 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           </div>
         )}
 
-        {/* Selected Images Previews Container (Max 2) */}
         {selectedImages.length > 0 && (
           <div style={styles.imagePreviewContainer}>
             {selectedImages.map((imgSrc, idx) => (
@@ -464,7 +469,6 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           </div>
         )}
 
-        {/* Quick Reaction Emoji Bar */}
         <div style={styles.quickEmojiBar}>
           {["❤️", "🥰", "😂", "😭", "🔥", "🙏", "😊"].map((emoji) => (
             <button
@@ -480,7 +484,6 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           ))}
         </div>
 
-        {/* Input Bar */}
         <div style={styles.inputArea}>
           <input
             type="file"
@@ -522,7 +525,6 @@ export default function Comments({ postId, postOwnerId, onClose }) {
             maxLength={500}
             style={styles.input}
           />
-          {/* Changed button label from "Post" to "Send" */}
           <button
             type="button"
             onClick={sendComment}
