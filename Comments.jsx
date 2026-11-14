@@ -9,17 +9,17 @@ export default function Comments({ postId, postOwnerId, onClose }) {
   const [currentUser, setCurrentUser] = useState(null);
   const [comments, setComments] = useState([]);
   const [commentText, setCommentText] = useState("");
+  const [selectedImage, setSelectedImage] = useState(null);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [viewportHeight, setViewportHeight] = useState(null);
   const [keyboardOffset, setKeyboardOffset] = useState(0);
-  const [replyingTo, setReplyingTo] = useState(null); // stores { commentId, displayName }
-  const [expandedThreads, setExpandedThreads] = useState({}); // tracks which threads have their replies shown
+  const [replyingTo, setReplyingTo] = useState(null);
+  const [expandedThreads, setExpandedThreads] = useState({});
 
-  const inputRef = useRef(null); // Reference to auto-focus input on reply click
-  const fileInputRef = useRef(null); // Reference for sticker/image uploads
-  
-  // Lock background body scroll completely so the browser cannot pan the feed
+  const inputRef = useRef(null);
+  const fileInputRef = useRef(null);
+
   useEffect(() => {
     const originalOverflow = document.body.style.overflow;
     const originalPosition = document.body.style.position;
@@ -36,7 +36,6 @@ export default function Comments({ postId, postOwnerId, onClose }) {
     };
   }, []);
 
-  // Visual Viewport listener to anchor smoothly to mobile keyboard without shifting the layout
   useEffect(() => {
     const handleResize = () => {
       if (window.visualViewport) {
@@ -96,17 +95,20 @@ export default function Comments({ postId, postOwnerId, onClose }) {
     fetchComments();
   }, [postId]);
 
-  const sendComment = async (textToSend) => {
+  const sendComment = async () => {
     if (!currentUser) return;
 
-    const text = (textToSend !== undefined ? textToSend : commentText).trim();
-    if (!text) return;
-
+    const text = commentText.trim();
+    if (!text && !selectedImage) return;
     if (!postId || !postOwnerId) return;
 
     setSending(true);
 
     try {
+      const finalContent = selectedImage 
+        ? JSON.stringify({ text: text, image: selectedImage }) 
+        : text;
+
       const response = await fetch(`${API_URL}/comments`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -114,7 +116,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           postId: postId,
           postOwnerId: postOwnerId,
           userId: currentUser.uid,
-          text: text,
+          text: finalContent,
           parentId: replyingTo ? replyingTo.commentId : null,
           parent_id: replyingTo ? replyingTo.commentId : null,
         }),
@@ -124,8 +126,6 @@ export default function Comments({ postId, postOwnerId, onClose }) {
 
       if (data.success) {
         const targetParentId = replyingTo ? replyingTo.commentId : null;
-        
-        // Ensure immediate profile data capture from currentUser with fallbacks
         const userDisplayName = currentUser.displayName || currentUser.email?.split("@")[0] || "Vezlivo User";
         const userPhotoURL = currentUser.photoURL || "";
 
@@ -137,13 +137,14 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           display_name: userDisplayName,
           photoURL: userPhotoURL,
           profile_url: userPhotoURL,
-          text,
+          text: finalContent,
           createdAt: Date.now(),
           parentId: targetParentId,
           parent_id: targetParentId,
         };
 
         setCommentText("");
+        setSelectedImage(null);
         if (replyingTo) {
           setExpandedThreads((prev) => ({ ...prev, [replyingTo.commentId]: true }));
         }
@@ -159,14 +160,13 @@ export default function Comments({ postId, postOwnerId, onClose }) {
     }
   };
 
-  const handleStickerSelect = async (e) => {
-    const file = e.target.files[0];
-    if (!file || !currentUser) return;
+  const handleStickerSelect = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
 
     const reader = new FileReader();
-    reader.onload = async (uploadEvent) => {
-      const stickerDataUrl = uploadEvent.target.result;
-      await sendComment(stickerDataUrl);
+    reader.onload = (uploadEvent) => {
+      setSelectedImage(uploadEvent.target.result);
     };
     reader.readAsDataURL(file);
     e.target.value = "";
@@ -188,6 +188,27 @@ export default function Comments({ postId, postOwnerId, onClose }) {
     if (difference < 7 * day) return `${Math.floor(difference / day)}d`;
 
     return date.toLocaleDateString();
+  };
+
+  const renderCommentContent = (rawText) => {
+    if (!rawText) return null;
+    try {
+      if (rawText.startsWith("{") && rawText.includes("image")) {
+        const parsed = JSON.parse(rawText);
+        return (
+          <div>
+            {parsed.image && <img src={parsed.image} alt="attachment" style={styles.commentStickerImage} />}
+            {parsed.text && <p style={styles.commentText}>{parsed.text}</p>}
+          </div>
+        );
+      }
+      if (rawText.startsWith("data:image")) {
+        return <img src={rawText} alt="sticker" style={styles.commentStickerImage} />;
+      }
+    } catch (e) {
+      // fallback
+    }
+    return <p style={styles.commentText}>{rawText}</p>;
   };
 
   return (
@@ -250,11 +271,9 @@ export default function Comments({ postId, postOwnerId, onClose }) {
                 const commentReplies = repliesMap[commentId] || [];
                 const hasReplies = commentReplies.length > 0;
                 const isExpanded = !!expandedThreads[commentId];
-                const isSticker = comment.text && comment.text.startsWith("data:image");
 
                 return (
                   <div key={commentId || index} style={styles.commentThreadWrapper}>
-                    {/* Top Level Comment Item */}
                     <div style={styles.commentItem}>
                       {userPhoto ? (
                         <img src={userPhoto} alt="" style={styles.avatar} />
@@ -267,11 +286,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
                         <div style={styles.commentTop}>
                           <strong style={styles.name}>{currentDisplayName}</strong>
                         </div>
-                        {isSticker ? (
-                          <img src={comment.text} alt="sticker" style={styles.commentStickerImage} />
-                        ) : (
-                          <p style={styles.commentText}>{comment.text}</p>
-                        )}
+                        {renderCommentContent(comment.text)}
                         <div style={styles.commentFooterRow}>
                           <span style={styles.time}>{formatTime(comment.createdAt || comment.created_at)}</span>
                           <button
@@ -292,7 +307,6 @@ export default function Comments({ postId, postOwnerId, onClose }) {
                           </button>
                         </div>
 
-                        {/* Vezlivo Show/Hide Replies Toggle */}
                         {hasReplies && (
                           <button
                             type="button"
@@ -310,13 +324,11 @@ export default function Comments({ postId, postOwnerId, onClose }) {
                       </div>
                     </div>
 
-                    {/* Nested Replies Section */}
                     {hasReplies && isExpanded && (
                       <div style={styles.repliesContainer}>
                         {commentReplies.map((reply, rIndex) => {
                           const replyDisplayName = reply.displayName || reply.display_name || "Vezlivo User";
                           const replyPhoto = reply.photoURL || reply.profile_url;
-                          const isReplySticker = reply.text && reply.text.startsWith("data:image");
                           return (
                             <div key={reply.id || reply.commentId || rIndex} style={styles.replyItem}>
                               {replyPhoto ? (
@@ -330,11 +342,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
                                 <div style={styles.commentTop}>
                                   <strong style={styles.name}>{replyDisplayName}</strong>
                                 </div>
-                                {isReplySticker ? (
-                                  <img src={reply.text} alt="sticker" style={styles.commentStickerImage} />
-                                ) : (
-                                  <p style={styles.commentText}>{reply.text}</p>
-                                )}
+                                {renderCommentContent(reply.text)}
                                 <div style={styles.commentFooterRow}>
                                   <span style={styles.time}>{formatTime(reply.createdAt || reply.created_at)}</span>
                                   <button
@@ -367,7 +375,6 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           )}
         </div>
 
-        {/* Replying Banner */}
         {replyingTo && (
           <div style={styles.replyingBanner}>
             <span>Replying to <strong>{replyingTo.displayName}</strong></span>
@@ -378,6 +385,20 @@ export default function Comments({ postId, postOwnerId, onClose }) {
                 setCommentText("");
               }}
               style={styles.cancelReplyBtn}
+            >
+              ×
+            </button>
+          </div>
+        )}
+
+        {/* Selected Image Preview Box */}
+        {selectedImage && (
+          <div style={styles.imagePreviewContainer}>
+            <img src={selectedImage} alt="Preview" style={styles.previewThumbnail} />
+            <button
+              type="button"
+              onClick={() => setSelectedImage(null)}
+              style={styles.removePreviewBtn}
             >
               ×
             </button>
@@ -400,7 +421,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           ))}
         </div>
 
-        {/* Input Bar pinned cleanly inside the fixed panel */}
+        {/* Input Bar */}
         <div style={styles.inputArea}>
           <input
             type="file"
@@ -418,7 +439,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
                 fileInputRef.current.click();
               }
             }}
-            title="Send sticker or image"
+            title="Attach image or sticker"
           >
             🖼️
           </button>
@@ -439,11 +460,11 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           />
           <button
             type="button"
-            onClick={() => sendComment()}
-            disabled={sending || !commentText.trim()}
+            onClick={sendComment}
+            disabled={sending || (!commentText.trim() && !selectedImage)}
             style={{
               ...styles.sendButton,
-              ...(sending || !commentText.trim() ? styles.disabledButton : {}),
+              ...(sending || (!commentText.trim() && !selectedImage) ? styles.disabledButton : {}),
             }}
           >
             {sending ? "..." : "Post"}
@@ -578,11 +599,12 @@ const styles = {
     wordBreak: "break-word",
   },
   commentStickerImage: {
-    maxWidth: "120px",
-    maxHeight: "120px",
+    maxWidth: "140px",
+    maxHeight: "140px",
     borderRadius: "8px",
     marginTop: "4px",
     objectFit: "cover",
+    display: "block",
   },
   commentFooterRow: {
     display: "flex",
@@ -636,6 +658,36 @@ const styles = {
     fontWeight: "bold",
     cursor: "pointer",
     color: "#555",
+  },
+  imagePreviewContainer: {
+    position: "relative",
+    display: "inline-block",
+    padding: "8px 16px",
+    background: "#f9f9f9",
+    borderTop: "1px solid #eee",
+  },
+  previewThumbnail: {
+    width: "60px",
+    height: "60px",
+    objectFit: "cover",
+    borderRadius: "6px",
+    border: "1px solid #ddd",
+  },
+  removePreviewBtn: {
+    position: "absolute",
+    top: "4px",
+    left: "64px",
+    background: "#333",
+    color: "#fff",
+    border: "none",
+    borderRadius: "50%",
+    width: "20px",
+    height: "20px",
+    fontSize: "12px",
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
   },
   quickEmojiBar: {
     display: "flex",
