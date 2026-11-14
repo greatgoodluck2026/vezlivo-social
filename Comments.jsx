@@ -19,6 +19,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
   const [likedComments, setLikedComments] = useState({});
   const [dislikedComments, setDislikedComments] = useState({});
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [fullscreenImage, setFullscreenImage] = useState(null); // Lightbox state
 
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -280,7 +281,14 @@ export default function Comments({ postId, postOwnerId, onClose }) {
         {allImages.length > 0 && (
           <div style={styles.commentImagesGrid}>
             {allImages.map((imgSrc, i) => (
-              <img key={i} src={imgSrc} alt="attachment" style={styles.commentStickerImage} />
+              <img 
+                key={i} 
+                src={imgSrc} 
+                alt="attachment" 
+                style={styles.commentStickerImage} 
+                onClick={() => setFullscreenImage(imgSrc)}
+                title="Tap to view fullscreen"
+              />
             ))}
           </div>
         )}
@@ -579,6 +587,25 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           </button>
         </div>
       </div>
+
+      {/* Fullscreen Lightbox Image Viewer Modal */}
+      {fullscreenImage && (
+        <div style={styles.lightboxOverlay} onClick={() => setFullscreenImage(null)}>
+          <button 
+            type="button" 
+            style={styles.lightboxCloseBtn} 
+            onClick={() => setFullscreenImage(null)}
+          >
+            ×
+          </button>
+          <img 
+            src={fullscreenImage} 
+            alt="Fullscreen view" 
+            style={styles.lightboxImage} 
+            onClick={(e) => e.stopPropagation()} 
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -764,6 +791,7 @@ const styles = {
     borderRadius: "8px",
     objectFit: "cover",
     display: "block",
+    cursor: "pointer",
   },
   commentFooterRow: {
     display: "flex",
@@ -989,5 +1017,40 @@ const styles = {
   },
   commentThreadWrapper: {
     marginBottom: "16px",
+  },
+  lightboxOverlay: {
+    position: "fixed",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    background: "rgba(0, 0, 0, 0.95)",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 9999999,
+    padding: "20px",
+  },
+  lightboxCloseBtn: {
+    position: "absolute",
+    top: "20px",
+    right: "20px",
+    background: "rgba(255, 255, 255, 0.2)",
+    color: "#ffffff",
+    border: "none",
+    borderRadius: "50%",
+    width: "40px",
+    height: "40px",
+    fontSize: "24px",
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  lightboxImage: {
+    maxWidth: "100%",
+    maxHeight: "90vh",
+    objectFit: "contain",
+    borderRadius: "8px",
   },
 };
