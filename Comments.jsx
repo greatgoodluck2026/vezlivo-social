@@ -17,6 +17,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
   const [replyingTo, setReplyingTo] = useState(null);
   const [expandedThreads, setExpandedThreads] = useState({});
   const [likedComments, setLikedComments] = useState({});
+  const [dislikedComments, setDislikedComments] = useState({});
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
 
   const inputRef = useRef(null);
@@ -104,6 +105,23 @@ export default function Comments({ postId, postOwnerId, onClose }) {
     setLikedComments((prev) => ({
       ...prev,
       [commentId]: !prev[commentId],
+    }));
+    // If liking, remove dislike
+    setDislikedComments((prev) => ({
+      ...prev,
+      [commentId]: false,
+    }));
+  };
+
+  const toggleDislike = (commentId) => {
+    setDislikedComments((prev) => ({
+      ...prev,
+      [commentId]: !prev[commentId],
+    }));
+    // If disliking, remove like
+    setLikedComments((prev) => ({
+      ...prev,
+      [commentId]: false,
     }));
   };
 
@@ -280,6 +298,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
     const displayName = comment.displayName || comment.display_name || "Vezlivo User";
     const userPhoto = comment.photoURL || comment.profile_url;
     const isLiked = !!likedComments[commentId];
+    const isDisliked = !!dislikedComments[commentId];
 
     return (
       <div style={isReply ? styles.replyItem : styles.commentItem} key={commentId}>
@@ -314,18 +333,28 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           </div>
         </div>
 
-        {/* TikTok-style Heart Like Button on the Right */}
-        <div style={styles.likeActionWrapper}>
-          <button
-            type="button"
-            onClick={() => toggleLike(commentId)}
-            style={styles.likeButton}
-          >
-            <span style={{ fontSize: "16px", color: isLiked ? "#fe2c55" : "#888" }}>
-              {isLiked ? "❤️" : "🤍"}
-            </span>
-          </button>
-          <span style={styles.likeCountText}>{isLiked ? 1 : 0}</span>
+        {/* TikTok-style Horizontal Like & Dislike Actions on the Right */}
+        <div style={styles.rightActionsContainer}>
+          <div style={styles.actionButtonWrapper}>
+            <button
+              type="button"
+              onClick={() => toggleLike(commentId)}
+              style={styles.iconButton}
+            >
+              <span>{isLiked ? "❤️" : "🤍"}</span>
+            </button>
+            <span style={styles.actionCountText}>{isLiked ? 1 : 0}</span>
+          </div>
+
+          <div style={styles.actionButtonWrapper}>
+            <button
+              type="button"
+              onClick={() => toggleDislike(commentId)}
+              style={styles.iconButton}
+            >
+              <span>{isDisliked ? "👎" : "👎🏻"}</span>
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -752,16 +781,20 @@ const styles = {
     cursor: "pointer",
     padding: 0,
   },
-  likeActionWrapper: {
+  rightActionsContainer: {
+    display: "flex",
+    alignItems: "center",
+    gap: "12px",
+    marginLeft: "8px",
+    flexShrink: 0,
+  },
+  actionButtonWrapper: {
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
     justifyContent: "center",
-    marginLeft: "8px",
-    flexShrink: 0,
-    width: "36px",
   },
-  likeButton: {
+  iconButton: {
     background: "transparent",
     border: "none",
     cursor: "pointer",
@@ -769,9 +802,10 @@ const styles = {
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
+    fontSize: "16px",
   },
-  likeCountText: {
-    fontSize: "11px",
+  actionCountText: {
+    fontSize: "10px",
     color: "#888",
     marginTop: "-2px",
   },
@@ -920,16 +954,18 @@ const styles = {
     border: "none",
     borderRadius: "22px",
     padding: "0 18px",
-    background: "#fe2c55",
+    background: "linear-gradient(135deg, #6366f1, #38bdf8)",
     color: "#ffffff",
     fontWeight: "700",
     fontSize: "14px",
     cursor: "pointer",
     flexShrink: 0,
+    boxShadow: "0 4px 12px rgba(99, 102, 241, 0.3)",
   },
   disabledButton: {
     opacity: 0.4,
     cursor: "not-allowed",
+    boxShadow: "none",
   },
   centerMessage: {
     minHeight: "180px",
