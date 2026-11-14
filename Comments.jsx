@@ -1,7 +1,6 @@
 import React, { useEffect, useState, useRef } from "react";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "./firebase.js";
-import { checkComment } from "./CommentFilter";
 
 const API_URL = "https://vezlivo-api.vezlivo-api.workers.dev";
 
@@ -17,6 +16,8 @@ export default function Comments({ postId, postOwnerId, onClose }) {
   const [keyboardOffset, setKeyboardOffset] = useState(0);
   const [replyingTo, setReplyingTo] = useState(null);
   const [expandedThreads, setExpandedThreads] = useState({});
+  const [likedComments, setLikedComments] = useState({});
+  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
 
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -99,6 +100,13 @@ export default function Comments({ postId, postOwnerId, onClose }) {
     fetchComments();
   }, [postId]);
 
+  const toggleLike = (commentId) => {
+    setLikedComments((prev) => ({
+      ...prev,
+      [commentId]: !prev[commentId],
+    }));
+  };
+
   const sendComment = async () => {
     if (!currentUser) {
       setErrorMessage("You must be logged in to send a comment.");
@@ -128,7 +136,6 @@ export default function Comments({ postId, postOwnerId, onClose }) {
 
       const targetParentId = replyingTo ? replyingTo.commentId : null;
 
-      // Send payload with dual-mapped fields to satisfy backend requirements for Neon PostgreSQL
       const response = await fetch(`${API_URL}/comments`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -171,6 +178,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
 
         setCommentText("");
         setSelectedImages([]);
+        setShowEmojiPicker(false);
         if (replyingTo) {
           setExpandedThreads((prev) => ({ ...prev, [replyingTo.commentId]: true }));
         }
@@ -267,6 +275,62 @@ export default function Comments({ postId, postOwnerId, onClose }) {
     );
   };
 
+  const renderCommentItem = (comment, isReply = false) => {
+    const commentId = comment.id || comment.commentId;
+    const displayName = comment.displayName || comment.display_name || "Vezlivo User";
+    const userPhoto = comment.photoURL || comment.profile_url;
+    const isLiked = !!likedComments[commentId];
+
+    return (
+      <div style={isReply ? styles.replyItem : styles.commentItem} key={commentId}>
+        {userPhoto ? (
+          <img src={userPhoto} alt="" style={isReply ? styles.replyAvatar : styles.avatar} />
+        ) : (
+          <div style={isReply ? styles.replyAvatarFallback : styles.avatarFallback}>
+            {displayName.charAt(0).toUpperCase()}
+          </div>
+        )}
+        <div style={styles.commentBody}>
+          <div style={styles.commentTop}>
+            <strong style={styles.name}>{displayName}</strong>
+          </div>
+          {renderCommentContent(comment)}
+          <div style={styles.commentFooterRow}>
+            <span style={styles.time}>{formatTime(comment.createdAt || comment.created_at)}</span>
+            <button
+              type="button"
+              style={styles.replyTriggerBtn}
+              onClick={() => {
+                setReplyingTo({
+                  commentId: isReply ? comment.parent_id || comment.parentId : commentId,
+                  displayName: displayName,
+                });
+                setCommentText("");
+                if (inputRef.current) inputRef.current.focus();
+              }}
+            >
+              Reply
+            </button>
+          </div>
+        </div>
+
+        {/* TikTok-style Heart Like Button on the Right */}
+        <div style={styles.likeActionWrapper}>
+          <button
+            type="button"
+            onClick={() => toggleLike(commentId)}
+            style={styles.likeButton}
+          >
+            <span style={{ fontSize: "16px", color: isLiked ? "#fe2c55" : "#888" }}>
+              {isLiked ? "❤️" : "🤍"}
+            </span>
+          </button>
+          <span style={styles.likeCountText}>{isLiked ? 1 : 0}</span>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div 
       style={{
@@ -329,106 +393,34 @@ export default function Comments({ postId, postOwnerId, onClose }) {
 
               return topLevelComments.map((comment, index) => {
                 const commentId = comment.id || comment.commentId;
-                const currentDisplayName = comment.displayName || comment.display_name || "Vezlivo User";
-                const userPhoto = comment.photoURL || comment.profile_url;
                 const commentReplies = repliesMap[commentId] || [];
                 const hasReplies = commentReplies.length > 0;
                 const isExpanded = !!expandedThreads[commentId];
 
                 return (
                   <div key={commentId || index} style={styles.commentThreadWrapper}>
-                    <div style={styles.commentItem}>
-                      {userPhoto ? (
-                        <img src={userPhoto} alt="" style={styles.avatar} />
-                      ) : (
-                        <div style={styles.avatarFallback}>
-                          {currentDisplayName.charAt(0).toUpperCase()}
-                        </div>
-                      )}
-                      <div style={styles.commentBody}>
-                        <div style={styles.commentTop}>
-                          <strong style={styles.name}>{currentDisplayName}</strong>
-                        </div>
-                        {renderCommentContent(comment)}
-                        <div style={styles.commentFooterRow}>
-                          <span style={styles.time}>{formatTime(comment.createdAt || comment.created_at)}</span>
-                          <button
-                            type="button"
-                            style={styles.replyTriggerBtn}
-                            onClick={() => {
-                              setReplyingTo({
-                                commentId: commentId,
-                                displayName: currentDisplayName,
-                              });
-                              setCommentText(""); 
-                              if (inputRef.current) {
-                                inputRef.current.focus();
-                              }
-                            }}
-                          >
-                            Reply
-                          </button>
-                        </div>
+                    {renderCommentItem(comment, false)}
 
-                        {hasReplies && (
-                          <button
-                            type="button"
-                            style={styles.toggleRepliesBtn}
-                            onClick={() => {
-                              setExpandedThreads((prev) => ({
-                                ...prev,
-                                [commentId]: !prev[commentId],
-                              }));
-                            }}
-                          >
-                            <span style={styles.replyArrow}>↳</span> {isExpanded ? "Hide replies" : `Show ${commentReplies.length} ${commentReplies.length === 1 ? "reply" : "replies"}`}
-                          </button>
-                        )}
+                    {hasReplies && (
+                      <div style={styles.viewRepliesWrapper}>
+                        <button
+                          type="button"
+                          style={styles.toggleRepliesBtn}
+                          onClick={() => {
+                            setExpandedThreads((prev) => ({
+                              ...prev,
+                              [commentId]: !prev[commentId],
+                            }));
+                          }}
+                        >
+                          <span style={styles.replyArrow}>──────</span> {isExpanded ? "Hide replies" : `View replies (${commentReplies.length})`}
+                        </button>
                       </div>
-                    </div>
+                    )}
 
                     {hasReplies && isExpanded && (
                       <div style={styles.repliesContainer}>
-                        {commentReplies.map((reply, rIndex) => {
-                          const replyDisplayName = reply.displayName || reply.display_name || "Vezlivo User";
-                          const replyPhoto = reply.photoURL || reply.profile_url;
-                          return (
-                            <div key={reply.id || reply.commentId || rIndex} style={styles.replyItem}>
-                              {replyPhoto ? (
-                                <img src={replyPhoto} alt="" style={styles.replyAvatar} />
-                              ) : (
-                                <div style={styles.replyAvatarFallback}>
-                                  {replyDisplayName.charAt(0).toUpperCase()}
-                                </div>
-                              )}
-                              <div style={styles.commentBody}>
-                                <div style={styles.commentTop}>
-                                  <strong style={styles.name}>{replyDisplayName}</strong>
-                                </div>
-                                {renderCommentContent(reply)}
-                                <div style={styles.commentFooterRow}>
-                                  <span style={styles.time}>{formatTime(reply.createdAt || reply.created_at)}</span>
-                                  <button
-                                    type="button"
-                                    style={styles.replyTriggerBtn}
-                                    onClick={() => {
-                                      setReplyingTo({
-                                        commentId: commentId,
-                                        displayName: replyDisplayName,
-                                      });
-                                      setCommentText("");
-                                      if (inputRef.current) {
-                                        inputRef.current.focus();
-                                      }
-                                    }}
-                                  >
-                                    Reply
-                                  </button>
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
+                        {commentReplies.map((reply) => renderCommentItem(reply, true))}
                       </div>
                     )}
                   </div>
@@ -471,21 +463,25 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           </div>
         )}
 
-        <div style={styles.quickEmojiBar}>
-          {["❤️", "🥰", "😂", "😭", "🔥", "🙏", "😊"].map((emoji) => (
-            <button
-              key={emoji}
-              type="button"
-              style={styles.quickEmojiBtn}
-              onClick={() => {
-                setCommentText((prev) => prev + emoji);
-              }}
-            >
-              {emoji}
-            </button>
-          ))}
-        </div>
+        {/* Emoji Quick Picker Popup */}
+        {showEmojiPicker && (
+          <div style={styles.emojiPopupBar}>
+            {["❤️", "🥰", "😂", "😭", "🔥", "🙏", "😊", "👏", "🔥", "💯"].map((emoji) => (
+              <button
+                key={emoji}
+                type="button"
+                style={styles.quickEmojiBtn}
+                onClick={() => {
+                  setCommentText((prev) => prev + emoji);
+                }}
+              >
+                {emoji}
+              </button>
+            ))}
+          </div>
+        )}
 
+        {/* TikTok-style Bottom Input Bar with embedded action buttons */}
         <div style={styles.inputArea}>
           <input
             type="file"
@@ -496,37 +492,48 @@ export default function Comments({ postId, postOwnerId, onClose }) {
             onChange={handleStickerSelect}
           />
 
-          <button
-            type="button"
-            style={styles.stickerBtn}
-            onClick={() => {
-              if (selectedImages.length >= 2) {
-                setErrorMessage("You can only attach a maximum of 2 images.");
-                return;
-              }
-              if (fileInputRef.current) {
-                fileInputRef.current.click();
-              }
-            }}
-            title="Attach up to 2 images"
-          >
-            🖼️
-          </button>
+          <div style={styles.inputWrapperContainer}>
+            <input
+              ref={inputRef}
+              type="text"
+              value={commentText}
+              onChange={(event) => setCommentText(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  sendComment();
+                }
+              }}
+              placeholder={replyingTo ? `Replying to ${replyingTo.displayName}...` : "Add comment..."}
+              maxLength={500}
+              style={styles.input}
+            />
 
-          <input
-            ref={inputRef}
-            type="text"
-            value={commentText}
-            onChange={(event) => setCommentText(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                sendComment();
-              }
-            }}
-            placeholder={replyingTo ? `Replying to ${replyingTo.displayName}...` : "Add a comment..."}
-            maxLength={500}
-            style={styles.input}
-          />
+            <div style={styles.inputIconsRight}>
+              <button
+                type="button"
+                style={styles.inlineActionBtn}
+                onClick={() => {
+                  if (selectedImages.length >= 2) {
+                    setErrorMessage("You can only attach a maximum of 2 images.");
+                    return;
+                  }
+                  if (fileInputRef.current) fileInputRef.current.click();
+                }}
+                title="Attach Image"
+              >
+                🖼️
+              </button>
+              <button
+                type="button"
+                style={styles.inlineActionBtn}
+                onClick={() => setShowEmojiPicker((prev) => !prev)}
+                title="Add Emoji"
+              >
+                😊
+              </button>
+            </div>
+          </div>
+
           <button
             type="button"
             onClick={sendComment}
@@ -536,7 +543,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
               ...(sending || (!commentText.trim() && selectedImages.length === 0) ? styles.disabledButton : {}),
             }}
           >
-            {sending ? "..." : "Send"}
+            {sending ? "..." : "Post"}
           </button>
         </div>
       </div>
@@ -564,8 +571,8 @@ const styles = {
     transform: "translateX(-50%)",
     width: "100%",
     maxWidth: "600px",
-    height: "65vh",
-    maxHeight: "70dvh",
+    height: "68vh",
+    maxHeight: "72dvh",
     background: "#ffffff",
     color: "#000000",
     borderRadius: "24px 24px 0 0",
@@ -642,24 +649,50 @@ const styles = {
     display: "flex",
     alignItems: "flex-start",
     gap: "12px",
-    marginBottom: "18px",
+    marginBottom: "16px",
+  },
+  replyItem: {
+    display: "flex",
+    alignItems: "flex-start",
+    gap: "10px",
   },
   avatar: {
-    width: "40px",
-    height: "40px",
+    width: "38px",
+    height: "38px",
     borderRadius: "50%",
     objectFit: "cover",
     background: "#eee",
     flexShrink: 0,
   },
   avatarFallback: {
-    width: "40px",
-    height: "40px",
+    width: "38px",
+    height: "38px",
     borderRadius: "50%",
     background: "#3b82f6",
     color: "#ffffff",
     fontWeight: "700",
-    fontSize: "16px",
+    fontSize: "15px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  },
+  replyAvatar: {
+    width: "30px",
+    height: "30px",
+    borderRadius: "50%",
+    objectFit: "cover",
+    background: "#eee",
+    flexShrink: 0,
+  },
+  replyAvatarFallback: {
+    width: "30px",
+    height: "30px",
+    borderRadius: "50%",
+    background: "#3b82f6",
+    color: "#ffffff",
+    fontWeight: "700",
+    fontSize: "12px",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
@@ -678,13 +711,13 @@ const styles = {
   name: {
     fontSize: "13px",
     fontWeight: "700",
-    color: "#111",
+    color: "#555",
   },
   commentText: {
-    margin: "4px 0 3px",
+    margin: "3px 0 4px",
     fontSize: "14px",
     lineHeight: "1.4",
-    color: "#222",
+    color: "#111",
     wordBreak: "break-word",
   },
   commentImagesGrid: {
@@ -713,34 +746,70 @@ const styles = {
   replyTriggerBtn: {
     background: "transparent",
     border: "none",
-    color: "#6366f1",
+    color: "#555",
     fontSize: "12px",
     fontWeight: "600",
     cursor: "pointer",
     padding: 0,
+  },
+  likeActionWrapper: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    marginLeft: "8px",
+    flexShrink: 0,
+    width: "36px",
+  },
+  likeButton: {
+    background: "transparent",
+    border: "none",
+    cursor: "pointer",
+    padding: "4px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  likeCountText: {
+    fontSize: "11px",
+    color: "#888",
+    marginTop: "-2px",
+  },
+  viewRepliesWrapper: {
+    marginLeft: "50px",
+    marginTop: "4px",
+    marginBottom: "10px",
   },
   toggleRepliesBtn: {
     background: "transparent",
     border: "none",
-    color: "#3b82f6",
+    color: "#555",
     fontSize: "12px",
     fontWeight: "600",
     cursor: "pointer",
     padding: 0,
-    marginTop: "6px",
     display: "flex",
     alignItems: "center",
-    gap: "4px",
+    gap: "6px",
   },
   replyArrow: {
-    fontSize: "13px",
+    fontSize: "10px",
+    color: "#ccc",
+    letterSpacing: "-2px",
+  },
+  repliesContainer: {
+    marginTop: "8px",
+    marginLeft: "40px",
+    display: "flex",
+    flexDirection: "column",
+    gap: "12px",
   },
   replyingBanner: {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
     padding: "8px 16px",
-    background: "#f0f4f8",
+    background: "#f1f1f4",
     borderTop: "1px solid #e2e8f0",
     fontSize: "13px",
     color: "#333",
@@ -788,13 +857,13 @@ const styles = {
     alignItems: "center",
     justifyContent: "center",
   },
-  quickEmojiBar: {
+  emojiPopupBar: {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-around",
-    padding: "10px 16px",
-    background: "#ffffff",
-    borderTop: "1px solid #f0f0f0",
+    padding: "8px 16px",
+    background: "#fafafa",
+    borderTop: "1px solid #eee",
   },
   quickEmojiBtn: {
     background: "transparent",
@@ -802,57 +871,65 @@ const styles = {
     fontSize: "22px",
     cursor: "pointer",
     padding: "4px",
-    transition: "transform 0.1s ease",
   },
   inputArea: {
     position: "relative",
     marginTop: "auto",
     display: "flex",
     alignItems: "center",
-    gap: "10px",
-    padding: "12px 16px",
+    gap: "8px",
+    padding: "10px 16px",
     borderTop: "1px solid #eee",
     background: "#ffffff",
     zIndex: 10,
   },
-  stickerBtn: {
-    background: "transparent",
-    border: "none",
-    fontSize: "20px",
-    cursor: "pointer",
-    padding: "0 2px",
-    flexShrink: 0,
+  inputWrapperContainer: {
+    flex: 1,
+    position: "relative",
+    display: "flex",
+    alignItems: "center",
   },
   input: {
-    flex: 1,
-    minWidth: 0,
-    height: "46px",
-    border: "1px solid #ddd",
-    borderRadius: "24px",
+    width: "100%",
+    height: "44px",
+    border: "1px solid #e2e2e2",
+    borderRadius: "22px",
     outline: "none",
-    padding: "0 18px",
+    padding: "0 80px 0 16px",
     fontSize: "14px",
-    background: "#f9f9f9",
+    background: "#f8f8f8",
     color: "#111",
     boxSizing: "border-box",
   },
-  sendButton: {
-    height: "46px",
+  inputIconsRight: {
+    position: "absolute",
+    right: "10px",
+    display: "flex",
+    alignItems: "center",
+    gap: "6px",
+  },
+  inlineActionBtn: {
+    background: "transparent",
     border: "none",
-    borderRadius: "24px",
-    padding: "0 22px",
-    background: "linear-gradient(135deg, #6366f1, #38bdf8)",
+    fontSize: "18px",
+    cursor: "pointer",
+    padding: "2px",
+  },
+  sendButton: {
+    height: "44px",
+    border: "none",
+    borderRadius: "22px",
+    padding: "0 18px",
+    background: "#fe2c55",
     color: "#ffffff",
     fontWeight: "700",
     fontSize: "14px",
     cursor: "pointer",
     flexShrink: 0,
-    boxShadow: "0 4px 12px rgba(99, 102, 241, 0.3)",
   },
   disabledButton: {
     opacity: 0.4,
     cursor: "not-allowed",
-    boxShadow: "none",
   },
   centerMessage: {
     minHeight: "180px",
@@ -873,41 +950,6 @@ const styles = {
     fontSize: "13px",
   },
   commentThreadWrapper: {
-    marginBottom: "18px",
-  },
-  repliesContainer: {
-    marginTop: "10px",
-    marginLeft: "28px",
-    paddingLeft: "12px",
-    borderLeft: "2px solid #f0f0f0",
-    display: "flex",
-    flexDirection: "column",
-    gap: "14px",
-  },
-  replyItem: {
-    display: "flex",
-    alignItems: "flex-start",
-    gap: "10px",
-  },
-  replyAvatar: {
-    width: "32px",
-    height: "32px",
-    borderRadius: "50%",
-    objectFit: "cover",
-    background: "#eee",
-    flexShrink: 0,
-  },
-  replyAvatarFallback: {
-    width: "32px",
-    height: "32px",
-    borderRadius: "50%",
-    background: "#3b82f6",
-    color: "#ffffff",
-    fontWeight: "700",
-    fontSize: "13px",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    flexShrink: 0,
+    marginBottom: "16px",
   },
 };
