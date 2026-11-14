@@ -9,7 +9,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
   const [currentUser, setCurrentUser] = useState(null);
   const [comments, setComments] = useState([]);
   const [commentText, setCommentText] = useState("");
-  const [selectedImages, setSelectedImages] = useState([]); // Base64 data strings for R2 storage processing via Cloudflare Workers
+  const [selectedImages, setSelectedImages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [errorMessage, setErrorMessage] = useState(null);
@@ -126,25 +126,30 @@ export default function Comments({ postId, postOwnerId, onClose }) {
         return;
       }
 
-      // Connect through Cloudflare Workers backend API to process R2 storage & save records to Neon PostgreSQL
+      const targetParentId = replyingTo ? replyingTo.commentId : null;
+
+      // Send payload with dual-mapped fields to satisfy backend requirements for Neon PostgreSQL
       const response = await fetch(`${API_URL}/comments`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           postId: postId,
+          post_id: postId,
           postOwnerId: postOwnerId,
+          post_owner_id: postOwnerId,
           userId: currentUser.uid,
+          user_id: currentUser.uid,
           text: text,
-          mediaUrls: selectedImages, // Passed cleanly to backend for R2 storage routing
-          parentId: replyingTo ? replyingTo.commentId : null,
-          parent_id: replyingTo ? replyingTo.commentId : null,
+          mediaUrls: selectedImages,
+          media_urls: selectedImages,
+          parentId: targetParentId,
+          parent_id: targetParentId,
         }),
       });
 
       const data = await response.json();
 
       if (data.success) {
-        const targetParentId = replyingTo ? replyingTo.commentId : null;
         const userDisplayName = currentUser.displayName || currentUser.email?.split("@")[0] || "Vezlivo User";
         const userPhotoURL = currentUser.photoURL || "";
 
@@ -158,6 +163,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           profile_url: userPhotoURL,
           text: text,
           mediaUrls: selectedImages,
+          media_urls: selectedImages,
           createdAt: Date.now(),
           parentId: targetParentId,
           parent_id: targetParentId,
