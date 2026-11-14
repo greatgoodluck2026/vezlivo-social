@@ -106,7 +106,6 @@ export default function Comments({ postId, postOwnerId, onClose }) {
       ...prev,
       [commentId]: !prev[commentId],
     }));
-    // If liking, remove dislike
     setDislikedComments((prev) => ({
       ...prev,
       [commentId]: false,
@@ -118,7 +117,6 @@ export default function Comments({ postId, postOwnerId, onClose }) {
       ...prev,
       [commentId]: !prev[commentId],
     }));
-    // If disliking, remove like
     setLikedComments((prev) => ({
       ...prev,
       [commentId]: false,
@@ -175,7 +173,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
       const data = await response.json();
 
       if (data.success) {
-        const userDisplayName = currentUser.displayName || currentUser.email?.split("@")[0] || "Vezlivo User";
+        const userDisplayName = currentUser.displayName || currentUser.email?.split("@")[0] || "WriteThisCode User";
         const userPhotoURL = currentUser.photoURL || "";
 
         const newCommentObj = {
@@ -295,7 +293,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
 
   const renderCommentItem = (comment, isReply = false) => {
     const commentId = comment.id || comment.commentId;
-    const displayName = comment.displayName || comment.display_name || "Vezlivo User";
+    const displayName = comment.displayName || comment.display_name || "WriteThisCode User";
     const userPhoto = comment.photoURL || comment.profile_url;
     const isLiked = !!likedComments[commentId];
     const isDisliked = !!dislikedComments[commentId];
@@ -333,7 +331,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           </div>
         </div>
 
-        {/* Clean TikTok-style Right Actions matching Vezlivo Blue */}
+        {/* Clean SVG Line Art Action Buttons (WriteThisCode Blue Theme) */}
         <div style={styles.rightActionsContainer}>
           <div style={styles.actionButtonWrapper}>
             <button
@@ -341,9 +339,9 @@ export default function Comments({ postId, postOwnerId, onClose }) {
               onClick={() => toggleLike(commentId)}
               style={styles.iconButton}
             >
-              <span style={{ fontSize: "16px", color: isLiked ? "#3b82f6" : "#888" }}>
-                {isLiked ? "❤️" : "🤍"}
-              </span>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill={isLiked ? "#3b82f6" : "none"} stroke={isLiked ? "#3b82f6" : "#888"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>
+              </svg>
             </button>
             <span style={styles.actionCountText}>{isLiked ? 1 : 0}</span>
           </div>
@@ -354,9 +352,10 @@ export default function Comments({ postId, postOwnerId, onClose }) {
               onClick={() => toggleDislike(commentId)}
               style={styles.iconButton}
             >
-              <span style={{ fontSize: "16px", color: isDisliked ? "#333" : "#aaa" }}>
-                👎
-              </span>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill={isDisliked ? "#3b82f6" : "none"} stroke={isDisliked ? "#3b82f6" : "#888"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.3 9a2 2 0 0 0 2 2.3H10z"></path>
+                <path d="M21 2v11a2 2 0 0 1-2 2h-3v-13h3a2 2 0 0 1 2 2z"></path>
+              </svg>
             </button>
           </div>
         </div>
@@ -514,7 +513,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           </div>
         )}
 
-        {/* TikTok-style Bottom Input Bar with embedded action buttons */}
+        {/* Bottom Input Bar */}
         <div style={styles.inputArea}>
           <input
             type="file"
@@ -806,7 +805,6 @@ const styles = {
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    fontSize: "16px",
   },
   actionCountText: {
     fontSize: "10px",
