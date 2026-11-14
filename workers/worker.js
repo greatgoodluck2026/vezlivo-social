@@ -80,6 +80,8 @@ export default {
             post_id TEXT NOT NULL,
             post_owner_id TEXT NOT NULL,
             user_id TEXT NOT NULL,
+            display_name TEXT,
+            profile_url TEXT,
             text TEXT,
             media_urls TEXT[],
             parent_id TEXT,
@@ -89,8 +91,10 @@ export default {
 
         await sql`ALTER TABLE comments ADD COLUMN IF NOT EXISTS parent_id TEXT;`;
         await sql`ALTER TABLE comments ADD COLUMN IF NOT EXISTS media_urls TEXT[];`;
+        await sql`ALTER TABLE comments ADD COLUMN IF NOT EXISTS display_name TEXT;`;
+        await sql`ALTER TABLE comments ADD COLUMN IF NOT EXISTS profile_url TEXT;`;
 
-        if (request.method === "GET") {
+     if (request.method === "GET") {
           const postId = url.searchParams.get("postId");
           const currentUserId = url.searchParams.get("userId");
           if (!postId) {
@@ -116,9 +120,9 @@ export default {
                 c.id, 
                 c.post_id, 
                 c.user_id, 
-                COALESCE(u.display_name, c.display_name, 'WriteThisCode User') AS display_name,
-                COALESCE(u.username, c.username, 'user') AS username,
-                COALESCE(u.profile_url, u.photo_url, '') AS user_photo,
+                COALESCE(NULLIF(u.display_name, ''), NULLIF(c.display_name, ''), 'User') AS display_name,
+                COALESCE(NULLIF(u.username, ''), 'user') AS username,
+                COALESCE(NULLIF(u.profile_url, ''), NULLIF(u.photo_url, ''), NULLIF(c.profile_url, ''), NULLIF(c.photo_url, ''), '') AS user_photo,
                 c.text, 
                 c.media_urls,
                 c.parent_id, 
@@ -132,7 +136,7 @@ export default {
             `;
           } catch (innerErr) {
             comments = await sql`
-              SELECT id, post_id, user_id, display_name, username, text, media_urls, parent_id, created_at, NULL AS reaction_type, '' AS user_photo
+              SELECT id, post_id, user_id, display_name, '' AS username, '' AS user_photo, text, media_urls, parent_id, created_at, NULL AS reaction_type
               FROM comments 
               WHERE post_id = ${postId} 
               ORDER BY created_at ASC
@@ -141,14 +145,15 @@ export default {
 
           const formattedComments = comments.map(c => {
             const avatarUrl = c.user_photo || '';
+            const realName = c.display_name && c.display_name !== 'WriteThisCode User' ? c.display_name : 'User';
             return {
               id: c.id,
               commentId: c.id,
               postId: c.post_id,
               userId: c.user_id,
               user_id: c.user_id,
-              displayName: c.display_name || 'WriteThisCode User',
-              display_name: c.display_name || 'WriteThisCode User',
+              displayName: realName,
+              display_name: realName,
               username: c.username || 'user',
               photoURL: avatarUrl,
               profile_url: avatarUrl,
@@ -167,9 +172,11 @@ export default {
 
         if (request.method === "POST") {
           const body = await request.json();
-          const { postId, postOwnerId, userId, text, mediaUrls, media_urls, parentId, parent_id } = body;
+          const { postId, postOwnerId, userId, displayName, display_name, photoURL, profile_url, text, mediaUrls, media_urls, parentId, parent_id } = body;
           const effectiveParentId = parentId || parent_id || null;
           const imagesArray = mediaUrls || media_urls || [];
+          const effectiveName = displayName || display_name || "User";
+          const effectivePhoto = photoURL || profile_url || "";
 
           if (!postId || !userId || (!text && imagesArray.length === 0)) {
             return json({ success: false, error: "Missing required fields (text or image required)" }, 400);
@@ -181,23 +188,18 @@ export default {
             if (trimmedText.length > 500) {
               return json({ success: false, error: "Comment is too long (maximum 500 characters)." }, 400);
             }
-
-            const cleanedText = trimmedText
-              .toLowerCase()
-              .replace(/[^\p{L}\p{N}\s]/gu, " ")
-              .replace(/\s+/g, " ")
-              .trim();
-
-            const blockedWords = ["badword", "badword2", "badword3", "idiot", "stupid", "fool", "dumb"];
-            const words = cleanedText.split(" ");
-            if (words.some((word) => blockedWords.includes(word))) {
-              return json({ success: false, error: "This comment contains language that is not allowed on Vezlivo." }, 400);
-            }
-
-            if (/(.)\1{7,}/i.test(cleanedText)) {
-              return json({ success: false, error: "Please do not send repeated or spam characters." }, 400);
-            }
           }
+
+          // Auto-upsert into users table so future lookups find them immediately
+          try {
+            await sql`
+              INSERT INTO users (uid, display_name, profile_url, created_at)
+              VALUES (${userId}, ${effectiveName}, ${effectivePhoto}, NOW())
+              ON CONFLICT (uid) DO UPDATE SET
+                display_name = COALESCE(NULLIF(EXCLUDED.display_name, 'User'), users.display_name),
+                profile_url = COALESCE(NULLIF(EXCLUDED.profile_url, ''), users.profile_url)
+            `;
+          } catch (e) {}
 
           await sql`ALTER TABLE posts ADD COLUMN IF NOT EXISTS comments_count INT DEFAULT 0`;
           await sql`ALTER TABLE posts ADD COLUMN IF NOT EXISTS comments INT DEFAULT 0`;
@@ -205,8 +207,8 @@ export default {
           const createdAt = Date.now();
 
           const insertRes = await sql`
-            INSERT INTO comments (post_id, post_owner_id, user_id, text, media_urls, parent_id, created_at)
-            VALUES (${postId}, ${postOwnerId || ""}, ${userId}, ${trimmedText}, ${imagesArray}, ${effectiveParentId}, ${createdAt})
+            INSERT INTO comments (post_id, post_owner_id, user_id, display_name, profile_url, text, media_urls, parent_id, created_at)
+            VALUES (${postId}, ${postOwnerId || ""}, ${userId}, ${effectiveName}, ${effectivePhoto}, ${trimmedText}, ${imagesArray}, ${effectiveParentId}, ${createdAt})
             RETURNING id
           `;
 
@@ -225,51 +227,6 @@ export default {
               SET comments_count = COALESCE(comments_count, 0) + 1,
                   comments = COALESCE(comments, 0) + 1
               WHERE id::text = ${postId}
-            `;
-          }
-
-          let targetUserId = postOwnerId;
-          let activityType = "comment";
-
-          if (effectiveParentId) {
-            const parentRes = await sql`SELECT user_id FROM comments WHERE id::text = ${effectiveParentId} OR id = ${effectiveParentId}`;
-            if (parentRes.length > 0 && parentRes[0].user_id) {
-              targetUserId = parentRes[0].user_id;
-              activityType = "reply";
-            }
-          }
-
-          if (targetUserId && targetUserId !== userId) {
-            const userRes = await sql`SELECT display_name, username FROM users WHERE uid = ${userId}`;
-            const actorName = userRes[0]?.display_name || userRes[0]?.username || "Someone";
-
-            const postRes = await sql`SELECT thumbnail_url, video_url, mux_playback_id FROM posts WHERE id::text = ${postId}`;
-            let thumbnail = null;
-            if (postRes.length > 0) {
-              const playbackId = postRes[0].mux_playback_id;
-              thumbnail = playbackId 
-                ? `https://image.mux.com/${playbackId}/thumbnail.jpg` 
-                : (postRes[0].thumbnail_url || postRes[0].video_url || null);
-            }
-
-            await sql`
-              CREATE TABLE IF NOT EXISTS activities (
-                id SERIAL PRIMARY KEY,
-                user_uid TEXT NOT NULL,
-                type VARCHAR(50) NOT NULL,
-                actor_id TEXT,
-                actor_name TEXT,
-                comment_text TEXT,
-                post_id TEXT,
-                post_thumbnail TEXT,
-                read BOOLEAN DEFAULT FALSE,
-                created_at BIGINT
-              )
-            `;
-
-            await sql`
-              INSERT INTO activities (user_uid, type, actor_id, actor_name, comment_text, post_id, post_thumbnail, read, created_at)
-              VALUES (${targetUserId}, ${activityType}, ${userId}, ${actorName}, ${trimmedText || '[Image]'}, ${postId}, ${thumbnail}, FALSE, ${createdAt})
             `;
           }
 
@@ -616,7 +573,7 @@ export default {
     }
 
     // GET POSTS AND REELS
-    if (
+   if (
       [
         "/posts",
         "/api/posts",
@@ -631,10 +588,10 @@ export default {
 
         const posts = await sql`
           SELECT p.*, 
-                 COALESCE(u.display_name, p.display_name, 'WriteThisCode User') AS display_name, 
-                 COALESCE(u.username, p.username, '@user') AS username, 
-                 COALESCE(u.profile_url, u.photo_url, p.profile_url, '') AS profile_url,
-                 COALESCE(u.profile_url, u.photo_url, p.profile_url, '') AS "profileURL"
+                 COALESCE(NULLIF(u.display_name, ''), NULLIF(p.display_name, ''), 'WriteThisCode User') AS display_name, 
+                 COALESCE(NULLIF(u.username, ''), NULLIF(p.username, ''), '@user') AS username, 
+                 COALESCE(NULLIF(u.profile_url, ''), NULLIF(u.photo_url, ''), NULLIF(p.profile_url, ''), '') AS profile_url,
+                 COALESCE(NULLIF(u.profile_url, ''), NULLIF(u.photo_url, ''), NULLIF(p.profile_url, ''), '') AS "profileURL"
           FROM posts p
           LEFT JOIN users u ON p.user_id = u.uid
           ORDER BY p.created_at DESC 

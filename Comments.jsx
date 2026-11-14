@@ -1,1111 +1,1310 @@
-import React, { useEffect, useState, useRef } from "react";
-import { onAuthStateChanged } from "firebase/auth";
-import { auth } from "./firebase.js";
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
 
-const API_URL = "https://vezlivo-api.vezlivo-api.workers.dev";
-
-export default function Comments({ postId, postOwnerId, onClose }) {
-  const [currentUser, setCurrentUser] = useState(null);
-  const [comments, setComments] = useState([]);
-  const [commentText, setCommentText] = useState("");
-  const [selectedImages, setSelectedImages] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [sending, setSending] = useState(false);
-  const [errorMessage, setErrorMessage] = useState(null);
-  const [viewportHeight, setViewportHeight] = useState(null);
-  const [keyboardOffset, setKeyboardOffset] = useState(0);
-  const [replyingTo, setReplyingTo] = useState(null);
-  const [expandedThreads, setExpandedThreads] = useState({});
-  const [likedComments, setLikedComments] = useState({});
-  const [dislikedComments, setDislikedComments] = useState({});
-  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
-  const [fullscreenImage, setFullscreenImage] = useState(null);
-
-  const inputRef = useRef(null);
-  const fileInputRef = useRef(null);
-
-  useEffect(() => {
-    const originalOverflow = document.body.style.overflow;
-    const originalPosition = document.body.style.position;
-    const originalWidth = document.body.style.width;
-
-    document.body.style.overflow = "hidden";
-    document.body.style.position = "fixed";
-    document.body.style.width = "100%";
-
-    return () => {
-      document.body.style.overflow = originalOverflow;
-      document.body.style.position = originalPosition;
-      document.body.style.width = originalWidth;
-    };
-  }, []);
-
-  useEffect(() => {
-    const handleResize = () => {
-      if (window.visualViewport) {
-        setViewportHeight(window.visualViewport.height);
-        setKeyboardOffset(window.visualViewport.offsetTop);
-      }
-    };
-
-    if (window.visualViewport) {
-      window.visualViewport.addEventListener("resize", handleResize);
-      window.visualViewport.addEventListener("scroll", handleResize);
-      setViewportHeight(window.visualViewport.height);
-      setKeyboardOffset(window.visualViewport.offsetTop);
+    if (request.method === "OPTIONS") {
+      return new Response(null, {
+        headers: corsHeaders(),
+      });
     }
 
-    return () => {
-      if (window.visualViewport) {
-        window.visualViewport.removeEventListener("resize", handleResize);
-        window.visualViewport.removeEventListener("scroll", handleResize);
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setCurrentUser(user);
-    });
-    return () => unsubscribe();
-  }, []);
-
-  useEffect(() => {
-    if (!postId) {
-      setComments([]);
-      setLoading(false);
-      return;
-    }
-
-    const fetchComments = async () => {
+    // ROOT / DATABASE TEST
+    if (url.pathname === "/" || url.pathname === "/db-test") {
       try {
-        const userIdParam = currentUser ? `&userId=${currentUser.uid}` : "";
-        const response = await fetch(`${API_URL}/comments?postId=${postId}${userIdParam}`);
-        const data = await response.json();
-        if (data.success) {
-          const sorted = (data.comments || []).sort((a, b) => {
-            const timeA = Number(a.createdAt || a.created_at || 0);
-            const timeB = Number(b.createdAt || b.created_at || 0);
-            return timeB - timeA;
-          });
-          setComments(sorted);
+        const { neon } = await import("@neondatabase/serverless");
+        const sql = neon(env.DATABASE_URL);
+        const result = await sql`
+          SELECT NOW() AS current_time, version() AS db_version
+        `;
 
-          // Populate initial like/dislike states from server response
-          const initialLikes = {};
-          const initialDislikes = {};
-          data.comments.forEach((c) => {
-            const commentId = c.id || c.commentId;
-            if (c.userReaction === "like") initialLikes[commentId] = true;
-            if (c.userReaction === "dislike") initialDislikes[commentId] = true;
+        return json({
+          success: true,
+          message: "Successfully connected to Neon PostgreSQL!",
+          data: result[0],
+        });
+      } catch (err) {
+        return json({ success: false, error: err.message }, 500);
+      }
+    }
+
+    // SERVE FILES FROM CLOUDFARE R2 (/media/*)
+    const mediaMatch = url.pathname.match(/^\/media\/(.+)$/);
+    if (mediaMatch && request.method === "GET") {
+      try {
+        const filename = decodeURIComponent(mediaMatch[1]);
+        if (!env.R2) {
+          return new Response("R2 storage not configured", { status: 500 });
+        }
+        
+        const object = await env.R2.get(filename);
+        if (!object) {
+          return new Response("File not found", { status: 404 });
+        }
+
+        const headers = new Headers(corsHeaders());
+        object.writeHttpMetadata(headers);
+        headers.set("etag", object.httpEtag);
+        
+        return new Response(object.body, { headers });
+      } catch (err) {
+        return json({ success: false, error: err.message }, 500);
+      }
+    }
+
+    // HEALTH CHECK
+    if (url.pathname === "/health") {
+      return json({
+        ok: true,
+        service: "Vezlivo API",
+        status: "healthy",
+      });
+    }
+
+    // SOUNDS ENDPOINT
+    if (["/sounds", "/api/sounds"].includes(url.pathname) && request.method === "GET") {
+      return json({
+        success: true,
+        sounds: [],
+      });
+    }
+
+   // COMMENTS ENDPOINT (GET & POST)
+    if (url.pathname === "/comments") {
+      try {
+        const { neon } = await import("@neondatabase/serverless");
+        const sql = neon(env.DATABASE_URL);
+
+        await sql`
+          CREATE TABLE IF NOT EXISTS comments (
+            id SERIAL PRIMARY KEY,
+            post_id TEXT NOT NULL,
+            post_owner_id TEXT NOT NULL,
+            user_id TEXT NOT NULL,
+            display_name TEXT,
+            profile_url TEXT,
+            text TEXT,
+            media_urls TEXT[],
+            parent_id TEXT,
+            created_at BIGINT
+          )
+        `;
+
+        await sql`ALTER TABLE comments ADD COLUMN IF NOT EXISTS parent_id TEXT;`;
+        await sql`ALTER TABLE comments ADD COLUMN IF NOT EXISTS media_urls TEXT[];`;
+        await sql`ALTER TABLE comments ADD COLUMN IF NOT EXISTS display_name TEXT;`;
+        await sql`ALTER TABLE comments ADD COLUMN IF NOT EXISTS profile_url TEXT;`;
+
+        if (request.method === "GET") {
+          const postId = url.searchParams.get("postId");
+          const currentUserId = url.searchParams.get("userId");
+          if (!postId) {
+            return json({ success: false, error: "Missing postId" }, 400);
+          }
+
+          try {
+            await sql`
+              CREATE TABLE IF NOT EXISTS comment_likes (
+                user_id TEXT NOT NULL,
+                comment_id INT NOT NULL,
+                reaction_type VARCHAR(20) NOT NULL,
+                created_at TIMESTAMPTZ DEFAULT NOW(),
+                PRIMARY KEY (user_id, comment_id)
+              )
+            `;
+          } catch (e) {}
+
+          let comments = [];
+          try {
+            comments = await sql`
+              SELECT 
+                c.id, 
+                c.post_id, 
+                c.user_id, 
+                COALESCE(NULLIF(u.display_name, ''), NULLIF(c.display_name, ''), 'User') AS display_name,
+                COALESCE(NULLIF(u.username, ''), 'user') AS username,
+                COALESCE(NULLIF(u.profile_url, ''), NULLIF(u.photo_url, ''), NULLIF(c.profile_url, ''), NULLIF(c.photo_url, ''), '') AS user_photo,
+                c.text, 
+                c.media_urls,
+                c.parent_id, 
+                c.created_at,
+                cl.reaction_type
+              FROM comments c
+              LEFT JOIN users u ON c.user_id = u.uid
+              LEFT JOIN comment_likes cl ON c.id = cl.comment_id AND cl.user_id = ${currentUserId || ''}
+              WHERE c.post_id = ${postId} 
+              ORDER BY c.created_at ASC
+            `;
+          } catch (innerErr) {
+            comments = await sql`
+              SELECT id, post_id, user_id, display_name, '' AS username, '' AS user_photo, text, media_urls, parent_id, created_at, NULL AS reaction_type
+              FROM comments 
+              WHERE post_id = ${postId} 
+              ORDER BY created_at ASC
+            `;
+          }
+
+          const formattedComments = comments.map(c => {
+            const avatarUrl = c.user_photo || '';
+            const realName = c.display_name && c.display_name !== 'WriteThisCode User' ? c.display_name : 'User';
+            return {
+              id: c.id,
+              commentId: c.id,
+              postId: c.post_id,
+              userId: c.user_id,
+              user_id: c.user_id,
+              displayName: realName,
+              display_name: realName,
+              username: c.username || 'user',
+              photoURL: avatarUrl,
+              profile_url: avatarUrl,
+              text: c.text || '',
+              mediaUrls: c.media_urls || [],
+              media_urls: c.media_urls || [],
+              parentId: c.parent_id || null,
+              parent_id: c.parent_id || null,
+              createdAt: c.created_at || Date.now(),
+              userReaction: c.reaction_type || null
+            };
           });
-          setLikedComments(initialLikes);
-          setDislikedComments(initialDislikes);
-        } else {
-          setErrorMessage("Could not load comments from server.");
+
+          return json({ success: true, comments: formattedComments });
+        }
+
+        if (request.method === "POST") {
+          const body = await request.json();
+          const { postId, postOwnerId, userId, displayName, display_name, photoURL, profile_url, text, mediaUrls, media_urls, parentId, parent_id } = body;
+          const effectiveParentId = parentId || parent_id || null;
+          const imagesArray = mediaUrls || media_urls || [];
+          const effectiveName = displayName || display_name || "User";
+          const effectivePhoto = photoURL || profile_url || "";
+
+          if (!postId || !userId || (!text && imagesArray.length === 0)) {
+            return json({ success: false, error: "Missing required fields (text or image required)" }, 400);
+          }
+
+          const trimmedText = typeof text === "string" ? text.trim() : "";
+          
+          if (trimmedText) {
+            if (trimmedText.length > 500) {
+              return json({ success: false, error: "Comment is too long (maximum 500 characters)." }, 400);
+            }
+          }
+
+          // Auto-upsert into users table so future lookups find them immediately
+          try {
+            await sql`
+              INSERT INTO users (uid, display_name, profile_url, created_at)
+              VALUES (${userId}, ${effectiveName}, ${effectivePhoto}, NOW())
+              ON CONFLICT (uid) DO UPDATE SET
+                display_name = COALESCE(NULLIF(EXCLUDED.display_name, 'User'), users.display_name),
+                profile_url = COALESCE(NULLIF(EXCLUDED.profile_url, ''), users.profile_url)
+            `;
+          } catch (e) {}
+
+          await sql`ALTER TABLE posts ADD COLUMN IF NOT EXISTS comments_count INT DEFAULT 0`;
+          await sql`ALTER TABLE posts ADD COLUMN IF NOT EXISTS comments INT DEFAULT 0`;
+
+          const createdAt = Date.now();
+
+          const insertRes = await sql`
+            INSERT INTO comments (post_id, post_owner_id, user_id, display_name, profile_url, text, media_urls, parent_id, created_at)
+            VALUES (${postId}, ${postOwnerId || ""}, ${userId}, ${effectiveName}, ${effectivePhoto}, ${trimmedText}, ${imagesArray}, ${effectiveParentId}, ${createdAt})
+            RETURNING id
+          `;
+
+          const newCommentId = insertRes[0]?.id;
+
+          if (!isNaN(postId)) {
+            await sql`
+              UPDATE posts 
+              SET comments_count = COALESCE(comments_count, 0) + 1,
+                  comments = COALESCE(comments, 0) + 1
+              WHERE id = ${parseInt(postId, 10)}
+            `;
+          } else {
+            await sql`
+              UPDATE posts 
+              SET comments_count = COALESCE(comments_count, 0) + 1,
+                  comments = COALESCE(comments, 0) + 1
+              WHERE id::text = ${postId}
+            `;
+          }
+
+          return json({ success: true, message: "Comment added successfully", commentId: newCommentId });
         }
       } catch (err) {
-        console.error("Failed to load comments:", err);
-        setErrorMessage("Network error: Unable to connect to server.");
-      } finally {
-        setLoading(false);
+        return json({ success: false, error: err.message }, 500);
       }
-    };
-
-    fetchComments();
-  }, [postId, currentUser]);
-
-  const toggleLike = async (commentId) => {
-    if (!currentUser) {
-      setErrorMessage("You must be logged in to like comments.");
-      return;
     }
 
-    const wasLiked = !!likedComments[commentId];
-    const newAction = wasLiked ? "none" : "like";
-
-    // Optimistic UI update
-    setLikedComments((prev) => ({ ...prev, [commentId]: !wasLiked }));
-    setDislikedComments((prev) => ({ ...prev, [commentId]: false }));
-
-    try {
-      await fetch(`${API_URL}/comments/like`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userId: currentUser.uid,
-          commentId: commentId,
-          action: newAction,
-        }),
-      });
-    } catch (err) {
-      console.error("Failed to sync comment like:", err);
-    }
-  };
-
-  const toggleDislike = async (commentId) => {
-    if (!currentUser) {
-      setErrorMessage("You must be logged in to dislike comments.");
-      return;
-    }
-
-    const wasDisliked = !!dislikedComments[commentId];
-    const newAction = wasDisliked ? "none" : "dislike";
-
-    // Optimistic UI update
-    setDislikedComments((prev) => ({ ...prev, [commentId]: !wasDisliked }));
-    setLikedComments((prev) => ({ ...prev, [commentId]: false }));
-
-    try {
-      await fetch(`${API_URL}/comments/like`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userId: currentUser.uid,
-          commentId: commentId,
-          action: newAction,
-        }),
-      });
-    } catch (err) {
-      console.error("Failed to sync comment dislike:", err);
-    }
-  };
-
-  const sendComment = async () => {
-    if (!currentUser) {
-      setErrorMessage("You must be logged in to send a comment.");
-      return;
-    }
-
-    const text = commentText.trim();
-    if (!text && selectedImages.length === 0) {
-      setErrorMessage("Please type a message or attach at least one picture before sending.");
-      return;
-    }
-
-    if (!postId || !postOwnerId) {
-      setErrorMessage("Error: Missing post reference information.");
-      return;
-    }
-
-    setSending(true);
-    setErrorMessage(null);
-
-    try {
-      if (text && text.length > 500) {
-        setErrorMessage("Comment is too long (maximum 500 characters).");
-        setSending(false);
-        return;
+    // COMMENT LIKE / DISLIKE ENDPOINT
+    if (
+      url.pathname === "/comments/like" ||
+      url.pathname === "/api/comments/like" ||
+      url.pathname.endsWith("/comments/like")
+    ) {
+      if (request.method !== "POST") {
+        return json({ success: false, error: "Method not allowed" }, 405);
       }
 
-      const targetParentId = replyingTo ? replyingTo.commentId : null;
-      const userDisplayName = currentUser.displayName || currentUser.email?.split("@")[0] || "WriteThisCode User";
-      const userPhotoURL = currentUser.photoURL || "";
+      try {
+        const body = await request.json();
+        const { userId, commentId, action } = body;
 
-      const response = await fetch(`${API_URL}/comments`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          postId: postId,
-          post_id: postId,
-          postOwnerId: postOwnerId,
-          post_owner_id: postOwnerId,
-          userId: currentUser.uid,
-          user_id: currentUser.uid,
-          displayName: userDisplayName,
-          display_name: userDisplayName,
-          photoURL: userPhotoURL,
-          profile_url: userPhotoURL,
-          text: text,
-          mediaUrls: selectedImages,
-          media_urls: selectedImages,
-          parentId: targetParentId,
-          parent_id: targetParentId,
-        }),
-      });
+        if (!userId || !commentId) {
+          return json({ success: false, error: "Missing userId or commentId" }, 400);
+        }
 
-      const data = await response.json();
+        const { neon } = await import("@neondatabase/serverless");
+        const sql = neon(env.DATABASE_URL);
 
-      if (data.success) {
-        const newCommentObj = {
-          id: data.commentId || Date.now().toString(),
-          user_id: currentUser.uid,
-          userId: currentUser.uid,
-          displayName: userDisplayName,
-          display_name: userDisplayName,
-          photoURL: userPhotoURL,
-          profile_url: userPhotoURL,
-          text: text,
-          mediaUrls: selectedImages,
-          media_urls: selectedImages,
-          createdAt: Date.now(),
-          parentId: targetParentId,
-          parent_id: targetParentId,
+        await sql`
+          CREATE TABLE IF NOT EXISTS comment_likes (
+            user_id TEXT NOT NULL,
+            comment_id INT NOT NULL,
+            reaction_type VARCHAR(20) NOT NULL,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            PRIMARY KEY (user_id, comment_id)
+          )
+        `;
+
+        if (action === "none" || !action) {
+          await sql`
+            DELETE FROM comment_likes 
+            WHERE user_id = ${userId} AND comment_id = ${parseInt(commentId, 10)}
+          `;
+        } else {
+          await sql`
+            INSERT INTO comment_likes (user_id, comment_id, reaction_type) 
+            VALUES (${userId}, ${parseInt(commentId, 10)}, ${action}) 
+            ON CONFLICT (user_id, comment_id) 
+            DO UPDATE SET reaction_type = EXCLUDED.reaction_type
+          `;
+        }
+
+        return json({ success: true, message: "Comment reaction updated successfully" });
+      } catch (err) {
+        return json({ success: false, error: err.message }, 500);
+      }
+    }
+
+    // SYNC USER PROFILE & IMAGES
+    if (
+      [
+        "/users/sync",
+        "/api/users/sync",
+        "/users/update-profile",
+        "/api/users/update-profile",
+        "/rs/update-profile",
+        "/api/rs/update-profile"
+      ].includes(url.pathname) &&
+      request.method === "POST"
+    ) {
+      try {
+        const body = await request.json();
+
+        const {
+          uid,
+          displayName,
+          display_name,
+          username,
+          bio,
+          isPrivate,
+          is_private,
+          profileURL,
+          profile_url,
+          coverURL,
+          cover_url,
+          profileImageBase64,
+          profileImageName,
+          coverImageBase64,
+          coverImageName,
+          birthMonth,
+          birthDay,
+          birthYear,
+          dateOfBirth,
+          age,
+          isMinor,
+          accountAgeGroup,
+          canAccessMatureContent,
+          onboardingComplete,
+          onboardingCompletedAt,
+        } = body;
+
+        if (!uid) {
+          return json({ success: false, error: "Missing user UID" }, 400);
+        }
+
+        let finalProfileURL = profile_url || profileURL || "";
+        let finalCoverURL = cover_url || coverURL || "";
+
+        if (profileImageBase64 && env.R2) {
+          try {
+            const base64Data = profileImageBase64.includes(",")
+              ? profileImageBase64.split(",")[1]
+              : profileImageBase64;
+
+            const binary = atob(base64Data);
+            const bytes = new Uint8Array(binary.length);
+
+            for (let i = 0; i < binary.length; i++) {
+              bytes[i] = binary.charCodeAt(i);
+            }
+
+            const filename =
+              profileImageName || `profile-${uid}-${Date.now()}.jpg`;
+
+            await env.R2.put(filename, bytes, {
+              httpMetadata: { contentType: "image/jpeg" },
+            });
+
+            finalProfileURL = `${url.origin}/media/${filename}`;
+          } catch (err) {
+            console.error("Profile R2 upload failed:", err);
+          }
+        } else if (!finalProfileURL && profileImageBase64) {
+          finalProfileURL = profileImageBase64;
+        }
+
+        if (coverImageBase64 && env.R2) {
+          try {
+            const base64Data = coverImageBase64.includes(",")
+              ? coverImageBase64.split(",")[1]
+              : coverImageBase64;
+
+            const binary = atob(base64Data);
+            const bytes = new Uint8Array(binary.length);
+
+            for (let i = 0; i < binary.length; i++) {
+              bytes[i] = binary.charCodeAt(i);
+            }
+
+            const filename =
+              coverImageName || `cover-${uid}-${Date.now()}.jpg`;
+
+            await env.R2.put(filename, bytes, {
+              httpMetadata: { contentType: "image/jpeg" },
+            });
+
+            finalCoverURL = `${url.origin}/media/${filename}`;
+          } catch (err) {
+            console.error("Cover R2 upload failed:", err);
+          }
+        }
+
+        const { neon } = await import("@neondatabase/serverless");
+        const sql = neon(env.DATABASE_URL);
+
+        await sql`
+          CREATE TABLE IF NOT EXISTS users (
+            uid TEXT PRIMARY KEY,
+            display_name TEXT,
+            username TEXT,
+            bio TEXT,
+            is_private BOOLEAN DEFAULT FALSE,
+            profile_url TEXT,
+            cover_url TEXT,
+            birth_month INT,
+            birth_day INT,
+            birth_year INT,
+            date_of_birth TEXT,
+            age INT,
+            is_minor BOOLEAN,
+            account_age_group TEXT,
+            can_access_mature_content BOOLEAN,
+            can_go_live BOOLEAN DEFAULT FALSE,
+            can_join_live BOOLEAN DEFAULT FALSE,
+            content_maturity_rating VARCHAR(20) DEFAULT 'mature',
+            onboarding_complete BOOLEAN,
+            onboarding_completed_at BIGINT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          )
+        `;
+
+        await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS cover_url TEXT`;
+        await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_url TEXT`;
+        await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS bio TEXT`;
+        await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_private BOOLEAN DEFAULT FALSE`;
+        await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS date_of_birth TEXT`;
+        await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS age INT`;
+        await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_minor BOOLEAN`;
+        await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS can_go_live BOOLEAN DEFAULT FALSE`;
+        await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS can_join_live BOOLEAN DEFAULT FALSE`;
+        await sql`ALTER TABLE users ADD COLUMN IF NOT EXISTS content_maturity_rating VARCHAR(20) DEFAULT 'mature'`;
+
+        const calculatedAge = typeof age === 'number' ? age : (age ? parseInt(age, 10) : 18);
+        const derivedIsMinor = calculatedAge < 18;
+        const derivedCanGoLive = !derivedIsMinor;
+        const derivedCanJoinLive = !derivedIsMinor;
+        const derivedMaturityRating = derivedIsMinor ? 'teen' : 'mature';
+        const effectiveDisplayName = displayName || display_name || "";
+        const effectiveIsPrivate = isPrivate === true || is_private === true;
+
+        await sql`
+          INSERT INTO users (
+            uid, display_name, username, bio, is_private, profile_url, cover_url,
+            birth_month, birth_day, birth_year, date_of_birth, age, is_minor,
+            account_age_group, can_access_mature_content, can_go_live, can_join_live,
+            content_maturity_rating, onboarding_complete, onboarding_completed_at
+          )
+          VALUES (
+            ${uid}, ${effectiveDisplayName}, ${username || ""}, ${bio || ""}, ${effectiveIsPrivate},
+            ${finalProfileURL}, ${finalCoverURL}, ${birthMonth || null}, ${birthDay || null},
+            ${birthYear || null}, ${dateOfBirth || null}, ${calculatedAge}, ${derivedIsMinor},
+            ${accountAgeGroup || (derivedIsMinor ? 'minor' : 'adult')}, ${canAccessMatureContent ?? !derivedIsMinor},
+            ${derivedCanGoLive}, ${derivedCanJoinLive}, ${derivedMaturityRating},
+            ${onboardingComplete || false}, ${onboardingCompletedAt || null}
+          )
+          ON CONFLICT (uid) DO UPDATE SET
+            display_name = COALESCE(EXCLUDED.display_name, users.display_name),
+            username = COALESCE(EXCLUDED.username, users.username),
+            bio = COALESCE(EXCLUDED.bio, users.bio),
+            is_private = COALESCE(EXCLUDED.is_private, users.is_private),
+            profile_url = CASE WHEN EXCLUDED.profile_url IS NOT NULL AND EXCLUDED.profile_url != '' THEN EXCLUDED.profile_url ELSE users.profile_url END,
+            cover_url = CASE WHEN EXCLUDED.cover_url IS NOT NULL AND EXCLUDED.cover_url != '' THEN EXCLUDED.cover_url ELSE users.cover_url END,
+            date_of_birth = COALESCE(EXCLUDED.date_of_birth, users.date_of_birth),
+            age = COALESCE(EXCLUDED.age, users.age),
+            is_minor = COALESCE(EXCLUDED.is_minor, users.is_minor),
+            can_go_live = COALESCE(EXCLUDED.can_go_live, users.can_go_live),
+            can_join_live = COALESCE(EXCLUDED.can_join_live, users.can_join_live),
+            content_maturity_rating = COALESCE(EXCLUDED.content_maturity_rating, users.content_maturity_rating),
+            onboarding_complete = COALESCE(EXCLUDED.onboarding_complete, users.onboarding_complete)
+        `;
+
+        if (finalProfileURL) {
+          await sql`
+            UPDATE posts 
+            SET profile_url = ${finalProfileURL} 
+            WHERE user_id = ${uid}
+          `;
+        }
+
+       return json({
+          success: true,
+          message: "User profile synchronized successfully with age rules",
+          profileURL: finalProfileURL,
+          coverURL: finalCoverURL,
+          canGoLive: derivedCanGoLive,
+          canJoinLive: derivedCanJoinLive,
+        });
+      } catch (err) {
+        return json({ success: false, error: err.message }, 500);
+      }
+    }
+
+    // GET USER PROFILE ROUTE
+    const userProfileMatch = url.pathname.match(/^\/api\/users\/([^/]+)$/) || url.pathname.match(/^\/users\/([^/]+)$/);
+    if (userProfileMatch && request.method === "GET") {
+      try {
+        const uid = decodeURIComponent(userProfileMatch[1]);
+        const { neon } = await import("@neondatabase/serverless");
+        const sql = neon(env.DATABASE_URL);
+
+        let users = await sql`
+          SELECT uid, display_name, username, bio, 
+                 COALESCE(profile_url, photo_url, '') AS profile_url, 
+                 COALESCE(photo_url, profile_url, '') AS photo_url,
+                 cover_url, followers_count, following_count, is_private 
+          FROM users 
+          WHERE uid = ${uid}
+        `;
+
+        if (users.length === 0) {
+          await sql`
+            INSERT INTO users (uid, display_name, username, bio, profile_url, photo_url, created_at)
+            VALUES (${uid}, 'WriteThisCode User', ${'user_' + uid.substring(0, 6)}, '', '', '', NOW())
+            ON CONFLICT (uid) DO NOTHING
+          `;
+          
+          users = await sql`
+            SELECT uid, display_name, username, bio, 
+                   COALESCE(profile_url, photo_url, '') AS profile_url, 
+                   COALESCE(photo_url, profile_url, '') AS photo_url,
+                   cover_url, followers_count, following_count, is_private 
+            FROM users 
+            WHERE uid = ${uid}
+          `;
+        }
+
+        const u = users[0] || {};
+        return json({
+          success: true,
+          profile: {
+            uid: u.uid || uid,
+            displayName: u.display_name || "WriteThisCode User",
+            username: u.username || "user",
+            bio: u.bio || "",
+            profileURL: u.profile_url || u.photo_url || "",
+            photoURL: u.photo_url || u.profile_url || "",
+            coverURL: u.cover_url || "",
+            followersCount: u.followers_count || 0,
+            followingCount: u.following_count || 0,
+            isPrivate: u.is_private || false,
+          },
+        });
+      } catch (err) {
+        return json({ success: false, error: err.message }, 500);
+      }
+    }
+
+    // SEARCH USERS
+    if (
+      (url.pathname === "/search/users" ||
+        url.pathname === "/api/search/users") &&
+      request.method === "GET"
+    ) {
+      try {
+        const query = url.searchParams.get("q") || "";
+        const { neon } = await import("@neondatabase/serverless");
+        const sql = neon(env.DATABASE_URL);
+
+        const users = await sql`
+          SELECT uid, display_name, username, profile_url
+          FROM users
+          WHERE username ILIKE ${"%" + query + "%"}
+             OR display_name ILIKE ${"%" + query + "%"}
+          LIMIT 20
+        `;
+
+        return json({ success: true, users });
+      } catch (err) {
+        return json({ success: false, error: err.message }, 500);
+      }
+    }
+
+    // GET POSTS AND REELS
+   if (
+      [
+        "/posts",
+        "/api/posts",
+        "/reels",
+        "/api/reels",
+      ].includes(url.pathname) &&
+      request.method === "GET"
+    ) {
+      try {
+        const { neon } = await import("@neondatabase/serverless");
+        const sql = neon(env.DATABASE_URL);
+
+        const posts = await sql`
+          SELECT p.*, 
+                 COALESCE(NULLIF(u.display_name, ''), NULLIF(p.display_name, ''), 'WriteThisCode User') AS display_name, 
+                 COALESCE(NULLIF(u.username, ''), NULLIF(p.username, ''), '@user') AS username, 
+                 COALESCE(NULLIF(u.profile_url, ''), NULLIF(u.photo_url, ''), NULLIF(p.profile_url, ''), '') AS profile_url,
+                 COALESCE(NULLIF(u.profile_url, ''), NULLIF(u.photo_url, ''), NULLIF(p.profile_url, ''), '') AS "profileURL"
+          FROM posts p
+          LEFT JOIN users u ON p.user_id = u.uid
+          ORDER BY p.created_at DESC 
+          LIMIT 50
+        `;
+
+        return json({
+          success: true,
+          posts,
+        });
+      } catch (err) {
+        return json({ success: false, error: err.message }, 500);
+      }
+    }
+
+    // CREATE POSTS AND REELS
+    if (
+      [
+        "/posts",
+        "/api/posts",
+        "/posts/create",
+        "/reels",
+        "/api/reels",
+        "/reels/create",
+      ].includes(url.pathname) &&
+      request.method === "POST"
+    ) {
+      try {
+        const body = await request.json();
+
+        const {
+          userId,
+          uid,
+          displayName,
+          username,
+          profileURL,
+          userPhotoURL,
+          caption,
+          videoUrl,
+          mediaURL,
+          thumbnailUrl,
+          muxAssetId,
+          muxPlaybackId,
+          isMature,
+          category,
+          coverURL,
+        } = body;
+
+        const effectiveUserId = userId || uid;
+
+        if (!effectiveUserId) {
+          return json({
+            success: false,
+            error: "Missing userId or uid",
+          }, 400);
+        }
+
+        const { neon } = await import("@neondatabase/serverless");
+        const sql = neon(env.DATABASE_URL);
+
+        const userQuery = await sql`SELECT profile_url, display_name, username FROM users WHERE uid = ${effectiveUserId}`;
+        const dbUser = userQuery[0] || {};
+
+        const effectiveProfileUrl = dbUser.profile_url || profileURL || userPhotoURL || "";
+        const effectiveDisplayName = dbUser.display_name || displayName || "WriteThisCode User";
+        const effectiveUsername = dbUser.username || username || "@user";
+
+        await sql`
+          CREATE TABLE IF NOT EXISTS posts (
+            id VARCHAR(128) PRIMARY KEY DEFAULT gen_random_uuid()::text,
+            user_id TEXT,
+            display_name TEXT,
+            username TEXT,
+            profile_url TEXT,
+            caption TEXT,
+            video_url TEXT,
+            mux_asset_id TEXT,
+            mux_playback_id TEXT,
+            thumbnail_url TEXT,
+            is_mature BOOLEAN DEFAULT FALSE,
+            category VARCHAR(50) DEFAULT 'general',
+            likes_count INT DEFAULT 0,
+            comments_count INT DEFAULT 0,
+            shares_count INT DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          )
+        `;
+
+        let finalVideoUrl = videoUrl || mediaURL || "";
+        const finalMuxPlaybackId = muxPlaybackId || "";
+
+        if ((!finalVideoUrl || finalVideoUrl.trim() === "") && finalMuxPlaybackId) {
+          finalVideoUrl = `https://stream.mux.com/${finalMuxPlaybackId}/high.mp4`;
+        }
+
+        let finalThumbnailUrl = thumbnailUrl || coverURL || "";
+        if (!finalThumbnailUrl && finalMuxPlaybackId) {
+          finalThumbnailUrl = `https://image.mux.com/${finalMuxPlaybackId}/thumbnail.jpg`;
+        }
+
+        const result = await sql`
+          INSERT INTO posts (
+            user_id, display_name, username, profile_url, 
+            caption, video_url, mux_asset_id,
+            mux_playback_id, thumbnail_url, is_mature, category
+          )
+          VALUES (
+            ${effectiveUserId},
+            ${effectiveDisplayName},
+            ${effectiveUsername},
+            ${effectiveProfileUrl},
+            ${caption || ""},
+            ${finalVideoUrl},
+            ${muxAssetId || ""},
+            ${finalMuxPlaybackId},
+            ${finalThumbnailUrl},
+            ${isMature || false},
+            ${category || 'general'}
+          )
+          RETURNING *
+        `;
+
+        return json({
+          success: true,
+          message: "Post created successfully",
+          post: result[0],
+        });
+      } catch (err) {
+        return json({ success: false, error: err.message }, 500);
+      }
+    }
+
+    // TOGGLE FOLLOW / UNFOLLOW ENDPOINT
+    if (
+      url.pathname === "/follow" ||
+      url.pathname === "/api/follow" ||
+      url.pathname === "/users/follow" ||
+      url.pathname === "/api/users/follow" ||
+      url.pathname.endsWith("/follow")
+    ) {
+      if (request.method !== "POST") {
+        return json({ success: false, error: "Method not allowed" }, 405);
+      }
+
+      try {
+        const body = await request.json();
+        const { followerId, followingId, action } = body;
+
+        if (!followerId || !followingId) {
+          return json({ success: false, error: "Missing followerId or followingId" }, 400);
+        }
+
+        const { neon } = await import("@neondatabase/serverless");
+        const sql = neon(env.DATABASE_URL);
+
+        if (action === "unfollow") {
+          await sql`
+            DELETE FROM follows 
+            WHERE follower_id = ${followerId} AND following_id = ${followingId}
+          `;
+          await sql`
+            UPDATE users 
+            SET following_count = GREATEST(COALESCE(following_count, 0) - 1, 0) 
+            WHERE uid = ${followerId}
+          `;
+          await sql`
+            UPDATE users 
+            SET followers_count = GREATEST(COALESCE(followers_count, 0) - 1, 0) 
+            WHERE uid = ${followingId}
+          `;
+        } else {
+          await sql`
+            INSERT INTO follows (follower_id, following_id) 
+            VALUES (${followerId}, ${followingId}) 
+            ON CONFLICT (follower_id, following_id) DO NOTHING
+          `;
+          await sql`
+            UPDATE users 
+            SET following_count = COALESCE(following_count, 0) + 1 
+            WHERE uid = ${followerId}
+          `;
+          await sql`
+            UPDATE users 
+            SET followers_count = COALESCE(followers_count, 0) + 1 
+            WHERE uid = ${followingId}
+          `;
+
+          const userRes = await sql`SELECT display_name, username FROM users WHERE uid = ${followerId}`;
+          const actorName = userRes[0]?.display_name || userRes[0]?.username || "Someone";
+          
+          await sql`
+            CREATE TABLE IF NOT EXISTS activities (
+              id SERIAL PRIMARY KEY,
+              user_uid TEXT NOT NULL,
+              type VARCHAR(50) NOT NULL,
+              actor_id TEXT,
+              actor_name TEXT,
+              comment_text TEXT,
+              post_id TEXT,
+              post_thumbnail TEXT,
+              read BOOLEAN DEFAULT FALSE,
+              created_at BIGINT
+            )
+          `;
+          await sql`
+            INSERT INTO activities (user_uid, type, actor_id, actor_name, read, created_at)
+            VALUES (${followingId}, 'follow', ${followerId}, ${actorName}, FALSE, ${Date.now()})
+          `;
+        }
+
+        return json({ success: true, message: "Follow updated successfully" });
+      } catch (err) {
+        return json({ success: false, error: err.message }, 500);
+      }
+    }
+
+    // TOGGLE LIKE / UNLIKE ENDPOINT
+    if (
+      url.pathname === "/like" ||
+      url.pathname === "/api/like" ||
+      url.pathname === "/posts/like" ||
+      url.pathname === "/api/posts/like" ||
+      url.pathname.endsWith("/like")
+    ) {
+      if (request.method !== "POST") {
+        return json({ success: false, error: "Method not allowed" }, 405);
+      }
+
+      try {
+        const body = await request.json();
+        const { userId, postId, action } = body;
+
+        if (!userId || !postId) {
+          return json({ success: false, error: "Missing userId or postId" }, 400);
+        }
+
+        const { neon } = await import("@neondatabase/serverless");
+        const sql = neon(env.DATABASE_URL);
+
+        await sql`
+          CREATE TABLE IF NOT EXISTS likes (
+            user_id VARCHAR(128) NOT NULL,
+            post_id VARCHAR(128) NOT NULL,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            PRIMARY KEY (user_id, post_id)
+          )
+        `;
+        await sql`ALTER TABLE posts ADD COLUMN IF NOT EXISTS likes_count INT DEFAULT 0`;
+
+        if (action === "unlike") {
+          await sql`
+            DELETE FROM likes 
+            WHERE user_id = ${userId} AND post_id = ${postId}
+          `;
+          await sql`
+            UPDATE posts 
+            SET likes_count = GREATEST(COALESCE(likes_count, 0) - 1, 0) 
+            WHERE id::text = ${postId}
+          `;
+        } else {
+          await sql`
+            INSERT INTO likes (user_id, post_id) 
+            VALUES (${userId}, ${postId}) 
+            ON CONFLICT (user_id, post_id) DO NOTHING
+          `;
+          await sql`
+            UPDATE posts 
+            SET likes_count = COALESCE(likes_count, 0) + 1 
+            WHERE id::text = ${postId}
+          `;
+
+          const postRes = await sql`SELECT user_id, thumbnail_url, video_url, mux_playback_id FROM posts WHERE id::text = ${postId}`;
+          if (postRes.length > 0) {
+            const ownerId = postRes[0].user_id;
+            if (ownerId && ownerId !== userId) {
+              const userRes = await sql`SELECT display_name, username FROM users WHERE uid = ${userId}`;
+              const actorName = userRes[0]?.display_name || userRes[0]?.username || "Someone";
+
+              const playbackId = postRes[0].mux_playback_id;
+              const thumbnail = playbackId 
+                ? `https://image.mux.com/${playbackId}/thumbnail.jpg` 
+                : (postRes[0].thumbnail_url || postRes[0].video_url || null);
+
+              await sql`
+                CREATE TABLE IF NOT EXISTS activities (
+                  id SERIAL PRIMARY KEY,
+                  user_uid TEXT NOT NULL,
+                  type VARCHAR(50) NOT NULL,
+                  actor_id TEXT,
+                  actor_name TEXT,
+                  comment_text TEXT,
+.user_id                  post_id TEXT,
+                  post_thumbnail TEXT,
+                  read BOOLEAN DEFAULT FALSE,
+                  created_at BIGINT
+                )
+              `;
+              await sql`
+                INSERT INTO activities (user_uid, type, actor_id, actor_name, post_id, post_thumbnail, read, created_at)
+                VALUES (${ownerId}, 'like', ${userId}, ${actorName}, ${postId}, ${thumbnail}, FALSE, ${Date.now()})
+              `;
+            }
+          }
+        }
+
+        return json({ success: true, message: "Like updated successfully" });
+      } catch (err) {
+        return json({ success: false, error: err.message }, 500);
+      }
+    }
+
+   // USER LIKES FETCH ENDPOINT (Safe fallback for 400/404)
+    if (
+      url.pathname === "/likes" ||
+      url.pathname === "/api/likes" ||
+      url.pathname.endsWith("/likes")
+    ) {
+      try {
+        const { neon } = await import("@neondatabase/serverless");
+        const sql = neon(env.DATABASE_URL);
+
+        await sql`
+          CREATE TABLE IF NOT EXISTS likes (
+            user_id VARCHAR(128) NOT NULL,
+            post_id VARCHAR(128) NOT NULL,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            PRIMARY KEY (user_id, post_id)
+          )
+        `;
+
+        if (request.method === "GET") {
+          const userId = url.searchParams.get("userId");
+          if (!userId || userId === "null" || userId === "undefined") {
+            return json({ success: true, likes: {} }); // Return empty map instead of failing 400
+          }
+          const userLikes = await sql`SELECT post_id FROM likes WHERE user_id = ${userId}`;
+          const likedMap = {};
+          userLikes.forEach(row => { likedMap[row.post_id] = true; });
+          return json({ success: true, likes: likedMap });
+        }
+
+        return json({ success: true, message: "Likes endpoint ready" });
+      } catch (err) {
+        return json({ success: true, likes: {} }); // Fallback success to prevent frontend crash
+      }
+    }
+
+    // TOGGLE SAVE / FAVORITE ENDPOINT
+    if (
+      url.pathname === "/save" ||
+      url.pathname === "/api/save" ||
+      url.pathname === "/posts/save" ||
+      url.pathname === "/api/posts/save" ||
+      url.pathname.endsWith("/save")
+    ) {
+      if (request.method !== "POST") {
+        return json({ success: false, error: "Method not allowed" }, 405);
+      }
+
+      try {
+        const body = await request.json();
+        const { userId, postId, action } = body;
+
+        if (!userId || !postId) {
+          return json({ success: false, error: "Missing userId or postId" }, 400);
+        }
+
+        const { neon } = await import("@neondatabase/serverless");
+        const sql = neon(env.DATABASE_URL);
+
+        await sql`
+          CREATE TABLE IF NOT EXISTS saves (
+            user_id VARCHAR(128) NOT NULL,
+            post_id VARCHAR(128) NOT NULL,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            PRIMARY KEY (user_id, post_id)
+          )
+        `;
+
+        if (action === "unsave") {
+          await sql`
+            DELETE FROM saves 
+            WHERE user_id = ${userId} AND post_id = ${postId}
+          `;
+        } else {
+          await sql`
+            INSERT INTO saves (user_id, post_id) 
+            VALUES (${userId}, ${postId}) 
+            ON CONFLICT (user_id, post_id) DO NOTHING
+          `;
+        }
+
+        return json({ success: true, message: "Save updated successfully" });
+      } catch (err) {
+        return json({ success: false, error: err.message }, 500);
+      }
+    }
+
+    // CREATE MUX DIRECT UPLOAD
+    if (
+      ["/mux/uploads", "/api/mux/uploads"].includes(url.pathname) &&
+      request.method === "POST"
+    ) {
+      try {
+        if (!env.MUX_TOKEN_ID || !env.MUX_TOKEN_SECRET) {
+          return json({
+            success: false,
+            error: "Mux credentials are not configured in Cloudflare environment variables.",
+          }, 500);
+        }
+
+        const muxResponse = await fetch(
+          "https://api.mux.com/video/v1/uploads",
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization:
+                "Basic " +
+                btoa(`${env.MUX_TOKEN_ID.trim()}:${env.MUX_TOKEN_SECRET.trim()}`),
+            },
+            body: JSON.stringify({
+              cors_origin: "*",
+              new_asset_settings: {
+                playback_policy: ["public"],
+              },
+            }),
+          }
+        );
+
+        const muxData = await muxResponse.json();
+
+        if (!muxResponse.ok || !muxData.data?.url) {
+          return json({
+            success: false,
+            error:
+              muxData.error?.messages?.[0] ||
+              muxData.error?.message ||
+              JSON.stringify(muxData),
+          }, 502);
+        }
+
+        return json({
+          success: true,
+          uploadId: muxData.data.id,
+          uploadUrl: muxData.data.url,
+        }, 201);
+      } catch (err) {
+        return json({ success: false, error: err.message }, 500);
+      }
+    }
+
+    // MUX PROXY UPLOAD ROUTE
+    if (
+      ["/mux/proxy-upload", "/api/mux/proxy-upload"].includes(url.pathname) &&
+      ["GET", "POST", "PUT", "PATCH", "HEAD", "OPTIONS"].includes(request.method)
+    ) {
+      try {
+        const targetUrl = url.searchParams.get("target");
+        if (!targetUrl) {
+          return json({ success: false, error: "Missing target URL" }, 400);
+        }
+
+        const forwardHeaders = {
+          "Content-Type": request.headers.get("Content-Type") || "application/offset+octet-stream",
         };
 
-        setCommentText("");
-        setSelectedImages([]);
-        setShowEmojiPicker(false);
-        if (replyingTo) {
-          setExpandedThreads((prev) => ({ ...prev, [replyingTo.commentId]: true }));
+        const optionalHeaderKeys = [
+          "upload-length",
+          "upload-offset",
+          "tus-resumable",
+          "upload-metadata",
+          "upload-concat",
+          "x-http-method-override",
+        ];
+
+        for (const key of optionalHeaderKeys) {
+          const val = request.headers.get(key);
+          if (val) {
+            forwardHeaders[key] = val;
+          }
         }
-        setReplyingTo(null);
-        setComments((prev) => [newCommentObj, ...prev]);
-      } else {
-        throw new Error(data.error || "Server failed to save comment.");
-      }
-    } catch (error) {
-      console.error("Could not send comment:", error);
-      setErrorMessage(error.message || "Failed to send comment. Please check your connection.");
-    } finally {
-      setSending(false);
-    }
-  };
 
-  const handleStickerSelect = (e) => {
-    const files = Array.from(e.target.files || []);
-    if (files.length === 0) return;
-
-    if (selectedImages.length >= 2) {
-      setErrorMessage("You can only attach a maximum of 2 images.");
-      return;
-    }
-
-    const remainingSlots = 2 - selectedImages.length;
-    const filesToProcess = files.slice(0, remainingSlots);
-
-    filesToProcess.forEach((file) => {
-      const reader = new FileReader();
-      reader.onload = (uploadEvent) => {
-        setSelectedImages((prev) => {
-          if (prev.length >= 2) return prev;
-          return [...prev, uploadEvent.target.result];
+        const proxyRes = await fetch(targetUrl, {
+          method: request.method,
+          headers: forwardHeaders,
+          body: ["GET", "HEAD"].includes(request.method) ? undefined : request.body,
         });
-      };
-      reader.readAsDataURL(file);
-    });
 
-    e.target.value = "";
-  };
+        const responseHeaders = new Headers(corsHeaders());
+        proxyRes.headers.forEach((val, key) => responseHeaders.set(key, val));
 
-  const removeImage = (indexToRemove) => {
-    setSelectedImages((prev) => prev.filter((_, idx) => idx !== indexToRemove));
-  };
-
-  const formatTime = (timestamp) => {
-    if (!timestamp) return "";
-    const date = new Date(Number(timestamp));
-    if (Number.isNaN(date.getTime())) return "";
-
-    const difference = Date.now() - date.getTime();
-    const minute = 60 * 1000;
-    const hour = 60 * minute;
-    const day = 24 * hour;
-
-    if (difference < minute) return "Just now";
-    if (difference < hour) return `${Math.floor(difference / minute)}m`;
-    if (difference < day) return `${Math.floor(difference / hour)}h`;
-    if (difference < 7 * day) return `${Math.floor(difference / day)}d`;
-
-    return date.toLocaleDateString();
-  };
-
-  const renderCommentContent = (comment) => {
-    const media = comment.mediaUrls || comment.media_urls || [];
-    let parsedImages = [];
-
-    try {
-      if (comment.text && comment.text.startsWith("{") && comment.text.includes("images")) {
-        const parsed = JSON.parse(comment.text);
-        if (parsed.images) parsedImages = parsed.images;
-        if (parsed.text) comment.text = parsed.text;
+        return new Response(proxyRes.body, {
+          status: proxyRes.status,
+          headers: responseHeaders,
+        });
+      } catch (err) {
+        return json({ success: false, error: err.message }, 500);
       }
-    } catch (e) {
-      // ignore
     }
 
-    const allImages = [...media, ...parsedImages];
-
-    return (
-      <div>
-        {allImages.length > 0 && (
-          <div style={styles.commentImagesGrid}>
-            {allImages.map((imgSrc, i) => (
-              <img 
-                key={i} 
-                src={imgSrc} 
-                alt="attachment" 
-                style={styles.commentStickerImage} 
-                onClick={() => setFullscreenImage(imgSrc)}
-                title="Tap to view fullscreen"
-              />
-            ))}
-          </div>
-        )}
-        {comment.text && !comment.text.startsWith("{") && (
-          <p style={styles.commentText}>{comment.text}</p>
-        )}
-      </div>
+    // CHECK MUX UPLOAD STATUS
+    const completeMatch = url.pathname.match(
+      /^\/mux\/uploads\/([^/]+)\/complete$/
     );
-  };
 
-  const renderCommentItem = (comment, isReply = false) => {
-    const commentId = comment.id || comment.commentId;
-    const displayName = comment.displayName || comment.display_name || "WriteThisCode User";
-    const userPhoto = comment.photoURL || comment.profile_url;
-    const isLiked = !!likedComments[commentId];
-    const isDisliked = !!dislikedComments[commentId];
+    if (completeMatch && request.method === "POST") {
+      try {
+        if (!env.MUX_TOKEN_ID || !env.MUX_TOKEN_SECRET) {
+          return json({
+            success: false,
+            error: "Mux credentials are not configured",
+          }, 500);
+        }
 
-    return (
-      <div style={isReply ? styles.replyItem : styles.commentItem} key={commentId}>
-        {userPhoto ? (
-          <img src={userPhoto} alt="" style={isReply ? styles.replyAvatar : styles.avatar} />
-        ) : (
-          <div style={isReply ? styles.replyAvatarFallback : styles.avatarFallback}>
-            {displayName.charAt(0).toUpperCase()}
-          </div>
-        )}
-        <div style={styles.commentBody}>
-          <div style={styles.commentTop}>
-            <strong style={styles.name}>{displayName}</strong>
-          </div>
-          {renderCommentContent(comment)}
-          <div style={styles.commentFooterRow}>
-            <span style={styles.time}>{formatTime(comment.createdAt || comment.created_at)}</span>
-            <button
-              type="button"
-              style={styles.replyTriggerBtn}
-              onClick={() => {
-                setReplyingTo({
-                  commentId: isReply ? comment.parent_id || comment.parentId : commentId,
-                  displayName: displayName,
-                });
-                setCommentText("");
-                if (inputRef.current) inputRef.current.focus();
-              }}
-            >
-              Reply
-            </button>
-          </div>
-        </div>
+        const uploadId = decodeURIComponent(completeMatch[1]);
 
-        {/* Properly Aligned Action Buttons (WriteThisCode Blue Theme) */}
-        <div style={styles.rightActionsContainer}>
-          <div style={styles.actionButtonWrapper}>
-            <button
-              type="button"
-              onClick={() => toggleLike(commentId)}
-              style={styles.iconButton}
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill={isLiked ? "#3b82f6" : "none"} stroke={isLiked ? "#3b82f6" : "#888"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>
-              </svg>
-            </button>
-            <span style={styles.actionCountText}>{isLiked ? 1 : 0}</span>
-          </div>
+        const muxResponse = await fetch(
+          `https://api.mux.com/video/v1/uploads/${encodeURIComponent(uploadId)}`,
+          {
+            headers: {
+              Authorization:
+                "Basic " +
+                btoa(`${env.MUX_TOKEN_ID.trim()}:${env.MUX_TOKEN_SECRET.trim()}`),
+            },
+          }
+        );
 
-          <div style={styles.actionButtonWrapper}>
-            <button
-              type="button"
-              onClick={() => toggleDislike(commentId)}
-              style={styles.iconButton}
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill={isDisliked ? "#3b82f6" : "none"} stroke={isDisliked ? "#3b82f6" : "#888"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.3 9a2 2 0 0 0 2 2.3H10z"></path>
-                <path d="M21 2v11a2 2 0 0 1-2 2h-3v-13h3a2 2 0 0 1 2 2z"></path>
-              </svg>
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  };
+        const muxData = await muxResponse.json();
 
-  return (
-    <div 
-      style={{
-        ...styles.overlay,
-        ...(viewportHeight ? { height: `${viewportHeight}px`, top: `${keyboardOffset}px` } : {})
-      }} 
-      onClick={onClose}
-    >
-      <div style={styles.panel} onClick={(e) => e.stopPropagation()}>
-        {errorMessage && (
-          <div style={styles.errorPopup}>
-            <span>⚠️ {errorMessage}</span>
-            <button type="button" onClick={() => setErrorMessage(null)} style={styles.closeErrorBtn}>
-              ×
-            </button>
-          </div>
-        )}
+        if (!muxResponse.ok || !muxData.data) {
+          return json({
+            success: false,
+            error: "Failed to check Mux upload status",
+          }, 502);
+        }
 
-        <div style={styles.header}>
-          <div>
-            <h2 style={styles.title}>Comments</h2>
-            <span style={styles.commentCount}>
-              {comments.filter(c => {
-                const p = c.parent_id || c.parentId;
-                return !p || p === "" || p === null || p === "null" || p === undefined;
-              }).length} comments
-            </span>
-          </div>
-          <button type="button" onClick={onClose} style={styles.closeButton}>
-            ×
-          </button>
-        </div>
+        const upload = muxData.data;
+        let playbackId = "";
+        let assetStatus = "processing";
 
-        <div style={styles.commentsArea}>
-          {loading ? (
-            <div style={styles.centerMessage}>Loading comments...</div>
-          ) : comments.length === 0 ? (
-            <div style={styles.centerMessage}>
-              <div style={styles.emptyIcon}>💬</div>
-              <strong>No comments yet</strong>
-              <span style={styles.emptyText}>Be the first person to comment.</span>
-            </div>
-          ) : (
-            (() => {
-              const topLevelComments = comments.filter((c) => {
-                const pId = c.parent_id || c.parentId;
-                return !pId || pId === "" || pId === null || pId === "null" || pId === undefined;
-              });
+        if (upload.asset_id) {
+          const assetResponse = await fetch(
+            `https://api.mux.com/video/v1/assets/${encodeURIComponent(upload.asset_id)}`,
+            {
+              headers: {
+                Authorization:
+                  "Basic " +
+                  btoa(`${env.MUX_TOKEN_ID.trim()}:${env.MUX_TOKEN_SECRET.trim()}`),
+              },
+            }
+          );
 
-              const repliesMap = {};
-              comments.forEach((c) => {
-                const pId = c.parent_id || c.parentId;
-                if (pId && pId !== "" && pId !== null && pId !== "null" && pId !== undefined) {
-                  if (!repliesMap[pId]) repliesMap[pId] = [];
-                  if (!repliesMap[pId].some((existing) => String(existing.id || existing.commentId) === String(c.id || c.commentId))) {
-                    repliesMap[pId].push(c);
-                  }
-                }
-              });
+          const assetData = await assetResponse.json();
 
-              return topLevelComments.map((comment, index) => {
-                const commentId = comment.id || comment.commentId;
-                const commentReplies = repliesMap[commentId] || [];
-                const hasReplies = commentReplies.length > 0;
-                const isExpanded = !!expandedThreads[commentId];
+          if (assetResponse.ok && assetData.data) {
+            playbackId =
+              assetData.data.playback_ids?.[0]?.id || "";
+            assetStatus = assetData.data.status || "processing";
+          }
+        }
 
-                return (
-                  <div key={commentId || index} style={styles.commentThreadWrapper}>
-                    {renderCommentItem(comment, false)}
+        if (upload.status === "errored") {
+          return json({
+            success: false,
+            status: upload.status,
+            error: "Mux reports that the upload failed",
+          }, 502);
+        }
 
-                    {hasReplies && (
-                      <div style={styles.viewRepliesWrapper}>
-                        <button
-                          type="button"
-                          style={styles.toggleRepliesBtn}
-                          onClick={() => {
-                            setExpandedThreads((prev) => ({
-                              ...prev,
-                              [commentId]: !prev[commentId],
-                            }));
-                          }}
-                        >
-                          <span style={styles.replyArrow}>──────</span> {isExpanded ? "Hide replies" : `View replies (${commentReplies.length})`}
-                        </button>
-                      </div>
-                    )}
+        return json({
+          success: true,
+          uploadId: upload.id,
+          status: upload.status,
+          assetId: upload.asset_id || null,
+          playbackId,
+          assetStatus,
+          processing: assetStatus !== "ready",
+          url: playbackId
+            ? `https://stream.mux.com/${playbackId}/high.mp4`
+            : "",
+        });
+      } catch (err) {
+        return json({ success: false, error: err.message }, 500);
+      }
+    }
 
-                    {hasReplies && isExpanded && (
-                      <div style={styles.repliesContainer}>
-                        {commentReplies.map((reply) => renderCommentItem(reply, true))}
-                      </div>
-                    )}
-                  </div>
-                );
-              });
-            })()
-          )}
-        </div>
+    // STORIES
+    if (
+      ["/stories", "/api/stories"].includes(url.pathname) &&
+      request.method === "POST"
+    ) {
+      return json({
+        success: true,
+        storyId: Date.now().toString(),
+      });
+    }
 
-        {replyingTo && (
-          <div style={styles.replyingBanner}>
-            <span>Replying to <strong>{replyingTo.displayName}</strong></span>
-            <button
-              type="button"
-              onClick={() => {
-                setReplyingTo(null);
-                setCommentText("");
-              }}
-              style={styles.cancelReplyBtn}
-            >
-              ×
-            </button>
-          </div>
-        )}
+    // DELETE POST / REEL ROUTE
+    const deleteMatch = url.pathname.match(/^\/posts\/([^/]+)\/delete$/);
+    if (deleteMatch && request.method === "POST") {
+      try {
+        const rawId = decodeURIComponent(deleteMatch[1]);
+        const { neon } = await import("@neondatabase/serverless");
+        const sql = neon(env.DATABASE_URL);
 
-        {selectedImages.length > 0 && (
-          <div style={styles.imagePreviewContainer}>
-            {selectedImages.map((imgSrc, idx) => (
-              <div key={idx} style={styles.previewThumbWrapper}>
-                <img src={imgSrc} alt="Preview" style={styles.previewThumbnail} />
-                <button
-                  type="button"
-                  onClick={() => removeImage(idx)}
-                  style={styles.removePreviewBtn}
-                >
-                  ×
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
+        if (!isNaN(rawId)) {
+          await sql`DELETE FROM posts WHERE id = ${parseInt(rawId, 10)}`;
+        } else {
+          await sql`DELETE FROM posts WHERE id::text = ${rawId}`;
+        }
 
-        {/* Emoji Quick Picker Popup */}
-        {showEmojiPicker && (
-          <div style={styles.emojiPopupBar}>
-            {["❤️", "🥰", "😂", "😭", "🔥", "🙏", "😊", "👏", "🔥", "💯"].map((emoji) => (
-              <button
-                key={emoji}
-                type="button"
-                style={styles.quickEmojiBtn}
-                onClick={() => {
-                  setCommentText((prev) => prev + emoji);
-                }}
-              >
-                {emoji}
-              </button>
-            ))}
-          </div>
-        )}
+        return json({
+          success: true,
+          message: "Post deleted successfully",
+        });
+      } catch (err) {
+        return json({ success: false, error: err.message }, 500);
+      }
+    }
 
-        {/* Bottom Input Bar */}
-        <div style={styles.inputArea}>
-          <input
-            type="file"
-            ref={fileInputRef}
-            style={{ display: "none" }}
-            accept="image/*"
-            multiple
-            onChange={handleStickerSelect}
-          />
+    // GET USER FOLLOWING LIST
+    const userFollowingMatch = url.pathname.match(/^\/users\/([^/]+)\/following$/);
+    if (userFollowingMatch && request.method === "GET") {
+      try {
+        const uid = decodeURIComponent(userFollowingMatch[1]);
+        const { neon } = await import("@neondatabase/serverless");
+        const sql = neon(env.DATABASE_URL);
 
-          <div style={styles.inputWrapperContainer}>
-            <input
-              ref={inputRef}
-              type="text"
-              value={commentText}
-              onChange={(event) => setCommentText(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  sendComment();
-                }
-              }}
-              placeholder={replyingTo ? `Replying to ${replyingTo.displayName}...` : "Add comment..."}
-              maxLength={500}
-              style={styles.input}
-            />
+        await sql`
+          CREATE TABLE IF NOT EXISTS follows (
+            follower_id TEXT NOT NULL,
+            following_id TEXT NOT NULL,
+            created_at TIMESTAMPTZ DEFAULT NOW(),
+            PRIMARY KEY (follower_id, following_id)
+          )
+        `;
 
-            <div style={styles.inputIconsRight}>
-              <button
-                type="button"
-                style={styles.inlineActionBtn}
-                onClick={() => {
-                  if (selectedImages.length >= 2) {
-                    setErrorMessage("You can only attach a maximum of 2 images.");
-                    return;
-                  }
-                  if (fileInputRef.current) fileInputRef.current.click();
-                }}
-                title="Attach Image"
-              >
-                🖼️
-              </button>
-              <button
-                type="button"
-                style={styles.inlineActionBtn}
-                onClick={() => setShowEmojiPicker((prev) => !prev)}
-                title="Add Emoji"
-              >
-                😊
-              </button>
-            </div>
-          </div>
+        const follows = await sql`
+          SELECT following_id FROM follows WHERE follower_id = ${uid}
+        `;
 
-          <button
-            type="button"
-            onClick={sendComment}
-            disabled={sending || (!commentText.trim() && selectedImages.length === 0)}
-            style={{
-              ...styles.sendButton,
-              ...(sending || (!commentText.trim() && selectedImages.length === 0) ? styles.disabledButton : {}),
-            }}
-          >
-            {sending ? "..." : "Post"}
-          </button>
-        </div>
-      </div>
+        const followingMap = {};
+        follows.forEach((row) => {
+          followingMap[row.following_id] = true;
+        });
 
-      {/* Fullscreen Lightbox Image Viewer Modal */}
-      {fullscreenImage && (
-        <div style={styles.lightboxOverlay} onClick={() => setFullscreenImage(null)}>
-          <button 
-            type="button" 
-            style={styles.lightboxCloseBtn} 
-            onClick={() => setFullscreenImage(null)}
-          >
-            ×
-          </button>
-          <img 
-            src={fullscreenImage} 
-            alt="Fullscreen view" 
-            style={styles.lightboxImage} 
-            onClick={(e) => e.stopPropagation()} 
-          />
-        </div>
-      )}
-    </div>
-  );
-}
+        return json({ success: true, followingIds: followingMap });
+      } catch (err) {
+        return json({ success: false, error: err.message }, 500);
+      }
+    }
 
-const styles = {
-  overlay: {
-    position: "fixed",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    background: "rgba(0, 0, 0, 0.65)",
-    display: "flex",
-    alignItems: "flex-end",
-    justifyContent: "center",
-    zIndex: 999999,
-  },
-  panel: {
-    position: "fixed",
-    bottom: 0,
-    left: "50%",
-    transform: "translateX(-50%)",
-    width: "100%",
-    maxWidth: "600px",
-    height: "68vh",
-    maxHeight: "72dvh",
-    background: "#ffffff",
-    color: "#000000",
-    borderRadius: "24px 24px 0 0",
-    display: "flex",
-    flexDirection: "column",
-    boxShadow: "0 -10px 40px rgba(0, 0, 0, 0.4)",
-    overflow: "hidden",
-    zIndex: 1000000,
-  },
-  errorPopup: {
-    background: "#fee2e2",
-    color: "#b91c1c",
-    padding: "10px 16px",
-    fontSize: "13px",
-    fontWeight: "600",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    borderBottom: "1px solid #fca5a5",
-    zIndex: 10,
-  },
-  closeErrorBtn: {
-    background: "transparent",
-    border: "none",
-    color: "#b91c1c",
-    fontSize: "18px",
-    fontWeight: "bold",
-    cursor: "pointer",
-  },
-  header: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    padding: "16px 20px",
-    borderBottom: "1px solid #f0f0f0",
-    background: "#ffffff",
-    borderTopLeftRadius: "24px",
-    borderTopRightRadius: "24px",
-    flexShrink: 0,
-  },
-  title: {
-    margin: 0,
-    fontSize: "17px",
-    fontWeight: "800",
-    color: "#111",
-  },
-  commentCount: {
-    display: "block",
-    marginTop: "2px",
-    color: "#888",
-    fontSize: "12px",
-  },
-  closeButton: {
-    width: "36px",
-    height: "36px",
-    border: "none",
-    borderRadius: "50%",
-    background: "#f1f1f4",
-    color: "#333",
-    fontSize: "22px",
-    lineHeight: "1",
-    cursor: "pointer",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  commentsArea: {
-    flex: 1,
-    overflowY: "auto",
-    padding: "16px 20px",
-    background: "#ffffff",
-  },
-  commentItem: {
-    display: "flex",
-    alignItems: "center",
-    gap: "12px",
-    marginBottom: "16px",
-  },
-  replyItem: {
-    display: "flex",
-    alignItems: "center",
-    gap: "10px",
-    marginBottom: "12px",
-  },
-  avatar: {
-    width: "38px",
-    height: "38px",
-    borderRadius: "50%",
-    objectFit: "cover",
-    background: "#eee",
-    flexShrink: 0,
-    alignSelf: "flex-start",
-  },
-  avatarFallback: {
-    width: "38px",
-    height: "38px",
-    borderRadius: "50%",
-    background: "#3b82f6",
-    color: "#ffffff",
-    fontWeight: "700",
-    fontSize: "15px",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    flexShrink: 0,
-    alignSelf: "flex-start",
-  },
-  replyAvatar: {
-    width: "30px",
-    height: "30px",
-    borderRadius: "50%",
-    objectFit: "cover",
-    background: "#eee",
-    flexShrink: 0,
-    alignSelf: "flex-start",
-  },
-  replyAvatarFallback: {
-    width: "30px",
-    height: "30px",
-    borderRadius: "50%",
-    background: "#3b82f6",
-    color: "#ffffff",
-    fontWeight: "700",
-    fontSize: "12px",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    flexShrink: 0,
-    alignSelf: "flex-start",
-  },
-  commentBody: {
-    flex: 1,
-    minWidth: 0,
-  },
-  commentTop: {
-    display: "flex",
-    alignItems: "center",
-    gap: "8px",
-    flexWrap: "wrap",
-  },
-  name: {
-    fontSize: "13px",
-    fontWeight: "700",
-    color: "#555",
-  },
-  commentText: {
-    margin: "3px 0 4px",
-    fontSize: "14px",
-    lineHeight: "1.4",
-    color: "#111",
-    wordBreak: "break-word",
-  },
-  commentImagesGrid: {
-    display: "flex",
-    flexWrap: "wrap",
-    gap: "6px",
-    marginTop: "4px",
-  },
-  commentStickerImage: {
-    maxWidth: "130px",
-    maxHeight: "130px",
-    borderRadius: "8px",
-    objectFit: "cover",
-    display: "block",
-    cursor: "pointer",
-  },
-  commentFooterRow: {
-    display: "flex",
-    alignItems: "center",
-    gap: "12px",
-    marginTop: "2px",
-  },
-  time: {
-    fontSize: "11px",
-    color: "#999",
-  },
-  replyTriggerBtn: {
-    background: "transparent",
-    border: "none",
-    color: "#555",
-    fontSize: "12px",
-    fontWeight: "600",
-    cursor: "pointer",
-    padding: 0,
-  },
-  rightActionsContainer: {
-    display: "flex",
-    alignItems: "center",
-    gap: "12px",
-    marginLeft: "8px",
-    flexShrink: 0,
-    alignSelf: "center",
-  },
-  actionButtonWrapper: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  iconButton: {
-    background: "transparent",
-    border: "none",
-    cursor: "pointer",
-    padding: "4px",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  actionCountText: {
-    fontSize: "10px",
-    color: "#888",
-    marginTop: "-2px",
-  },
-  viewRepliesWrapper: {
-    marginLeft: "50px",
-    marginTop: "4px",
-    marginBottom: "10px",
-  },
-  toggleRepliesBtn: {
-    background: "transparent",
-    border: "none",
-    color: "#555",
-    fontSize: "12px",
-    fontWeight: "600",
-    cursor: "pointer",
-    padding: 0,
-    display: "flex",
-    alignItems: "center",
-    gap: "6px",
-  },
-  replyArrow: {
-    fontSize: "10px",
-    color: "#ccc",
-    letterSpacing: "-2px",
-  },
-  repliesContainer: {
-    marginTop: "8px",
-    marginLeft: "40px",
-    display: "flex",
-    flexDirection: "column",
-    gap: "12px",
-  },
-  replyingBanner: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    padding: "8px 16px",
-    background: "#f1f1f4",
-    borderTop: "1px solid #e2e8f0",
-    fontSize: "13px",
-    color: "#333",
-  },
-  cancelReplyBtn: {
-    background: "transparent",
-    border: "none",
-    fontSize: "16px",
-    fontWeight: "bold",
-    cursor: "pointer",
-    color: "#555",
-  },
-  imagePreviewContainer: {
-    display: "flex",
-    gap: "8px",
-    padding: "8px 16px",
-    background: "#f9f9f9",
-    borderTop: "1px solid #eee",
-    overflowX: "auto",
-  },
-  previewThumbWrapper: {
-    position: "relative",
-    flexShrink: 0,
-  },
-  previewThumbnail: {
-    width: "60px",
-    height: "60px",
-    objectFit: "cover",
-    borderRadius: "6px",
-    border: "1px solid #ddd",
-  },
-  removePreviewBtn: {
-    position: "absolute",
-    top: "-6px",
-    right: "-6px",
-    background: "#333",
-    color: "#fff",
-    border: "none",
-    borderRadius: "50%",
-    width: "20px",
-    height: "20px",
-    fontSize: "12px",
-    cursor: "pointer",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  emojiPopupBar: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-around",
-    padding: "8px 16px",
-    background: "#fafafa",
-    borderTop: "1px solid #eee",
-  },
-  quickEmojiBtn: {
-    background: "transparent",
-    border: "none",
-    fontSize: "22px",
-    cursor: "pointer",
-    padding: "4px",
-  },
-  inputArea: {
-    position: "relative",
-    marginTop: "auto",
-    display: "flex",
-    alignItems: "center",
-    gap: "8px",
-    padding: "10px 16px",
-    borderTop: "1px solid #eee",
-    background: "#ffffff",
-    zIndex: 10,
-  },
-  inputWrapperContainer: {
-    flex: 1,
-    position: "relative",
-    display: "flex",
-    alignItems: "center",
-  },
-  input: {
-    width: "100%",
-    height: "44px",
-    border: "1px solid #e2e2e2",
-    borderRadius: "22px",
-    outline: "none",
-    padding: "0 80px 0 16px",
-    fontSize: "14px",
-    background: "#f8f8f8",
-    color: "#111",
-    boxSizing: "border-box",
-  },
-  inputIconsRight: {
-    position: "absolute",
-    right: "10px",
-    display: "flex",
-    alignItems: "center",
-    gap: "6px",
-  },
-  inlineActionBtn: {
-    background: "transparent",
-    border: "none",
-    fontSize: "18px",
-    cursor: "pointer",
-    padding: "2px",
-  },
-  sendButton: {
-    height: "44px",
-    border: "none",
-    borderRadius: "22px",
-    padding: "0 18px",
-    background: "linear-gradient(135deg, #6366f1, #38bdf8)",
-    color: "#ffffff",
-    fontWeight: "700",
-    fontSize: "14px",
-    cursor: "pointer",
-    flexShrink: 0,
-    boxShadow: "0 4px 12px rgba(99, 102, 241, 0.3)",
-  },
-  disabledButton: {
-    opacity: 0.4,
-    cursor: "not-allowed",
-    boxShadow: "none",
-  },
-  centerMessage: {
-    minHeight: "180px",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: "8px",
-    color: "#666",
-    textAlign: "center",
-  },
-  emptyIcon: {
-    fontSize: "42px",
-    marginBottom: "4px",
-  },
-  emptyText: {
-    color: "#888",
-    fontSize: "13px",
-  },
-  commentThreadWrapper: {
-    marginBottom: "16px",
-  },
-  lightboxOverlay: {
-    position: "fixed",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    background: "rgba(0, 0, 0, 0.95)",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    zIndex: 9999999,
-    padding: "20px",
-  },
-  lightboxCloseBtn: {
-    position: "absolute",
-    top: "20px",
-    right: "20px",
-    background: "rgba(255, 255, 255, 0.2)",
-    color: "#ffffff",
-    border: "none",
-    borderRadius: "50%",
-    width: "40px",
-    height: "40px",
-    fontSize: "24px",
-    cursor: "pointer",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  lightboxImage: {
-    maxWidth: "100%",
-    maxHeight: "90vh",
-    objectFit: "contain",
-    borderRadius: "8px",
+    // INCREMENT POST VIEW COUNT
+    const postViewMatch = url.pathname.match(/^\/posts\/([^/]+)\/view$/);
+    if (postViewMatch && request.method === "POST") {
+      try {
+        const rawId = decodeURIComponent(postViewMatch[1]);
+        const { neon } = await import("@neondatabase/serverless");
+        const sql = neon(env.DATABASE_URL);
+
+        await sql`ALTER TABLE posts ADD COLUMN IF NOT EXISTS views_count INT DEFAULT 0`;
+        await sql`ALTER TABLE posts ADD COLUMN IF NOT EXISTS views INT DEFAULT 0`;
+
+        if (!isNaN(rawId)) {
+          await sql`
+            UPDATE posts 
+            SET views_count = COALESCE(views_count, 0) + 1,
+                views = COALESCE(views, 0) + 1
+            WHERE id = ${parseInt(rawId, 10)}
+          `;
+        } else {
+          await sql`
+            UPDATE posts 
+            SET views_count = COALESCE(views_count, 0) + 1,
+                views = COALESCE(views, 0) + 1
+            WHERE id::text = ${rawId}
+          `;
+        }
+
+        return json({ success: true, message: "View recorded successfully" });
+      } catch (err) {
+        return json({ success: false, error: err.message }, 500);
+      }
+    }
+
+    return json({
+      ok: false,
+      error: "Route not found",
+      path: url.pathname,
+      method: request.method,
+    }, 404);
   },
 };
+
+function corsHeaders() {
+  return {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods":
+      "GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD",
+    "Access-Control-Allow-Headers":
+      "Content-Type, Authorization, Upload-Length, Upload-Metadata, Tus-Resumable, Upload-Offset, Upload-Concat, X-HTTP-Method-Override",
+    "Access-Control-Expose-Headers":
+      "Location, Upload-Offset, Upload-Length, Tus-Resumable, Upload-Metadata, Upload-Concat",
+  };
+}
+
+function json(data, status = 200) {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      ...corsHeaders(),
+    },
+  });
+}
