@@ -9,7 +9,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
   const [currentUser, setCurrentUser] = useState(null);
   const [comments, setComments] = useState([]);
   const [commentText, setCommentText] = useState("");
-  const [selectedImages, setSelectedImages] = useState([]); // Array to support multiple image/sticker previews
+  const [selectedImages, setSelectedImages] = useState([]); // Max 2 images allowed
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [viewportHeight, setViewportHeight] = useState(null);
@@ -105,7 +105,6 @@ export default function Comments({ postId, postOwnerId, onClose }) {
     setSending(true);
 
     try {
-      // Package text and multiple images safely
       const finalContent = selectedImages.length > 0 
         ? JSON.stringify({ text: text, images: selectedImages }) 
         : text;
@@ -165,13 +164,26 @@ export default function Comments({ postId, postOwnerId, onClose }) {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
 
-    files.forEach((file) => {
-      const reader = new FileReader();
-      reader.onload = (uploadEvent) => {
-        setSelectedImages((prev) => [...prev, uploadEvent.target.result]);
-      };
-      reader.readAsDataURL(file);
+    // Restrict total selected images to a maximum of 2
+    const combinedFiles = [...selectedImages, ...files].slice(0, 2);
+    
+    setSelectedImages([]); // Reset briefly to load fresh readers
+    combinedFiles.forEach((file) => {
+      // If it's already a data URL string (from previous state) or a File object
+      if (typeof file === "string") {
+        setSelectedImages((prev) => [...prev, file]);
+      } else {
+        const reader = new FileReader();
+        reader.onload = (uploadEvent) => {
+          setSelectedImages((prev) => {
+            if (prev.length >= 2) return prev; // hard cap at 2
+            return [...prev, uploadEvent.target.result];
+          });
+        };
+        reader.readAsDataURL(file);
+      }
     });
+
     e.target.value = "";
   };
 
@@ -405,7 +417,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           </div>
         )}
 
-        {/* Selected Images Previews Container */}
+        {/* Selected Images Previews Container (Max 2) */}
         {selectedImages.length > 0 && (
           <div style={styles.imagePreviewContainer}>
             {selectedImages.map((imgSrc, idx) => (
@@ -454,11 +466,15 @@ export default function Comments({ postId, postOwnerId, onClose }) {
             type="button"
             style={styles.stickerBtn}
             onClick={() => {
+              if (selectedImages.length >= 2) {
+                alert("You can only attach a maximum of 2 images.");
+                return;
+              }
               if (fileInputRef.current) {
                 fileInputRef.current.click();
               }
             }}
-            title="Attach images or stickers"
+            title="Attach up to 2 images"
           >
             🖼️
           </button>
