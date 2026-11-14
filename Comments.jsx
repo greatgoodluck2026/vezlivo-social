@@ -125,7 +125,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
       if (data.success) {
         const targetParentId = replyingTo ? replyingTo.commentId : null;
         
-        // Ensure immediate profile data capture from currentUser
+        // Ensure immediate profile data capture from currentUser with fallbacks
         const userDisplayName = currentUser.displayName || currentUser.email?.split("@")[0] || "Vezlivo User";
         const userPhotoURL = currentUser.photoURL || "";
 
@@ -670,7 +670,7 @@ const styles = {
     fontSize: "20px",
     cursor: "pointer",
     padding: "0 2px",
-    flexShrink: "0",
+    flexShrink: 0,
   },
   input: {
     flex: 1,
