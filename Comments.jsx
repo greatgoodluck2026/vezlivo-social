@@ -120,19 +120,14 @@ export default function Comments({ postId, postOwnerId, onClose }) {
     setErrorMessage(null);
 
     try {
-      // If there are images, format payload. If text exists, validate length.
-      if (!text && selectedImages.length > 0) {
-        // Skip text length check if only sending images
-      } else if (text.length > 500) {
+      // Validate text length if text is present
+      if (text && text.length > 500) {
         setErrorMessage("Comment is too long (maximum 500 characters).");
         setSending(false);
         return;
       }
 
-      const finalContent = selectedImages.length > 0 
-        ? JSON.stringify({ text: text, images: selectedImages }) 
-        : text;
-
+      // Send payload cleanly to Cloudflare Worker API
       const response = await fetch(`${API_URL}/comments`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -140,7 +135,8 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           postId: postId,
           postOwnerId: postOwnerId,
           userId: currentUser.uid,
-          text: finalContent,
+          text: text,
+          mediaUrls: selectedImages, // Sent as dedicated media array for R2 storage handling
           parentId: replyingTo ? replyingTo.commentId : null,
           parent_id: replyingTo ? replyingTo.commentId : null,
         }),
@@ -161,7 +157,8 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           display_name: userDisplayName,
           photoURL: userPhotoURL,
           profile_url: userPhotoURL,
-          text: finalContent,
+          text: text,
+          mediaUrls: selectedImages,
           createdAt: Date.now(),
           parentId: targetParentId,
           parent_id: targetParentId,
@@ -237,32 +234,37 @@ export default function Comments({ postId, postOwnerId, onClose }) {
     return date.toLocaleDateString();
   };
 
-  const renderCommentContent = (rawText) => {
-    if (!rawText) return null;
+  const renderCommentContent = (comment) => {
+    // Support both new mediaUrls array and fallback legacy formats
+    const media = comment.mediaUrls || comment.media_urls || [];
+    let parsedImages = [];
+
     try {
-      if (rawText.startsWith("{") && (rawText.includes("image") || rawText.includes("images"))) {
-        const parsed = JSON.parse(rawText);
-        const imgArray = parsed.images || (parsed.image ? [parsed.image] : []);
-        return (
-          <div>
-            {imgArray.length > 0 && (
-              <div style={styles.commentImagesGrid}>
-                {imgArray.map((imgSrc, i) => (
-                  <img key={i} src={imgSrc} alt="attachment" style={styles.commentStickerImage} />
-                ))}
-              </div>
-            )}
-            {parsed.text && <p style={styles.commentText}>{parsed.text}</p>}
-          </div>
-        );
-      }
-      if (rawText.startsWith("data:image")) {
-        return <img src={rawText} alt="sticker" style={styles.commentStickerImage} />;
+      if (comment.text && comment.text.startsWith("{") && comment.text.includes("images")) {
+        const parsed = JSON.parse(comment.text);
+        if (parsed.images) parsedImages = parsed.images;
+        if (parsed.text) comment.text = parsed.text;
       }
     } catch (e) {
-      // fallback
+      // ignore
     }
-    return <p style={styles.commentText}>{rawText}</p>;
+
+    const allImages = [...media, ...parsedImages];
+
+    return (
+      <div>
+        {allImages.length > 0 && (
+          <div style={styles.commentImagesGrid}>
+            {allImages.map((imgSrc, i) => (
+              <img key={i} src={imgSrc} alt="attachment" style={styles.commentStickerImage} />
+            ))}
+          </div>
+        )}
+        {comment.text && !comment.text.startsWith("{") && (
+          <p style={styles.commentText}>{comment.text}</p>
+        )}
+      </div>
+    );
   };
 
   return (
@@ -347,7 +349,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
                         <div style={styles.commentTop}>
                           <strong style={styles.name}>{currentDisplayName}</strong>
                         </div>
-                        {renderCommentContent(comment.text)}
+                        {renderCommentContent(comment)}
                         <div style={styles.commentFooterRow}>
                           <span style={styles.time}>{formatTime(comment.createdAt || comment.created_at)}</span>
                           <button
@@ -403,7 +405,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
                                 <div style={styles.commentTop}>
                                   <strong style={styles.name}>{replyDisplayName}</strong>
                                 </div>
-                                {renderCommentContent(reply.text)}
+                                {renderCommentContent(reply)}
                                 <div style={styles.commentFooterRow}>
                                   <span style={styles.time}>{formatTime(reply.createdAt || reply.created_at)}</span>
                                   <button
