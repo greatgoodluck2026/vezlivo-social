@@ -333,7 +333,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           </div>
         </div>
 
-        {/* TikTok-style Horizontal Like & Dislike Actions on the Right */}
+        {/* Clean TikTok-style Right Actions matching Vezlivo Blue */}
         <div style={styles.rightActionsContainer}>
           <div style={styles.actionButtonWrapper}>
             <button
@@ -341,7 +341,9 @@ export default function Comments({ postId, postOwnerId, onClose }) {
               onClick={() => toggleLike(commentId)}
               style={styles.iconButton}
             >
-              <span>{isLiked ? "❤️" : "🤍"}</span>
+              <span style={{ fontSize: "16px", color: isLiked ? "#3b82f6" : "#888" }}>
+                {isLiked ? "❤️" : "🤍"}
+              </span>
             </button>
             <span style={styles.actionCountText}>{isLiked ? 1 : 0}</span>
           </div>
@@ -352,7 +354,9 @@ export default function Comments({ postId, postOwnerId, onClose }) {
               onClick={() => toggleDislike(commentId)}
               style={styles.iconButton}
             >
-              <span>{isDisliked ? "👎" : "👎🏻"}</span>
+              <span style={{ fontSize: "16px", color: isDisliked ? "#333" : "#aaa" }}>
+                👎
+              </span>
             </button>
           </div>
         </div>
