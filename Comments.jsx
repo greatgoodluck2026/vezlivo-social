@@ -9,9 +9,10 @@ export default function Comments({ postId, postOwnerId, onClose }) {
   const [currentUser, setCurrentUser] = useState(null);
   const [comments, setComments] = useState([]);
   const [commentText, setCommentText] = useState("");
-  const [selectedImages, setSelectedImages] = useState([]); // Max 2 images allowed
+  const [selectedImages, setSelectedImages] = useState([]);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
+  const [errorMessage, setErrorMessage] = useState(null); // State for error pop-up alerts
   const [viewportHeight, setViewportHeight] = useState(null);
   const [keyboardOffset, setKeyboardOffset] = useState(0);
   const [replyingTo, setReplyingTo] = useState(null);
@@ -84,9 +85,12 @@ export default function Comments({ postId, postOwnerId, onClose }) {
             return timeB - timeA;
           });
           setComments(sorted);
+        } else {
+          setErrorMessage("Could not load comments from server.");
         }
       } catch (err) {
         console.error("Failed to load comments:", err);
+        setErrorMessage("Network error: Unable to connect to server.");
       } finally {
         setLoading(false);
       }
@@ -96,13 +100,24 @@ export default function Comments({ postId, postOwnerId, onClose }) {
   }, [postId]);
 
   const sendComment = async () => {
-    if (!currentUser) return;
+    if (!currentUser) {
+      setErrorMessage("You must be logged in to send a comment.");
+      return;
+    }
 
     const text = commentText.trim();
-    if (!text && selectedImages.length === 0) return;
-    if (!postId || !postOwnerId) return;
+    if (!text && selectedImages.length === 0) {
+      setErrorMessage("Please type a message or attach at least one picture before sending.");
+      return;
+    }
+
+    if (!postId || !postOwnerId) {
+      setErrorMessage("Error: Missing post reference information.");
+      return;
+    }
 
     setSending(true);
+    setErrorMessage(null); // Clear previous errors
 
     try {
       const finalContent = selectedImages.length > 0 
@@ -151,10 +166,11 @@ export default function Comments({ postId, postOwnerId, onClose }) {
         setReplyingTo(null);
         setComments((prev) => [newCommentObj, ...prev]);
       } else {
-        throw new Error(data.error || "Failed to post comment.");
+        throw new Error(data.error || "Server failed to save comment.");
       }
     } catch (error) {
       console.error("Could not send comment:", error);
+      setErrorMessage(error.message || "Failed to send comment. Please check your connection.");
     } finally {
       setSending(false);
     }
@@ -164,19 +180,22 @@ export default function Comments({ postId, postOwnerId, onClose }) {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
 
-    // Restrict total selected images to a maximum of 2
+    if (selectedImages.length >= 2) {
+      setErrorMessage("You can only attach a maximum of 2 pictures.");
+      return;
+    }
+
     const combinedFiles = [...selectedImages, ...files].slice(0, 2);
     
-    setSelectedImages([]); // Reset briefly to load fresh readers
+    setSelectedImages([]); 
     combinedFiles.forEach((file) => {
-      // If it's already a data URL string (from previous state) or a File object
       if (typeof file === "string") {
         setSelectedImages((prev) => [...prev, file]);
       } else {
         const reader = new FileReader();
         reader.onload = (uploadEvent) => {
           setSelectedImages((prev) => {
-            if (prev.length >= 2) return prev; // hard cap at 2
+            if (prev.length >= 2) return prev;
             return [...prev, uploadEvent.target.result];
           });
         };
@@ -246,6 +265,16 @@ export default function Comments({ postId, postOwnerId, onClose }) {
       onClick={onClose}
     >
       <div style={styles.panel} onClick={(e) => e.stopPropagation()}>
+        {/* Error Pop-up Banner */}
+        {errorMessage && (
+          <div style={styles.errorPopup}>
+            <span>⚠️ {errorMessage}</span>
+            <button type="button" onClick={() => setErrorMessage(null)} style={styles.closeErrorBtn}>
+              ×
+            </button>
+          </div>
+        )}
+
         {/* Header */}
         <div style={styles.header}>
           <div>
@@ -467,7 +496,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
             style={styles.stickerBtn}
             onClick={() => {
               if (selectedImages.length >= 2) {
-                alert("You can only attach a maximum of 2 images.");
+                setErrorMessage("You can only attach a maximum of 2 images.");
                 return;
               }
               if (fileInputRef.current) {
@@ -493,6 +522,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
             maxLength={500}
             style={styles.input}
           />
+          {/* Changed button label from "Post" to "Send" */}
           <button
             type="button"
             onClick={sendComment}
@@ -502,7 +532,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
               ...(sending || (!commentText.trim() && selectedImages.length === 0) ? styles.disabledButton : {}),
             }}
           >
-            {sending ? "..." : "Post"}
+            {sending ? "..." : "Send"}
           </button>
         </div>
       </div>
@@ -540,6 +570,26 @@ const styles = {
     boxShadow: "0 -10px 40px rgba(0, 0, 0, 0.4)",
     overflow: "hidden",
     zIndex: 1000000,
+  },
+  errorPopup: {
+    background: "#fee2e2",
+    color: "#b91c1c",
+    padding: "10px 16px",
+    fontSize: "13px",
+    fontWeight: "600",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    borderBottom: "1px solid #fca5a5",
+    zIndex: 10,
+  },
+  closeErrorBtn: {
+    background: "transparent",
+    border: "none",
+    color: "#b91c1c",
+    fontSize: "18px",
+    fontWeight: "bold",
+    cursor: "pointer",
   },
   header: {
     display: "flex",
