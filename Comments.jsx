@@ -18,6 +18,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
   const [expandedThreads, setExpandedThreads] = useState({});
   const [likedComments, setLikedComments] = useState({});
   const [dislikedComments, setDislikedComments] = useState({});
+  const [hiddenComments, setHiddenComments] = useState({}); // Tracks hidden/unliked comment notice state
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [fullscreenImage, setFullscreenImage] = useState(null);
 
@@ -103,25 +104,47 @@ export default function Comments({ postId, postOwnerId, onClose }) {
   }, [postId]);
 
   const toggleLike = (commentId) => {
+    const wasLiked = !!likedComments[commentId];
+    
     setLikedComments((prev) => ({
       ...prev,
-      [commentId]: !prev[commentId],
+      [commentId]: !wasLiked,
     }));
     setDislikedComments((prev) => ({
       ...prev,
       [commentId]: false,
     }));
+
+    // If unliking, show the "comment will not be visible" notice
+    if (wasLiked) {
+      setHiddenComments((prev) => ({ ...prev, [commentId]: true }));
+    } else {
+      setHiddenComments((prev) => ({ ...prev, [commentId]: false }));
+    }
   };
 
   const toggleDislike = (commentId) => {
+    const wasDisliked = !!dislikedComments[commentId];
+
     setDislikedComments((prev) => ({
       ...prev,
-      [commentId]: !prev[commentId],
+      [commentId]: !wasDisliked,
     }));
     setLikedComments((prev) => ({
       ...prev,
       [commentId]: false,
     }));
+
+    // If disliking/hiding, show notice
+    if (!wasDisliked) {
+      setHiddenComments((prev) => ({ ...prev, [commentId]: true }));
+    }
+  };
+
+  const undoHideComment = (commentId) => {
+    setHiddenComments((prev) => ({ ...prev, [commentId]: false }));
+    setLikedComments((prev) => ({ ...prev, [commentId]: true })); // Bring back as liked/visible
+    setDislikedComments((prev) => ({ ...prev, [commentId]: false }));
   };
 
   const sendComment = async () => {
@@ -305,6 +328,22 @@ export default function Comments({ postId, postOwnerId, onClose }) {
     const userPhoto = comment.photoURL || comment.profile_url;
     const isLiked = !!likedComments[commentId];
     const isDisliked = !!dislikedComments[commentId];
+    const isHidden = !!hiddenComments[commentId];
+
+    if (isHidden) {
+      return (
+        <div style={styles.hiddenCommentBanner} key={commentId}>
+          <span style={styles.hiddenCommentText}>This comment will not be visible for you again.</span>
+          <button 
+            type="button" 
+            style={styles.undoButton}
+            onClick={() => undoHideComment(commentId)}
+          >
+            Undo
+          </button>
+        </div>
+      );
+    }
 
     return (
       <div style={isReply ? styles.replyItem : styles.commentItem} key={commentId}>
@@ -339,7 +378,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           </div>
         </div>
 
-        {/* Properly Aligned Action Buttons (WriteThisCode Blue Theme) */}
+        {/* Action Buttons */}
         <div style={styles.rightActionsContainer}>
           <div style={styles.actionButtonWrapper}>
             <button
@@ -706,15 +745,37 @@ const styles = {
   },
   commentItem: {
     display: "flex",
-    alignItems: "center", // Perfectly centers avatar with body and right actions
+    alignItems: "center",
     gap: "12px",
     marginBottom: "16px",
   },
   replyItem: {
     display: "flex",
-    alignItems: "center", // Perfectly centers reply rows
+    alignItems: "center",
     gap: "10px",
     marginBottom: "12px",
+  },
+  hiddenCommentBanner: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    background: "#f8f8f8",
+    padding: "10px 14px",
+    borderRadius: "8px",
+    marginBottom: "16px",
+    border: "1px solid #eee",
+  },
+  hiddenCommentText: {
+    fontSize: "12px",
+    color: "#777",
+  },
+  undoButton: {
+    background: "transparent",
+    border: "none",
+    color: "#3b82f6",
+    fontSize: "12px",
+    fontWeight: "700",
+    cursor: "pointer",
   },
   avatar: {
     width: "38px",
@@ -723,7 +784,7 @@ const styles = {
     objectFit: "cover",
     background: "#eee",
     flexShrink: 0,
-    alignSelf: "flex-start", // Keep avatar pinned to the top of the comment block
+    alignSelf: "flex-start",
   },
   avatarFallback: {
     width: "38px",
@@ -823,7 +884,7 @@ const styles = {
     gap: "12px",
     marginLeft: "8px",
     flexShrink: 0,
-    alignSelf: "center", // Centers the like/dislike buttons vertically alongside the comment block
+    alignSelf: "center",
   },
   actionButtonWrapper: {
     display: "flex",
@@ -950,7 +1011,6 @@ const styles = {
     gap: "8px",
     padding: "10px 16px",
     borderTop: "1px solid #eee",
-/**********************************************************************************************************/
     background: "#ffffff",
     zIndex: 10,
   },
