@@ -73,29 +73,31 @@ export default {
         const { neon } = await import("@neondatabase/serverless");
         const sql = neon(env.DATABASE_URL);
 
-        // Ensure comments table exists
+        // Ensure comments table exists with media_urls column
         await sql`
           CREATE TABLE IF NOT EXISTS comments (
             id SERIAL PRIMARY KEY,
             post_id TEXT NOT NULL,
             post_owner_id TEXT NOT NULL,
             user_id TEXT NOT NULL,
-            text TEXT NOT NULL,
+            text TEXT,
+            media_urls TEXT[],
+            parent_id TEXT,
             created_at BIGINT
           )
         `;
 
-       // GET Comments for a post (with dynamic user profile joining)
+        // Ensure columns exist if table was already created previously
+        await sql`ALTER TABLE comments ADD COLUMN IF NOT EXISTS parent_id TEXT;`;
+        await sql`ALTER TABLE comments ADD COLUMN IF NOT EXISTS media_urls TEXT[];`;
+
+        // GET Comments for a post (with dynamic user profile joining)
         if (request.method === "GET" && url.pathname === "/comments") {
           const postId = url.searchParams.get("postId");
           if (!postId) {
             return json({ success: false, error: "Missing postId" }, 400);
           }
 
-          // Ensure parent_id column exists
-          await sql`ALTER TABLE comments ADD COLUMN IF NOT EXISTS parent_id TEXT;`;
-
-          // Fetch comments joined with users table to get live profile pictures and usernames
           const comments = await sql`
             SELECT 
               c.id, 
@@ -105,6 +107,7 @@ export default {
               COALESCE(u.username, c.username, 'user') AS username,
               COALESCE(u.profile_url, u.photo_url, c.profile_url, c.photo_url, '') AS photo_url,
               c.text, 
+              c.media_urls,
               c.parent_id, 
               c.created_at 
             FROM comments c
@@ -113,7 +116,6 @@ export default {
             ORDER BY c.created_at ASC
           `;
 
-          // Map fields to match frontend property expectations seamlessly
           const formattedComments = comments.map(c => ({
             id: c.id,
             commentId: c.id,
@@ -126,6 +128,8 @@ export default {
             photoURL: c.photo_url,
             profile_url: c.photo_url,
             text: c.text,
+            mediaUrls: c.media_urls || [],
+            media_urls: c.media_urls || [],
             parentId: c.parent_id,
             parent_id: c.parent_id,
             createdAt: c.created_at
@@ -137,57 +141,52 @@ export default {
         // POST Comments
         if (request.method === "POST") {
           const body = await request.json();
-          const { postId, postOwnerId, userId, text, parentId, parent_id } = body;
+          const { postId, postOwnerId, userId, text, mediaUrls, media_urls, parentId, parent_id } = body;
           const effectiveParentId = parentId || parent_id || null;
+          const imagesArray = mediaUrls || media_urls || [];
 
-          if (!postId || !userId || !text) {
-            return json({ success: false, error: "Missing required fields" }, 400);
+          // Fixed: Allow comment if either text OR images are provided!
+          if (!postId || !userId || (!text && imagesArray.length === 0)) {
+            return json({ success: false, error: "Missing required fields (text or image required)" }, 400);
           }
 
-          // --- BACKEND COMMENT FILTER (Policy Protection) ---
           const trimmedText = typeof text === "string" ? text.trim() : "";
-          if (!trimmedText || trimmedText.length > 500) {
-            return json({ success: false, error: "Invalid comment length." }, 400);
+          
+          if (trimmedText) {
+            if (trimmedText.length > 500) {
+              return json({ success: false, error: "Comment is too long (maximum 500 characters)." }, 400);
+            }
+
+            const cleanedText = trimmedText
+              .toLowerCase()
+              .replace(/[^\p{L}\p{N}\s]/gu, " ")
+              .replace(/\s+/g, " ")
+              .trim();
+
+            const blockedWords = ["badword", "badword2", "badword3", "idiot", "stupid", "fool", "dumb"];
+            const words = cleanedText.split(" ");
+            if (words.some((word) => blockedWords.includes(word))) {
+              return json({ success: false, error: "This comment contains language that is not allowed on Vezlivo." }, 400);
+            }
+
+            if (/(.)\1{7,}/i.test(cleanedText)) {
+              return json({ success: false, error: "Please do not send repeated or spam characters." }, 400);
+            }
           }
-
-          const cleanedText = trimmedText
-            .toLowerCase()
-            .replace(/[^\p{L}\p{N}\s]/gu, " ")
-            .replace(/\s+/g, " ")
-            .trim();
-
-          const blockedWords = ["badword", "badword2", "badword3", "idiot", "stupid", "fool", "dumb"];
-          const words = cleanedText.split(" ");
-          const hasBlockedWord = words.some((word) => blockedWords.includes(word));
-
-          if (hasBlockedWord) {
-            return json({ success: false, error: "This comment contains language that is not allowed on Vezlivo." }, 400);
-          }
-
-          const repeatedCharacters = /(.)\1{7,}/i;
-          if (repeatedCharacters.test(cleanedText)) {
-            return json({ success: false, error: "Please do not send repeated or spam characters." }, 400);
-          }
-
-          const repeatedWords = /\b(\w+)(?:\s+\1){4,}\b/i;
-          if (repeatedWords.test(cleanedText)) {
-            return json({ success: false, error: "Please do not spam the same word repeatedly." }, 400);
-          }
-          // --------------------------------------------------
 
           await sql`ALTER TABLE posts ADD COLUMN IF NOT EXISTS comments_count INT DEFAULT 0`;
           await sql`ALTER TABLE posts ADD COLUMN IF NOT EXISTS comments INT DEFAULT 0`;
 
           const createdAt = Date.now();
 
-          await sql`
-            ALTER TABLE comments ADD COLUMN IF NOT EXISTS parent_id TEXT;
+          // Save comment with media URLs into Neon PostgreSQL
+          const insertRes = await sql`
+            INSERT INTO comments (post_id, post_owner_id, user_id, text, media_urls, parent_id, created_at)
+            VALUES (${postId}, ${postOwnerId || ""}, ${userId}, ${trimmedText}, ${imagesArray}, ${effectiveParentId}, ${createdAt})
+            RETURNING id
           `;
 
-          await sql`
-            INSERT INTO comments (post_id, post_owner_id, user_id, text, parent_id, created_at)
-            VALUES (${postId}, ${postOwnerId || ""}, ${userId}, ${trimmedText}, ${effectiveParentId}, ${createdAt})
-          `;
+          const newCommentId = insertRes[0]?.id;
 
           if (!isNaN(postId)) {
             await sql`
@@ -205,12 +204,11 @@ export default {
             `;
           }
 
-         // Determine who should receive the notification (Post Owner or Parent Comment Author)
           let targetUserId = postOwnerId;
           let activityType = "comment";
 
-          if (parentId) {
-            const parentRes = await sql`SELECT user_id FROM comments WHERE id::text = ${parentId} OR id = ${parentId}`;
+          if (effectiveParentId) {
+            const parentRes = await sql`SELECT user_id FROM comments WHERE id::text = ${effectiveParentId} OR id = ${effectiveParentId}`;
             if (parentRes.length > 0 && parentRes[0].user_id) {
               targetUserId = parentRes[0].user_id;
               activityType = "reply";
@@ -247,17 +245,16 @@ export default {
 
             await sql`
               INSERT INTO activities (user_uid, type, actor_id, actor_name, comment_text, post_id, post_thumbnail, read, created_at)
-              VALUES (${targetUserId}, ${activityType}, ${userId}, ${actorName}, ${trimmedText}, ${postId}, ${thumbnail}, FALSE, ${createdAt})
+              VALUES (${targetUserId}, ${activityType}, ${userId}, ${actorName}, ${trimmedText || '[Image]'}, ${postId}, ${thumbnail}, FALSE, ${createdAt})
             `;
           }
 
-          return json({ success: true, message: "Comment added successfully" });
+          return json({ success: true, message: "Comment added successfully", commentId: newCommentId });
         }
       } catch (err) {
         return json({ success: false, error: err.message }, 500);
       }
     }
-
     // SYNC USER PROFILE & IMAGES
     if (
       [
