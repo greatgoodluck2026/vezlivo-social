@@ -122,7 +122,7 @@ export default {
                 c.user_id, 
                 COALESCE(NULLIF(u.display_name, ''), NULLIF(c.display_name, ''), 'User') AS display_name,
                 COALESCE(NULLIF(u.username, ''), 'user') AS username,
-                COALESCE(NULLIF(u.profile_url, ''), NULLIF(u.photo_url, ''), NULLIF(c.profile_url, ''), NULLIF(c.photo_url, ''), '') AS user_photo,
+                COALESCE(NULLIF(c.profile_url, ''), NULLIF(c.photo_url, ''), NULLIF(u.profile_url, ''), NULLIF(u.photo_url, ''), '') AS user_photo,
                 c.text, 
                 c.media_urls,
                 c.parent_id, 
@@ -130,19 +130,18 @@ export default {
                 cl.reaction_type
               FROM comments c
               LEFT JOIN users u ON c.user_id = u.uid
-              LEFT JOIN comment_likes cl ON c.id = cl.comment_id AND cl.user_id = ${currentUserId || ''}
+              LEFT JOIN comment_likes cl ON c.id::text = cl.comment_id::text AND cl.user_id = ${currentUserId || ''}
               WHERE c.post_id = ${postId} 
               ORDER BY c.created_at ASC
             `;
           } catch (innerErr) {
             comments = await sql`
-              SELECT id, post_id, user_id, display_name, '' AS username, '' AS user_photo, text, media_urls, parent_id, created_at, NULL AS reaction_type
+              SELECT id, post_id, user_id, display_name, '' AS username, COALESCE(profile_url, photo_url, '') AS user_photo, text, media_urls, parent_id, created_at, NULL AS reaction_type
               FROM comments 
               WHERE post_id = ${postId} 
               ORDER BY created_at ASC
             `;
           }
-
           const formattedComments = comments.map(c => {
             const avatarUrl = c.user_photo || '';
             const realName = c.display_name && c.display_name !== 'WriteThisCode User' ? c.display_name : 'User';
@@ -157,6 +156,7 @@ export default {
               username: c.username || 'user',
               photoURL: avatarUrl,
               profile_url: avatarUrl,
+              user_photo: avatarUrl,
               text: c.text || '',
               mediaUrls: c.media_urls || [],
               media_urls: c.media_urls || [],
