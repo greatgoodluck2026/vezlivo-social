@@ -19,7 +19,6 @@ export default function Comments({ postId, postOwnerId, onClose }) {
   const [likedComments, setLikedComments] = useState({});
   const [dislikedComments, setDislikedComments] = useState({});
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
-  const [fullscreenImage, setFullscreenImage] = useState(null);
 
   const inputRef = useRef(null);
   const fileInputRef = useRef(null);
@@ -79,8 +78,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
 
     const fetchComments = async () => {
       try {
-        const userIdParam = currentUser ? `&userId=${currentUser.uid}` : "";
-        const response = await fetch(`${API_URL}/comments?postId=${postId}${userIdParam}`);
+        const response = await fetch(`${API_URL}/comments?postId=${postId}`);
         const data = await response.json();
         if (data.success) {
           const sorted = (data.comments || []).sort((a, b) => {
@@ -89,16 +87,6 @@ export default function Comments({ postId, postOwnerId, onClose }) {
             return timeB - timeA;
           });
           setComments(sorted);
-
-          const initialLikes = {};
-          const initialDislikes = {};
-          data.comments.forEach((c) => {
-            const commentId = c.id || c.commentId;
-            if (c.userReaction === "like") initialLikes[commentId] = true;
-            if (c.userReaction === "dislike") initialDislikes[commentId] = true;
-          });
-          setLikedComments(initialLikes);
-          setDislikedComments(initialDislikes);
         } else {
           setErrorMessage("Could not load comments from server.");
         }
@@ -111,60 +99,30 @@ export default function Comments({ postId, postOwnerId, onClose }) {
     };
 
     fetchComments();
-  }, [postId, currentUser]);
+  }, [postId]);
 
-  const toggleLike = async (commentId) => {
-    if (!currentUser) {
-      setErrorMessage("You must be logged in to like comments.");
-      return;
-    }
-
-    const wasLiked = !!likedComments[commentId];
-    const newAction = wasLiked ? "none" : "like";
-
-    setLikedComments((prev) => ({ ...prev, [commentId]: !wasLiked }));
-    setDislikedComments((prev) => ({ ...prev, [commentId]: false }));
-
-    try {
-      await fetch(`${API_URL}/comments/like`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userId: currentUser.uid,
-          commentId: commentId,
-          action: newAction,
-        }),
-      });
-    } catch (err) {
-      console.error("Failed to sync comment like:", err);
-    }
+  const toggleLike = (commentId) => {
+    setLikedComments((prev) => ({
+      ...prev,
+      [commentId]: !prev[commentId],
+    }));
+    // If liking, remove dislike
+    setDislikedComments((prev) => ({
+      ...prev,
+      [commentId]: false,
+    }));
   };
 
-  const toggleDislike = async (commentId) => {
-    if (!currentUser) {
-      setErrorMessage("You must be logged in to dislike comments.");
-      return;
-    }
-
-    const wasDisliked = !!dislikedComments[commentId];
-    const newAction = wasDisliked ? "none" : "dislike";
-
-    setDislikedComments((prev) => ({ ...prev, [commentId]: !wasDisliked }));
-    setLikedComments((prev) => ({ ...prev, [commentId]: false }));
-
-    try {
-      await fetch(`${API_URL}/comments/like`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userId: currentUser.uid,
-          commentId: commentId,
-          action: newAction,
-        }),
-      });
-    } catch (err) {
-      console.error("Failed to sync comment dislike:", err);
-    }
+  const toggleDislike = (commentId) => {
+    setDislikedComments((prev) => ({
+      ...prev,
+      [commentId]: !prev[commentId],
+    }));
+    // If disliking, remove like
+    setLikedComments((prev) => ({
+      ...prev,
+      [commentId]: false,
+    }));
   };
 
   const sendComment = async () => {
@@ -195,8 +153,6 @@ export default function Comments({ postId, postOwnerId, onClose }) {
       }
 
       const targetParentId = replyingTo ? replyingTo.commentId : null;
-      const userDisplayName = currentUser.displayName || currentUser.email?.split("@")[0] || "WriteThisCode User";
-      const userPhotoURL = currentUser.photoURL || "";
 
       const response = await fetch(`${API_URL}/comments`, {
         method: "POST",
@@ -208,10 +164,6 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           post_owner_id: postOwnerId,
           userId: currentUser.uid,
           user_id: currentUser.uid,
-          displayName: userDisplayName,
-          display_name: userDisplayName,
-          photoURL: userPhotoURL,
-          profile_url: userPhotoURL,
           text: text,
           mediaUrls: selectedImages,
           media_urls: selectedImages,
@@ -223,6 +175,9 @@ export default function Comments({ postId, postOwnerId, onClose }) {
       const data = await response.json();
 
       if (data.success) {
+        const userDisplayName = currentUser.displayName || currentUser.email?.split("@")[0] || "Vezlivo User";
+        const userPhotoURL = currentUser.photoURL || "";
+
         const newCommentObj = {
           id: data.commentId || Date.now().toString(),
           user_id: currentUser.uid,
@@ -231,7 +186,6 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           display_name: userDisplayName,
           photoURL: userPhotoURL,
           profile_url: userPhotoURL,
-          user_photo: userPhotoURL,
           text: text,
           mediaUrls: selectedImages,
           media_urls: selectedImages,
@@ -328,14 +282,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
         {allImages.length > 0 && (
           <div style={styles.commentImagesGrid}>
             {allImages.map((imgSrc, i) => (
-              <img 
-                key={i} 
-                src={imgSrc} 
-                alt="attachment" 
-                style={styles.commentStickerImage} 
-                onClick={() => setFullscreenImage(imgSrc)}
-                title="Tap to view fullscreen"
-              />
+              <img key={i} src={imgSrc} alt="attachment" style={styles.commentStickerImage} />
             ))}
           </div>
         )}
@@ -348,15 +295,8 @@ export default function Comments({ postId, postOwnerId, onClose }) {
 
   const renderCommentItem = (comment, isReply = false) => {
     const commentId = comment.id || comment.commentId;
-    const displayName = comment.displayName || comment.display_name || "WriteThisCode User";
-    const commentUid = comment.userId || comment.user_id;
-    const isCurrentAuthedUser = currentUser && commentUid === currentUser.uid;
-    
-    const userPhoto = comment.user_photo || comment.photoURL || comment.profile_url || 
-      (isCurrentAuthedUser ? currentUser.photoURL : "") || 
-      localStorage.getItem(`profile_url_${commentUid}`) || 
-      localStorage.getItem(`photo_url_${commentUid}`) || "";
-
+    const displayName = comment.displayName || comment.display_name || "Vezlivo User";
+    const userPhoto = comment.photoURL || comment.profile_url;
     const isLiked = !!likedComments[commentId];
     const isDisliked = !!dislikedComments[commentId];
 
@@ -393,6 +333,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           </div>
         </div>
 
+        {/* Clean TikTok-style Right Actions matching Vezlivo Blue */}
         <div style={styles.rightActionsContainer}>
           <div style={styles.actionButtonWrapper}>
             <button
@@ -400,9 +341,9 @@ export default function Comments({ postId, postOwnerId, onClose }) {
               onClick={() => toggleLike(commentId)}
               style={styles.iconButton}
             >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill={isLiked ? "#3b82f6" : "none"} stroke={isLiked ? "#3b82f6" : "#888"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>
-              </svg>
+              <span style={{ fontSize: "16px", color: isLiked ? "#3b82f6" : "#888" }}>
+                {isLiked ? "❤️" : "🤍"}
+              </span>
             </button>
             <span style={styles.actionCountText}>{isLiked ? 1 : 0}</span>
           </div>
@@ -413,10 +354,9 @@ export default function Comments({ postId, postOwnerId, onClose }) {
               onClick={() => toggleDislike(commentId)}
               style={styles.iconButton}
             >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill={isDisliked ? "#3b82f6" : "none"} stroke={isDisliked ? "#3b82f6" : "#888"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.3 9a2 2 0 0 0 2 2.3H10z"></path>
-                <path d="M21 2v11a2 2 0 0 1-2 2h-3v-13h3a2 2 0 0 1 2 2z"></path>
-              </svg>
+              <span style={{ fontSize: "16px", color: isDisliked ? "#333" : "#aaa" }}>
+                👎
+              </span>
             </button>
           </div>
         </div>
@@ -556,6 +496,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           </div>
         )}
 
+        {/* Emoji Quick Picker Popup */}
         {showEmojiPicker && (
           <div style={styles.emojiPopupBar}>
             {["❤️", "🥰", "😂", "😭", "🔥", "🙏", "😊", "👏", "🔥", "💯"].map((emoji) => (
@@ -573,6 +514,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           </div>
         )}
 
+        {/* TikTok-style Bottom Input Bar with embedded action buttons */}
         <div style={styles.inputArea}>
           <input
             type="file"
@@ -634,28 +576,10 @@ export default function Comments({ postId, postOwnerId, onClose }) {
               ...(sending || (!commentText.trim() && selectedImages.length === 0) ? styles.disabledButton : {}),
             }}
           >
-            {sending ? "..." : "Send"}
+            {sending ? "..." : "Post"}
           </button>
         </div>
       </div>
-
-      {fullscreenImage && (
-        <div style={styles.lightboxOverlay} onClick={() => setFullscreenImage(null)}>
-          <button 
-            type="button" 
-            style={styles.lightboxCloseBtn} 
-            onClick={() => setFullscreenImage(null)}
-          >
-            ×
-          </button>
-          <img 
-            src={fullscreenImage} 
-            alt="Fullscreen view" 
-            style={styles.lightboxImage} 
-            onClick={(e) => e.stopPropagation()} 
-          />
-        </div>
-      )}
     </div>
   );
 }
@@ -756,15 +680,14 @@ const styles = {
   },
   commentItem: {
     display: "flex",
-    alignItems: "center",
+    alignItems: "flex-start",
     gap: "12px",
     marginBottom: "16px",
   },
   replyItem: {
     display: "flex",
-    alignItems: "center",
+    alignItems: "flex-start",
     gap: "10px",
-    marginBottom: "12px",
   },
   avatar: {
     width: "38px",
@@ -773,7 +696,6 @@ const styles = {
     objectFit: "cover",
     background: "#eee",
     flexShrink: 0,
-    alignSelf: "flex-start",
   },
   avatarFallback: {
     width: "38px",
@@ -787,7 +709,6 @@ const styles = {
     alignItems: "center",
     justifyContent: "center",
     flexShrink: 0,
-    alignSelf: "flex-start",
   },
   replyAvatar: {
     width: "30px",
@@ -796,7 +717,6 @@ const styles = {
     objectFit: "cover",
     background: "#eee",
     flexShrink: 0,
-    alignSelf: "flex-start",
   },
   replyAvatarFallback: {
     width: "30px",
@@ -810,7 +730,6 @@ const styles = {
     alignItems: "center",
     justifyContent: "center",
     flexShrink: 0,
-    alignSelf: "flex-start",
   },
   commentBody: {
     flex: 1,
@@ -846,7 +765,6 @@ const styles = {
     borderRadius: "8px",
     objectFit: "cover",
     display: "block",
-    cursor: "pointer",
   },
   commentFooterRow: {
     display: "flex",
@@ -873,7 +791,6 @@ const styles = {
     gap: "12px",
     marginLeft: "8px",
     flexShrink: 0,
-    alignSelf: "center",
   },
   actionButtonWrapper: {
     display: "flex",
@@ -889,6 +806,7 @@ const styles = {
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
+    fontSize: "16px",
   },
   actionCountText: {
     fontSize: "10px",
@@ -1073,40 +991,5 @@ const styles = {
   },
   commentThreadWrapper: {
     marginBottom: "16px",
-  },
-  lightboxOverlay: {
-    position: "fixed",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    background: "rgba(0, 0, 0, 0.95)",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    zIndex: 9999999,
-    padding: "20px",
-  },
-  lightboxCloseBtn: {
-    position: "absolute",
-    top: "20px",
-    right: "20px",
-    background: "rgba(255, 255, 255, 0.2)",
-    color: "#ffffff",
-    border: "none",
-    borderRadius: "50%",
-    width: "40px",
-    height: "40px",
-    fontSize: "24px",
-    cursor: "pointer",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  lightboxImage: {
-    maxWidth: "100%",
-    maxHeight: "90vh",
-    objectFit: "contain",
-    borderRadius: "8px",
   },
 };
