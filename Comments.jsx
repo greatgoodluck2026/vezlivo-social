@@ -79,7 +79,8 @@ export default function Comments({ postId, postOwnerId, onClose }) {
 
     const fetchComments = async () => {
       try {
-        const response = await fetch(`${API_URL}/comments?postId=${postId}`);
+        const userIdParam = currentUser ? `&userId=${currentUser.uid}` : "";
+        const response = await fetch(`${API_URL}/comments?postId=${postId}${userIdParam}`);
         const data = await response.json();
         if (data.success) {
           const sorted = (data.comments || []).sort((a, b) => {
@@ -88,6 +89,17 @@ export default function Comments({ postId, postOwnerId, onClose }) {
             return timeB - timeA;
           });
           setComments(sorted);
+
+          // Populate initial like/dislike states from server response
+          const initialLikes = {};
+          const initialDislikes = {};
+          data.comments.forEach((c) => {
+            const commentId = c.id || c.commentId;
+            if (c.userReaction === "like") initialLikes[commentId] = true;
+            if (c.userReaction === "dislike") initialDislikes[commentId] = true;
+          });
+          setLikedComments(initialLikes);
+          setDislikedComments(initialDislikes);
         } else {
           setErrorMessage("Could not load comments from server.");
         }
@@ -100,28 +112,62 @@ export default function Comments({ postId, postOwnerId, onClose }) {
     };
 
     fetchComments();
-  }, [postId]);
+  }, [postId, currentUser]);
 
-  const toggleLike = (commentId) => {
-    setLikedComments((prev) => ({
-      ...prev,
-      [commentId]: !prev[commentId],
-    }));
-    setDislikedComments((prev) => ({
-      ...prev,
-      [commentId]: false,
-    }));
+  const toggleLike = async (commentId) => {
+    if (!currentUser) {
+      setErrorMessage("You must be logged in to like comments.");
+      return;
+    }
+
+    const wasLiked = !!likedComments[commentId];
+    const newAction = wasLiked ? "none" : "like";
+
+    // Optimistic UI update
+    setLikedComments((prev) => ({ ...prev, [commentId]: !wasLiked }));
+    setDislikedComments((prev) => ({ ...prev, [commentId]: false }));
+
+    try {
+      await fetch(`${API_URL}/comments/like`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: currentUser.uid,
+          commentId: commentId,
+          action: newAction,
+        }),
+      });
+    } catch (err) {
+      console.error("Failed to sync comment like:", err);
+    }
   };
 
-  const toggleDislike = (commentId) => {
-    setDislikedComments((prev) => ({
-      ...prev,
-      [commentId]: !prev[commentId],
-    }));
-    setLikedComments((prev) => ({
-      ...prev,
-      [commentId]: false,
-    }));
+  const toggleDislike = async (commentId) => {
+    if (!currentUser) {
+      setErrorMessage("You must be logged in to dislike comments.");
+      return;
+    }
+
+    const wasDisliked = !!dislikedComments[commentId];
+    const newAction = wasDisliked ? "none" : "dislike";
+
+    // Optimistic UI update
+    setDislikedComments((prev) => ({ ...prev, [commentId]: !wasDisliked }));
+    setLikedComments((prev) => ({ ...prev, [commentId]: false }));
+
+    try {
+      await fetch(`${API_URL}/comments/like`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: currentUser.uid,
+          commentId: commentId,
+          action: newAction,
+        }),
+      });
+    } catch (err) {
+      console.error("Failed to sync comment dislike:", err);
+    }
   };
 
   const sendComment = async () => {
@@ -706,13 +752,13 @@ const styles = {
   },
   commentItem: {
     display: "flex",
-    alignItems: "center", // Perfectly centers avatar with body and right actions
+    alignItems: "center",
     gap: "12px",
     marginBottom: "16px",
   },
   replyItem: {
     display: "flex",
-    alignItems: "center", // Perfectly centers reply rows
+    alignItems: "center",
     gap: "10px",
     marginBottom: "12px",
   },
@@ -723,7 +769,7 @@ const styles = {
     objectFit: "cover",
     background: "#eee",
     flexShrink: 0,
-    alignSelf: "flex-start", // Keep avatar pinned to the top of the comment block
+    alignSelf: "flex-start",
   },
   avatarFallback: {
     width: "38px",
@@ -823,7 +869,7 @@ const styles = {
     gap: "12px",
     marginLeft: "8px",
     flexShrink: 0,
-    alignSelf: "center", // Centers the like/dislike buttons vertically alongside the comment block
+    alignSelf: "center",
   },
   actionButtonWrapper: {
     display: "flex",
@@ -950,7 +996,6 @@ const styles = {
     gap: "8px",
     padding: "10px 16px",
     borderTop: "1px solid #eee",
-/**********************************************************************************************************/
     background: "#ffffff",
     zIndex: 10,
   },
