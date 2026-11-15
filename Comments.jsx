@@ -231,6 +231,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           display_name: userDisplayName,
           photoURL: userPhotoURL,
           profile_url: userPhotoURL,
+          user_photo: userPhotoURL,
           text: text,
           mediaUrls: selectedImages,
           media_urls: selectedImages,
@@ -349,7 +350,8 @@ export default function Comments({ postId, postOwnerId, onClose }) {
     const commentId = comment.id || comment.commentId;
     const displayName = comment.displayName || comment.display_name || "WriteThisCode User";
     
-    const userPhoto = comment.photoURL || comment.profile_url || 
+    // Fixed priority chain including user_photo from SQL worker
+    const userPhoto = comment.user_photo || comment.photoURL || comment.profile_url || 
       (currentUser && (comment.userId === currentUser.uid || comment.user_id === currentUser.uid) ? currentUser.photoURL : "") || 
       localStorage.getItem(`profile_url_${comment.userId || comment.user_id}`) || "";
 
