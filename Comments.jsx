@@ -684,8 +684,8 @@ const styles = {
     transform: "translateX(-50%)",
     width: "100%",
     maxWidth: "600px",
-    height: "75vh", // Expanded to 75vh for a proper spacious TikTok feel!
-    maxHeight: "80dvh",
+    height: "50vh", // Balanced 50vh height so video stays large on top
+    maxHeight: "55dvh",
     background: "#ffffff",
     color: "#000000",
     borderRadius: "20px 20px 0 0",
