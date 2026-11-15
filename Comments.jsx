@@ -350,7 +350,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
     const commentId = comment.id || comment.commentId;
     const displayName = comment.displayName || comment.display_name || "WriteThisCode User";
     
-    // Fixed priority chain including user_photo from SQL worker
+    // Fixed: comment.user_photo is now prioritized first to match worker_2.js
     const userPhoto = comment.user_photo || comment.photoURL || comment.profile_url || 
       (currentUser && (comment.userId === currentUser.uid || comment.user_id === currentUser.uid) ? currentUser.photoURL : "") || 
       localStorage.getItem(`profile_url_${comment.userId || comment.user_id}`) || "";
