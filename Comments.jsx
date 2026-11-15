@@ -404,7 +404,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
               onClick={() => toggleLike(commentId)}
               style={styles.iconButton}
             >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill={isLiked ? "#3b82f6" : "none"} stroke={isLiked ? "#3b82f6" : "#888"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill={isLiked ? "#ff3b30" : "none"} stroke={isLiked ? "#ff3b30" : "#888"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>
               </svg>
             </button>
@@ -417,7 +417,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
               onClick={() => toggleDislike(commentId)}
               style={styles.iconButton}
             >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill={isDisliked ? "#3b82f6" : "none"} stroke={isDisliked ? "#3b82f6" : "#888"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill={isDisliked ? "#333" : "none"} stroke={isDisliked ? "#333" : "#888"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.3 9a2 2 0 0 0 2 2.3H10z"></path>
                 <path d="M21 2v11a2 2 0 0 1-2 2h-3v-13h3a2 2 0 0 1 2 2z"></path>
               </svg>
@@ -684,8 +684,8 @@ const styles = {
     transform: "translateX(-50%)",
     width: "100%",
     maxWidth: "600px",
-    height: "50vh", // Balanced 50vh height so video stays large on top
-    maxHeight: "55dvh",
+    height: "75vh", // Taller 75vh height matching TikTok's spacious comment drawer!
+    maxHeight: "82dvh",
     background: "#ffffff",
     color: "#000000",
     borderRadius: "20px 20px 0 0",
@@ -760,13 +760,13 @@ const styles = {
   },
   commentItem: {
     display: "flex",
-    alignItems: "center",
+    alignItems: "flex-start",
     gap: "12px",
     marginBottom: "16px",
   },
   replyItem: {
     display: "flex",
-    alignItems: "center",
+    alignItems: "flex-start",
     gap: "10px",
     marginBottom: "12px",
   },
@@ -777,7 +777,6 @@ const styles = {
     objectFit: "cover",
     background: "#eee",
     flexShrink: 0,
-    alignSelf: "flex-start",
   },
   avatarFallback: {
     width: "38px",
@@ -791,7 +790,6 @@ const styles = {
     alignItems: "center",
     justifyContent: "center",
     flexShrink: 0,
-    alignSelf: "flex-start",
   },
   replyAvatar: {
     width: "30px",
@@ -800,7 +798,6 @@ const styles = {
     objectFit: "cover",
     background: "#eee",
     flexShrink: 0,
-    alignSelf: "flex-start",
   },
   replyAvatarFallback: {
     width: "30px",
@@ -814,7 +811,6 @@ const styles = {
     alignItems: "center",
     justifyContent: "center",
     flexShrink: 0,
-    alignSelf: "flex-start",
   },
   commentBody: {
     flex: 1,
@@ -873,11 +869,12 @@ const styles = {
   },
   rightActionsContainer: {
     display: "flex",
+    flexDirection: "column",
     alignItems: "center",
-    gap: "12px",
+    gap: "10px",
     marginLeft: "8px",
     flexShrink: 0,
-    alignSelf: "center",
+    paddingTop: "4px",
   },
   actionButtonWrapper: {
     display: "flex",
@@ -889,7 +886,7 @@ const styles = {
     background: "transparent",
     border: "none",
     cursor: "pointer",
-    padding: "4px",
+    padding: "2px",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
