@@ -643,8 +643,11 @@ export default function Home({ commentsOpen, onNavigate, onCreate, onProfile, on
         </div>
       )}
 
-      {/* Feed container maintains fixed height so video never restarts */}
-      <main style={styles.feed}>
+      {/* Feed container dynamically shrinks to 50vh when comments are open, matching TikTok */}
+      <main style={{
+        ...styles.feed,
+        ...(commentsOpen ? { height: "50vh", maxHeight: "50vh" } : {})
+      }}>
         {loading ? (
           <div style={styles.centerMessage}>
             <div className="vezlivo-loader"></div>
@@ -703,7 +706,10 @@ export default function Home({ commentsOpen, onNavigate, onCreate, onProfile, on
         return (
              <article
                key={`${postOwnerUid || "user"}-${postIdKey}`}
-               style={styles.post}
+               style={{
+                 ...styles.post,
+                 ...(commentsOpen ? { height: "50vh" } : {})
+               }}
              >
                <div
                  style={styles.mediaFrame}
@@ -1229,6 +1235,7 @@ const styles = {
     msOverflowStyle: "none",
     position: "relative",
     background: "#000000",
+    transition: "height 0.3s ease",
   },
   post: {
     position: "relative",
@@ -1238,6 +1245,7 @@ const styles = {
     scrollSnapStop: "always",
     background: "#000000",
     overflow: "hidden",
+    transition: "height 0.3s ease",
   },
 
   mediaFrame: {
