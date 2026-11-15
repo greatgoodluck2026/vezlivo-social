@@ -349,11 +349,13 @@ export default function Comments({ postId, postOwnerId, onClose }) {
   const renderCommentItem = (comment, isReply = false) => {
     const commentId = comment.id || comment.commentId;
     const displayName = comment.displayName || comment.display_name || "WriteThisCode User";
+    const commentUid = comment.userId || comment.user_id;
+    const isCurrentAuthedUser = currentUser && commentUid === currentUser.uid;
     
-    // Fixed: comment.user_photo is now prioritized first to match worker_2.js
     const userPhoto = comment.user_photo || comment.photoURL || comment.profile_url || 
-      (currentUser && (comment.userId === currentUser.uid || comment.user_id === currentUser.uid) ? currentUser.photoURL : "") || 
-      localStorage.getItem(`profile_url_${comment.userId || comment.user_id}`) || "";
+      (isCurrentAuthedUser ? currentUser.photoURL : "") || 
+      localStorage.getItem(`profile_url_${commentUid}`) || 
+      localStorage.getItem(`photo_url_${commentUid}`) || "";
 
     const isLiked = !!likedComments[commentId];
     const isDisliked = !!dislikedComments[commentId];
@@ -632,7 +634,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
               ...(sending || (!commentText.trim() && selectedImages.length === 0) ? styles.disabledButton : {}),
             }}
           >
-            {sending ? "..." : "Post"}
+            {sending ? "..." : "Send"}
           </button>
         </div>
       </div>
