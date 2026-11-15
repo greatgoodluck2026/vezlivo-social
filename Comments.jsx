@@ -90,7 +90,6 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           });
           setComments(sorted);
 
-          // Populate initial like/dislike states from server response
           const initialLikes = {};
           const initialDislikes = {};
           data.comments.forEach((c) => {
@@ -123,7 +122,6 @@ export default function Comments({ postId, postOwnerId, onClose }) {
     const wasLiked = !!likedComments[commentId];
     const newAction = wasLiked ? "none" : "like";
 
-    // Optimistic UI update
     setLikedComments((prev) => ({ ...prev, [commentId]: !wasLiked }));
     setDislikedComments((prev) => ({ ...prev, [commentId]: false }));
 
@@ -151,7 +149,6 @@ export default function Comments({ postId, postOwnerId, onClose }) {
     const wasDisliked = !!dislikedComments[commentId];
     const newAction = wasDisliked ? "none" : "dislike";
 
-    // Optimistic UI update
     setDislikedComments((prev) => ({ ...prev, [commentId]: !wasDisliked }));
     setLikedComments((prev) => ({ ...prev, [commentId]: false }));
 
@@ -234,6 +231,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           display_name: userDisplayName,
           photoURL: userPhotoURL,
           profile_url: userPhotoURL,
+          user_photo: userPhotoURL,
           text: text,
           mediaUrls: selectedImages,
           media_urls: selectedImages,
@@ -351,7 +349,14 @@ export default function Comments({ postId, postOwnerId, onClose }) {
   const renderCommentItem = (comment, isReply = false) => {
     const commentId = comment.id || comment.commentId;
     const displayName = comment.displayName || comment.display_name || "WriteThisCode User";
-    const userPhoto = comment.photoURL || comment.profile_url;
+    const commentUid = comment.userId || comment.user_id;
+    const isCurrentAuthedUser = currentUser && commentUid === currentUser.uid;
+    
+    const userPhoto = comment.user_photo || comment.photoURL || comment.profile_url || 
+      (isCurrentAuthedUser ? currentUser.photoURL : "") || 
+      localStorage.getItem(`profile_url_${commentUid}`) || 
+      localStorage.getItem(`photo_url_${commentUid}`) || "";
+
     const isLiked = !!likedComments[commentId];
     const isDisliked = !!dislikedComments[commentId];
 
@@ -388,7 +393,6 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           </div>
         </div>
 
-        {/* Properly Aligned Action Buttons (WriteThisCode Blue Theme) */}
         <div style={styles.rightActionsContainer}>
           <div style={styles.actionButtonWrapper}>
             <button
@@ -552,7 +556,6 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           </div>
         )}
 
-        {/* Emoji Quick Picker Popup */}
         {showEmojiPicker && (
           <div style={styles.emojiPopupBar}>
             {["❤️", "🥰", "😂", "😭", "🔥", "🙏", "😊", "👏", "🔥", "💯"].map((emoji) => (
@@ -570,7 +573,6 @@ export default function Comments({ postId, postOwnerId, onClose }) {
           </div>
         )}
 
-        {/* Bottom Input Bar */}
         <div style={styles.inputArea}>
           <input
             type="file"
@@ -632,12 +634,11 @@ export default function Comments({ postId, postOwnerId, onClose }) {
               ...(sending || (!commentText.trim() && selectedImages.length === 0) ? styles.disabledButton : {}),
             }}
           >
-            {sending ? "..." : "Post"}
+            {sending ? "..." : "Send"}
           </button>
         </div>
       </div>
 
-      {/* Fullscreen Lightbox Image Viewer Modal */}
       {fullscreenImage && (
         <div style={styles.lightboxOverlay} onClick={() => setFullscreenImage(null)}>
           <button 
