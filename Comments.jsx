@@ -66,6 +66,10 @@ export default function Comments({ postId, postOwnerId, onClose }) {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setCurrentUser(user);
+      if (user && user.uid && user.photoURL) {
+        localStorage.setItem(`profile_url_${user.uid}`, user.photoURL);
+        localStorage.setItem(`photo_url_${user.uid}`, user.photoURL);
+      }
     });
     return () => unsubscribe();
   }, []);
@@ -352,6 +356,7 @@ export default function Comments({ postId, postOwnerId, onClose }) {
     const commentUid = comment.userId || comment.user_id;
     const isCurrentAuthedUser = currentUser && commentUid === currentUser.uid;
     
+    // Restored robust profile picture lookup chain matching the working state
     const userPhoto = comment.user_photo || comment.photoURL || comment.profile_url || 
       (isCurrentAuthedUser ? currentUser.photoURL : "") || 
       localStorage.getItem(`profile_url_${commentUid}`) || 
