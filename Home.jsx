@@ -350,15 +350,15 @@ export default function Home({ commentsOpen, onNavigate, onCreate, onProfile, on
     setTimeout(() => setToastMessage(""), 3000);
   };
 
- const openComments = (post) => {
-  const postId = post.postId || post.id;
-  const postOwnerId = post.user_id || post.uid;
-  window.dispatchEvent(
-    new CustomEvent("vezlivo:open-comments", {
-      detail: { postId, postOwnerId }
-    })
-  );
-};
+  const openComments = (post) => {
+    const postId = post.postId || post.id;
+    const postOwnerId = post.user_id || post.uid;
+    window.dispatchEvent(
+      new CustomEvent("vezlivo:open-comments", {
+        detail: { postId, postOwnerId }
+      })
+    );
+  };
 
   const openSection = (section) => {
     setActiveSection(section);
@@ -478,7 +478,6 @@ export default function Home({ commentsOpen, onNavigate, onCreate, onProfile, on
 
   return (
     <div style={styles.page}>
-      {/* Global CSS injection to make videos fit properly without extreme zooming */}
       <style>{`
         mux-video, video {
           width: 100% !important;
@@ -644,7 +643,11 @@ export default function Home({ commentsOpen, onNavigate, onCreate, onProfile, on
         </div>
       )}
 
-      <main style={styles.feed}>
+      {/* Feed container dynamically adjusts height to 50vh when comments are open */}
+      <main style={{
+        ...styles.feed,
+        ...(commentsOpen ? { height: "50vh", maxHeight: "50vh" } : {})
+      }}>
         {loading ? (
           <div style={styles.centerMessage}>
             <div className="vezlivo-loader"></div>
@@ -678,7 +681,6 @@ export default function Home({ commentsOpen, onNavigate, onCreate, onProfile, on
              post.playbackId || post.playback_id ||
              media.playbackId || media.playback_id || "";
 
-           // Prioritize Mux direct MP4 fallback if playbackId exists
            const videoUrl = (muxPlaybackId
              ? `https://stream.mux.com/${muxPlaybackId}/high.mp4`
              : "") ||
@@ -704,7 +706,10 @@ export default function Home({ commentsOpen, onNavigate, onCreate, onProfile, on
         return (
              <article
                key={`${postOwnerUid || "user"}-${postIdKey}`}
-               style={styles.post}
+               style={{
+                 ...styles.post,
+                 ...(commentsOpen ? { height: "50vh" } : {})
+               }}
              >
                <div
                  style={styles.mediaFrame}
@@ -749,9 +754,8 @@ export default function Home({ commentsOpen, onNavigate, onCreate, onProfile, on
                      <span>Media unavailable</span>
                    </div>
                  )}
-                  {/* Right Action Buttons - Clean Vezlivo Style */}
+                  {/* Right Action Buttons */}
                   <div style={styles.videoRightActions} onClick={(e) => e.stopPropagation()}>
-                    {/* 1. Floating Avatar */}
                     <div 
                       style={styles.floatingAvatarWrapper}
                       onClick={(e) => {
@@ -774,7 +778,6 @@ export default function Home({ commentsOpen, onNavigate, onCreate, onProfile, on
                         )}
                       </div>
 
-                      {/* Follow Plus Badge */}
                       {user && postOwnerUid && postOwnerUid !== user.uid && !followingIds[postOwnerUid] && (
                         <button 
                           style={styles.vezlivoPlusButton} 
@@ -797,7 +800,6 @@ export default function Home({ commentsOpen, onNavigate, onCreate, onProfile, on
                       )}
                     </div>
 
-                    {/* 2. Like Button */}
                     <button
                       type="button"
                       style={styles.vezlivoActionBtn}
@@ -815,7 +817,6 @@ export default function Home({ commentsOpen, onNavigate, onCreate, onProfile, on
                       </span>
                     </button>
 
-                    {/* 3. Comment Button */}
                     <button
                       type="button"
                       style={styles.vezlivoActionBtn}
@@ -827,7 +828,6 @@ export default function Home({ commentsOpen, onNavigate, onCreate, onProfile, on
                       </span>
                     </button>
 
-                    {/* 4. Share & Options Menu Button */}
                     <button
                       type="button"
                       style={styles.vezlivoActionBtn}
@@ -844,7 +844,6 @@ export default function Home({ commentsOpen, onNavigate, onCreate, onProfile, on
                       </span>
                     </button>
 
-                    {/* 5. Save/Favorite Button */}
                     <button
                       type="button"
                       style={styles.vezlivoActionBtn}
@@ -857,7 +856,6 @@ export default function Home({ commentsOpen, onNavigate, onCreate, onProfile, on
                       <span style={styles.sideActionCount}>Save</span>
                     </button>
 
-                    {/* 6. Rotating Sound Disc */}
                     <div
                       style={styles.soundDiscButton}
                       onClick={() => {
@@ -898,7 +896,6 @@ export default function Home({ commentsOpen, onNavigate, onCreate, onProfile, on
                       </p>
                     )}
 
-                    {/* Audio Track Badge */}
                     <div 
                       style={styles.audioBadge} 
                       onClick={(e) => {
@@ -922,7 +919,6 @@ export default function Home({ commentsOpen, onNavigate, onCreate, onProfile, on
                   </div>
                 </div>
 
-                {/* Combined Share & Options Menu Sheet */}
                 {openMenuPostId === postIdKey && (
                   <div style={styles.postMenu}>
                     <button
@@ -1016,7 +1012,6 @@ export default function Home({ commentsOpen, onNavigate, onCreate, onProfile, on
         </div>
       )}
 
-     {/* Main navigation - only show when comments are closed */}
       {!commentsOpen && (
         <nav style={styles.bottomNav} aria-label="Main navigation">
           <button
@@ -1085,10 +1080,10 @@ export default function Home({ commentsOpen, onNavigate, onCreate, onProfile, on
 }
 
 const styles = {
- page: {
+  page: {
     position: "relative",
     width: "100vw",
-    height: "100dvh", // <--- Change this
+    height: "100dvh",
     background: "#000000",
     color: "#ffffff",
     fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
@@ -1231,27 +1226,29 @@ const styles = {
     fontSize: "18px",
   },
 
- feed: {
+  feed: {
     width: "100vw",
-    height: "calc(100dvh - 68px)", // <--- Change this
+    height: "calc(100dvh - 68px)",
     overflowY: "scroll",
     scrollSnapType: "y mandatory",
     scrollbarWidth: "none",
     msOverflowStyle: "none",
     position: "relative",
     background: "#000000",
+    transition: "height 0.3s ease",
   },
   post: {
     position: "relative",
     width: "100vw",
-    height: "calc(100dvh - 68px)", // <--- Change this
+    height: "calc(100dvh - 68px)",
     scrollSnapAlign: "start",
     scrollSnapStop: "always",
     background: "#000000",
     overflow: "hidden",
+    transition: "height 0.3s ease",
   },
 
- mediaFrame: {
+  mediaFrame: {
     position: "absolute",
     inset: 0,
     width: "100%",
@@ -1264,7 +1261,7 @@ const styles = {
     display: "block",
     width: "100%",
     height: "100%",
-    objectFit: "contain", // Changed from cover to contain
+    objectFit: "contain",
     backgroundColor: "#000000",
     position: "absolute",
     inset: 0,
@@ -1388,7 +1385,6 @@ const styles = {
     cursor: "pointer",
     marginTop: "2px",
     boxShadow: "0 4px 10px rgba(0,0,0,0.4)",
-    animation: "spin 4s linear infinite",
   },
 
   soundDiscInner: {
