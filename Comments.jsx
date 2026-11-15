@@ -356,7 +356,6 @@ export default function Comments({ postId, postOwnerId, onClose }) {
     const commentUid = comment.userId || comment.user_id;
     const isCurrentAuthedUser = currentUser && commentUid === currentUser.uid;
     
-    // Restored robust profile picture lookup chain matching the working state
     const userPhoto = comment.user_photo || comment.photoURL || comment.profile_url || 
       (isCurrentAuthedUser ? currentUser.photoURL : "") || 
       localStorage.getItem(`profile_url_${commentUid}`) || 
@@ -672,7 +671,7 @@ const styles = {
     left: 0,
     right: 0,
     bottom: 0,
-    background: "rgba(0, 0, 0, 0.4)", // Lighter background like TikTok
+    background: "rgba(0, 0, 0, 0.4)",
     display: "flex",
     alignItems: "flex-end",
     justifyContent: "center",
@@ -685,8 +684,8 @@ const styles = {
     transform: "translateX(-50%)",
     width: "100%",
     maxWidth: "600px",
-    height: "50vh", // Shrinks to the bottom half so the video stays visible at the top!
-    maxHeight: "55dvh",
+    height: "75vh", // Expanded to 75vh for a proper spacious TikTok feel!
+    maxHeight: "80dvh",
     background: "#ffffff",
     color: "#000000",
     borderRadius: "20px 20px 0 0",
