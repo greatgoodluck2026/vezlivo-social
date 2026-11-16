@@ -200,7 +200,9 @@ export default function Comments({ postId, postOwnerId, onClose }) {
 
       const targetParentId = replyingTo ? replyingTo.commentId : null;
       const userDisplayName = currentUser.displayName || currentUser.email?.split("@")[0] || "WriteThisCode User";
-      const userPhotoURL = currentUser.photoURL || "";
+      
+      // FIXED: Added localStorage fallbacks so your picture never disappears when commenting
+      const userPhotoURL = currentUser.photoURL || localStorage.getItem(`profile_url_${currentUser.uid}`) || localStorage.getItem(`photo_url_${currentUser.uid}`) || "";
 
       const response = await fetch(`${API_URL}/comments`, {
         method: "POST",
@@ -684,7 +686,7 @@ const styles = {
     transform: "translateX(-50%)",
     width: "100%",
     maxWidth: "600px",
-    height: "75vh", // Taller 75vh height matching TikTok's spacious comment drawer!
+    height: "75vh",
     maxHeight: "82dvh",
     background: "#ffffff",
     color: "#000000",
