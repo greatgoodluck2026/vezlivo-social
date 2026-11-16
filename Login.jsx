@@ -722,11 +722,11 @@ function Login({ onBack }) {
             </div>
           </div>
 
-          {onboardingStep === 1 && (
+         {onboardingStep === 1 && (
             <>
               <h1>When were you born?</h1>
               <p className="login-subtitle">
-                Enter your date of birth. This helps Vezlivo apply the right age and safety settings to your account.
+                Enter your date of birth. You must meet Vezlivo's minimum age requirement to create an account. This helps us apply the right age and safety settings.
               </p>
 
               <div
