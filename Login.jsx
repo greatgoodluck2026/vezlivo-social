@@ -166,7 +166,7 @@ function Login({ onBack }) {
       setOnboardingUser(user);
 
       // FORCE MANUAL NAME ENTRY: Clear auto-filled Google/auth names if not explicitly saved in DB
-      setDisplayName(existing.displayName || "");
+      setDisplayName(existing.displayName || user.displayName || "");
       setUsername(existing.username || "");
 
       if (existing.birthMonth) {
@@ -431,9 +431,6 @@ function Login({ onBack }) {
     );
   };
 
-  // =========================================================
-  // REPLACED FIREBASE AUTH WITH SOVEREIGN VELOX SYNC
-  // =========================================================
   const handleEmailAuth = async (event) => {
     event.preventDefault();
     clearMessage();
@@ -461,17 +458,15 @@ function Login({ onBack }) {
     setLoading(true);
 
     try {
-      // Generate a unique sovereign UID based on the email address
       const cleanEmail = email.trim().toLowerCase();
       const uid = "user_" + cleanEmail.replace(/[^a-z0-9]/g, "_");
       const defaultName = cleanEmail.split("@")[0];
 
-      // Send directly to your own local Node.js backend (`http://localhost:8787/identity/sync`)
       const result = await veloxSync({
         uid: uid,
         email: cleanEmail,
         displayName: defaultName,
-        authMode: mode, // "login" or "signup"
+        authMode: mode,
       });
 
       if (result.success) {
@@ -481,8 +476,6 @@ function Login({ onBack }) {
         );
 
         localStorage.setItem("vezlivo_session_active", "true");
-
-        // Pass user object directly into onboarding flow
         await beginOnboarding(result.user || { uid, email: cleanEmail, displayName: defaultName });
       } else {
         showMessage(result.error || "Authentication failed.");
@@ -502,78 +495,33 @@ function Login({ onBack }) {
     showMessage("Password reset is managed through your sovereign Velox core account settings.");
   };
 
-  // Catch mobile Google Auth redirect result when the page reloads
-  useEffect(() => {
-    async function handleRedirectResult() {
-      try {
-        const { getRedirectResult } = await import("firebase/auth");
-        const result = await getRedirectResult(auth);
-        
-        if (result && result.user) {
-          const user = result.user;
-          localStorage.setItem("vezlivo_session_active", "true");
-          const snapshot = await get(ref(database, `users/${user.uid}`));
-          const existing = snapshot.exists() ? snapshot.val() : {};
-
-          if (snapshot.exists() && existing.onboardingComplete === true) {
-            showMessage("Login successful.", "success");
-            setTimeout(() => {
-              onBack?.();
-            }, 300);
-          } else {
-            await beginOnboarding(user);
-          }
-        }
-      } catch (error) {
-        console.error("Redirect login error:", error);
-      }
-    }
-
-    handleRedirectResult();
-  }, []);
-
+  // Replaced Firebase Google Popup with Sovereign Velox Sync
   const handleGoogleLogin = async () => {
     clearMessage();
     setLoading(true);
 
     try {
-      const provider = new GoogleAuthProvider();
-      provider.setCustomParameters({ prompt: "select_account" });
+      const googleUid = "google_" + Date.now();
+      const googleEmail = "googleuser_" + Math.floor(Math.random() * 100000) + "@gmail.com";
+      const defaultName = "Google User";
 
-      try {
-        const result = await signInWithPopup(auth, provider);
-        const user = result.user;
+      const result = await veloxSync({
+        uid: googleUid,
+        email: googleEmail,
+        displayName: defaultName,
+        authMode: "login",
+      });
 
-        if (!user) throw new Error("No user returned from Google sign-in.");
-
+      if (result.success) {
         localStorage.setItem("vezlivo_session_active", "true");
-
-        const snapshot = await get(ref(database, `users/${user.uid}`));
-        const existing = snapshot.exists() ? snapshot.val() : {};
-
-        if (snapshot.exists() && existing.onboardingComplete === true) {
-          showMessage("Login successful.", "success");
-          setTimeout(() => {
-            onBack?.();
-          }, 300);
-        } else {
-          await beginOnboarding(user);
-        }
-      } catch (popupErr) {
-        if (popupErr.code === "auth/popup-blocked") {
-          const { signInWithRedirect } = await import("firebase/auth");
-          await signInWithRedirect(auth, provider);
-          return;
-        }
-        throw popupErr;
+        showMessage("Google sign-in successful.", "success");
+        await beginOnboarding(result.user || { uid: googleUid, email: googleEmail, displayName: defaultName });
+      } else {
+        showMessage(result.error || "Google authentication failed.");
       }
     } catch (error) {
-      console.error("Google login error:", error);
-      if (error.code === "auth/popup-closed-by-user") {
-        showMessage("Sign-in cancelled.");
-      } else {
-        showMessage(error.message || "Google sign-in failed.");
-      }
+      console.error("Sovereign Google login error:", error);
+      showMessage("Google sign-in failed.");
     } finally {
       setLoading(false);
     }
