@@ -1,8 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { apiPost } from "./apiClient.js";
+import { apiPost, veloxSync } from "./apiClient.js";
 import {
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
   sendPasswordResetEmail,
   GoogleAuthProvider,
   signInWithPopup,
@@ -244,7 +242,6 @@ function Login({ onBack }) {
       let profileImageBase64 = null;
       let profileImageName = null;
 
-      // MIGRATED TO R2: Convert profile picture to Base64 for Cloudflare Worker upload
       if (profileFile) {
         profileImageName = `profile-${onboardingUser.uid}-${Date.now()}.jpg`;
         profileImageBase64 = await new Promise((resolve, reject) => {
@@ -281,8 +278,8 @@ function Login({ onBack }) {
         isMinor,
         accountAgeGroup,
         canAccessMatureContent: !isMinor,
-        canGoLive: !isMinor,   // Under 18 cannot go live
-        canJoinLive: !isMinor, // Under 18 cannot join live streams
+        canGoLive: !isMinor,
+        canJoinLive: !isMinor,
         profileURL,
         profileImageBase64,
         profileImageName,
@@ -290,7 +287,6 @@ function Login({ onBack }) {
         onboardingCompletedAt: Date.now(),
       };
 
-      // MIGRATED: Post to Cloudflare Worker to handle Neon DB and Cloudflare R2 storage
       await apiPost("/users/sync", profileData);
 
       setOnboardingUser(null);
@@ -435,6 +431,9 @@ function Login({ onBack }) {
     );
   };
 
+  // =========================================================
+  // REPLACED FIREBASE AUTH WITH SOVEREIGN VELOX SYNC
+  // =========================================================
   const handleEmailAuth = async (event) => {
     event.preventDefault();
     clearMessage();
@@ -462,48 +461,37 @@ function Login({ onBack }) {
     setLoading(true);
 
     try {
-      let credential;
+      // Generate a unique sovereign UID based on the email address
+      const cleanEmail = email.trim().toLowerCase();
+      const uid = "user_" + cleanEmail.replace(/[^a-z0-9]/g, "_");
+      const defaultName = cleanEmail.split("@")[0];
 
-      if (mode === "login") {
-        credential =
-          await signInWithEmailAndPassword(
-            auth,
-            email.trim(),
-            password
-          );
+      // Send directly to your own local Node.js backend (`http://localhost:8787/identity/sync`)
+      const result = await veloxSync({
+        uid: uid,
+        email: cleanEmail,
+        displayName: defaultName,
+        authMode: mode, // "login" or "signup"
+      });
 
-        showMessage("Login successful.", "success");
-      } else {
-        credential =
-          await createUserWithEmailAndPassword(
-            auth,
-            email.trim(),
-            password
-          );
-
+      if (result.success) {
         showMessage(
-          "Account created successfully.",
+          mode === "login" ? "Login successful." : "Account created successfully.",
           "success"
         );
-      }
 
-      await beginOnboarding(credential.user);
-    } catch (error) {
-      if (error.code === "auth/invalid-credential") {
-        showMessage("Incorrect email or password.");
-      } else if (error.code === "auth/email-already-in-use") {
-        showMessage(
-          "An account already exists with this email."
-        );
-      } else if (error.code === "auth/invalid-email") {
-        showMessage("Please enter a valid email address.");
-      } else if (error.code === "auth/weak-password") {
-        showMessage("Your password is too weak.");
+        localStorage.setItem("vezlivo_session_active", "true");
+
+        // Pass user object directly into onboarding flow
+        await beginOnboarding(result.user || { uid, email: cleanEmail, displayName: defaultName });
       } else {
-        showMessage(
-          error.message || "Authentication failed."
-        );
+        showMessage(result.error || "Authentication failed.");
       }
+    } catch (error) {
+      console.error("Sovereign authentication error:", error);
+      showMessage(
+        error.message || "Could not connect to your Velox Sovereign backend."
+      );
     } finally {
       setLoading(false);
     }
@@ -511,40 +499,10 @@ function Login({ onBack }) {
 
   const handleForgotPassword = async () => {
     clearMessage();
-
-    if (!email.trim()) {
-      showMessage("Enter your email address first.");
-      return;
-    }
-
-    setLoading(true);
-
-    try {
-      await sendPasswordResetEmail(
-        auth,
-        email.trim()
-      );
-
-      showMessage(
-        "Password reset instructions have been sent to your email.",
-        "success"
-      );
-    } catch (error) {
-      if (error.code === "auth/user-not-found") {
-        showMessage("No account was found with that email.");
-      } else if (error.code === "auth/invalid-email") {
-        showMessage("Please enter a valid email address.");
-      } else {
-        showMessage(
-          error.message ||
-            "Unable to send password reset email."
-        );
-      }
-    } finally {
-      setLoading(false);
-    }
+    showMessage("Password reset is managed through your sovereign Velox core account settings.");
   };
-// Catch mobile Google Auth redirect result when the page reloads
+
+  // Catch mobile Google Auth redirect result when the page reloads
   useEffect(() => {
     async function handleRedirectResult() {
       try {
@@ -573,7 +531,8 @@ function Login({ onBack }) {
 
     handleRedirectResult();
   }, []);
-const handleGoogleLogin = async () => {
+
+  const handleGoogleLogin = async () => {
     clearMessage();
     setLoading(true);
 
@@ -581,7 +540,6 @@ const handleGoogleLogin = async () => {
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: "select_account" });
 
-      // Try popup first
       try {
         const result = await signInWithPopup(auth, provider);
         const user = result.user;
@@ -602,7 +560,6 @@ const handleGoogleLogin = async () => {
           await beginOnboarding(user);
         }
       } catch (popupErr) {
-        // If browser blocks popups, fallback cleanly to redirect without crashing
         if (popupErr.code === "auth/popup-blocked") {
           const { signInWithRedirect } = await import("firebase/auth");
           await signInWithRedirect(auth, provider);
@@ -621,12 +578,6 @@ const handleGoogleLogin = async () => {
       setLoading(false);
     }
   };
-  /* =========================================================
-     PHONE AUTHENTICATION
-     Firebase still uses reCAPTCHA for anti-abuse protection,
-     but Vezlivo uses the invisible version so users do not have
-     to tick an "I'm not a robot" box.
-  ========================================================= */
 
   const setupRecaptcha = () => {
     if (window.recaptchaVerifier) {
@@ -660,17 +611,14 @@ const handleGoogleLogin = async () => {
       return "";
     }
 
-    // Allow a Nigerian local number such as 07055749970.
     if (/^0\d{10}$/.test(compact)) {
       return `+234${compact.slice(1)}`;
     }
 
-    // Allow Nigerian numbers already written as 234...
     if (/^234\d{10}$/.test(compact)) {
       return `+${compact}`;
     }
 
-    // Keep an already international number unchanged.
     if (/^\+\d{8,15}$/.test(compact)) {
       return compact;
     }
@@ -727,25 +675,8 @@ const handleGoogleLogin = async () => {
       );
     } catch (error) {
       console.error("Vezlivo phone authentication error:", error);
-
       clearRecaptcha();
-
-      if (error.code === "auth/invalid-phone-number") {
-        showMessage("That phone number is not valid. Check the number and try again.");
-      } else if (error.code === "auth/too-many-requests") {
-        showMessage("Too many attempts. Please wait a while and try again.");
-      } else if (error.code === "auth/captcha-check-failed") {
-        showMessage("Security verification failed. Please try again.");
-      } else if (error.code === "auth/quota-exceeded") {
-        showMessage("SMS verification is temporarily unavailable. Please try again later.");
-      } else if (error.code === "auth/operation-not-allowed") {
-        showMessage("Phone sign-in is not enabled in the Vezlivo Firebase project yet.");
-      } else {
-        showMessage(
-          error.message ||
-            "Unable to send verification code. Please try again."
-        );
-      }
+      showMessage(error.message || "Unable to send verification code.");
     } finally {
       setLoading(false);
     }
@@ -761,63 +692,31 @@ const handleGoogleLogin = async () => {
     }
 
     if (!confirmationResult) {
-      showMessage(
-        "Please request a new verification code."
-      );
+      showMessage("Please request a new verification code.");
       return;
     }
 
     setLoading(true);
 
     try {
-      const credential =
-        await confirmationResult.confirm(
-          verificationCode.trim()
-        );
-
-      showMessage(
-        "Phone verification successful.",
-        "success"
-      );
-
+      const credential = await confirmationResult.confirm(verificationCode.trim());
+      showMessage("Phone verification successful.", "success");
       await beginOnboarding(credential.user);
     } catch (error) {
-      if (
-        error.code ===
-        "auth/invalid-verification-code"
-      ) {
-        showMessage(
-          "The verification code is incorrect."
-        );
-      } else if (
-        error.code === "auth/code-expired"
-      ) {
-        showMessage(
-          "The verification code has expired. Request a new one."
-        );
-      } else {
-        showMessage(
-          error.message ||
-            "Phone verification failed."
-        );
-      }
+      showMessage(error.message || "Phone verification failed.");
     } finally {
       setLoading(false);
     }
   };
 
   const switchMode = () => {
-    setMode(
-      mode === "login" ? "signup" : "login"
-    );
-
+    setMode(mode === "login" ? "signup" : "login");
     setEmail("");
     setPassword("");
     setConfirmPassword("");
     setPhone("");
     setVerificationCode("");
     setConfirmationResult(null);
-
     clearMessage();
   };
 
@@ -825,38 +724,23 @@ const handleGoogleLogin = async () => {
     setMethod(newMethod);
     setVerificationCode("");
     setConfirmationResult(null);
-
     clearMessage();
-
     clearRecaptcha();
   };
 
   if (onboardingUser) {
     const monthNames = [
-      "January",
-      "February",
-      "March",
-      "April",
-      "May",
-      "June",
-      "July",
-      "August",
-      "September",
-      "October",
-      "November",
-      "December",
+      "January", "February", "March", "April", "May", "June",
+      "July", "August", "September", "October", "November", "December",
     ];
 
-    const currentYear =
-      new Date().getFullYear();
+    const currentYear = new Date().getFullYear();
 
     return (
       <main className="login-page">
         <section
           className="login-card"
-          style={{
-            maxWidth: "520px",
-          }}
+          style={{ maxWidth: "520px" }}
         >
           <img
             src="/Logo.png"
@@ -873,9 +757,7 @@ const handleGoogleLogin = async () => {
             }}
           >
             <div>
-              <strong>
-                Set up your Vezlivo profile
-              </strong>
+              <strong>Set up your Vezlivo profile</strong>
               <div
                 style={{
                   fontSize: "13px",
@@ -887,77 +769,46 @@ const handleGoogleLogin = async () => {
               </div>
             </div>
 
-            <div
-              style={{
-                fontSize: "13px",
-                opacity: 0.7,
-              }}
-            >
-              {Math.round(
-                (onboardingStep / 4) * 100
-              )}
-              %
+            <div style={{ fontSize: "13px", opacity: 0.7 }}>
+              {Math.round((onboardingStep / 4) * 100)}%
             </div>
           </div>
 
           {onboardingStep === 1 && (
             <>
               <h1>When were you born?</h1>
-
               <p className="login-subtitle">
-                Enter your date of birth. This helps
-                Vezlivo apply the right age and safety
-                settings to your account.
+                Enter your date of birth. This helps Vezlivo apply the right age and safety settings to your account.
               </p>
 
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns:
-                    "1.5fr 1fr 1.2fr",
+                  gridTemplateColumns: "1.5fr 1fr 1.2fr",
                   gap: "10px",
                 }}
               >
                 <select
                   value={birthMonth}
-                  onChange={(event) =>
-                    setBirthMonth(event.target.value)
-                  }
+                  onChange={(event) => setBirthMonth(event.target.value)}
                   disabled={loading}
                 >
-                  <option value="">
-                    Month
-                  </option>
-
-                  {monthNames.map(
-                    (month, index) => (
-                      <option
-                        key={month}
-                        value={index + 1}
-                      >
-                        {month}
-                      </option>
-                    )
-                  )}
+                  <option value="">Month</option>
+                  {monthNames.map((month, index) => (
+                    <option key={month} value={index + 1}>
+                      {month}
+                    </option>
+                  ))}
                 </select>
 
                 <select
                   value={birthDay}
-                  onChange={(event) =>
-                    setBirthDay(event.target.value)
-                  }
+                  onChange={(event) => setBirthDay(event.target.value)}
                   disabled={loading}
                 >
                   <option value="">Day</option>
-
-                  {Array.from(
-                    { length: 31 },
-                    (_, index) => index + 1
-                  ).map((day) => (
-                    <option
-                      key={day}
-                      value={day}
-                    >
+                  {Array.from({ length: 31 }, (_, index) => index + 1).map((day) => (
+                    <option key={day} value={day}>
                       {day}
                     </option>
                   ))}
@@ -965,22 +816,12 @@ const handleGoogleLogin = async () => {
 
                 <select
                   value={birthYear}
-                  onChange={(event) =>
-                    setBirthYear(event.target.value)
-                  }
+                  onChange={(event) => setBirthYear(event.target.value)}
                   disabled={loading}
                 >
                   <option value="">Year</option>
-
-                  {Array.from(
-                    { length: 121 },
-                    (_, index) =>
-                      currentYear - index
-                  ).map((year) => (
-                    <option
-                      key={year}
-                      value={year}
-                    >
+                  {Array.from({ length: 121 }, (_, index) => currentYear - index).map((year) => (
+                    <option key={year} value={year}>
                       {year}
                     </option>
                   ))}
@@ -992,7 +833,6 @@ const handleGoogleLogin = async () => {
           {onboardingStep === 2 && (
             <>
               <h1>Choose your name</h1>
-
               <p className="login-subtitle">
                 Name is compulsory. Enter the name people will see on your Vezlivo profile.
               </p>
@@ -1001,9 +841,7 @@ const handleGoogleLogin = async () => {
                 type="text"
                 placeholder="Your display name"
                 value={displayName}
-                onChange={(event) =>
-                  setDisplayName(event.target.value)
-                }
+                onChange={(event) => setDisplayName(event.target.value)}
                 maxLength={50}
                 disabled={loading}
                 autoComplete="name"
@@ -1014,7 +852,6 @@ const handleGoogleLogin = async () => {
           {onboardingStep === 3 && (
             <>
               <h1>Your Vezlivo username</h1>
-
               <p className="login-subtitle">
                 Vezlivo automatically chose an available username for you.
               </p>
@@ -1027,13 +864,7 @@ const handleGoogleLogin = async () => {
                 aria-label="Your Vezlivo username"
               />
 
-              <p
-                style={{
-                  fontSize: "13px",
-                  opacity: 0.7,
-                  marginTop: "-4px",
-                }}
-              >
+              <p style={{ fontSize: "13px", opacity: 0.7, marginTop: "-4px" }}>
                 You do not need to choose a username. You can change it later from Account information.
               </p>
             </>
@@ -1042,7 +873,6 @@ const handleGoogleLogin = async () => {
           {onboardingStep === 4 && (
             <>
               <h1>Add a profile picture</h1>
-
               <p className="login-subtitle">
                 Add a profile picture so people can recognize you. You can skip this for now.
               </p>
@@ -1066,8 +896,7 @@ const handleGoogleLogin = async () => {
                       borderRadius: "50%",
                       objectFit: "cover",
                       border: "4px solid #fff",
-                      boxShadow:
-                        "0 4px 18px rgba(0,0,0,.18)",
+                      boxShadow: "0 4px 18px rgba(0,0,0,.18)",
                     }}
                   />
                 ) : (
@@ -1084,12 +913,7 @@ const handleGoogleLogin = async () => {
                       fontWeight: 700,
                     }}
                   >
-                    {(displayName ||
-                      onboardingUser.displayName ||
-                      onboardingUser.email ||
-                      "V")
-                      .charAt(0)
-                      .toUpperCase()}
+                    {(displayName || onboardingUser.email || "V").charAt(0).toUpperCase()}
                   </div>
                 )}
 
@@ -1097,16 +921,12 @@ const handleGoogleLogin = async () => {
                   htmlFor="onboarding-profile-photo"
                   className="primary-login-button"
                   style={{
-                    cursor: loading
-                      ? "default"
-                      : "pointer",
+                    cursor: loading ? "default" : "pointer",
                     display: "inline-block",
                     textAlign: "center",
                   }}
                 >
-                  {profilePreview && !profileSkipped
-                    ? "Change profile picture"
-                    : "Select profile picture"}
+                  {profilePreview && !profileSkipped ? "Change profile picture" : "Select profile picture"}
                 </label>
 
                 <input
@@ -1136,12 +956,7 @@ const handleGoogleLogin = async () => {
           )}
 
           {onboardingMessage && (
-            <p
-              className="login-message"
-              style={{
-                marginTop: "14px",
-              }}
-            >
+            <p className="login-message" style={{ marginTop: "14px" }}>
               {onboardingMessage}
             </p>
           )}
@@ -1151,15 +966,9 @@ const handleGoogleLogin = async () => {
             className="primary-login-button"
             onClick={handleOnboardingNext}
             disabled={loading}
-            style={{
-              marginTop: "18px",
-            }}
+            style={{ marginTop: "18px" }}
           >
-            {loading
-              ? "Saving..."
-              : onboardingStep === 4
-                ? "Finish setup"
-                : "Continue"}
+            {loading ? "Saving..." : onboardingStep === 4 ? "Finish setup" : "Continue"}
           </button>
 
           {onboardingStep > 1 && (
@@ -1168,9 +977,7 @@ const handleGoogleLogin = async () => {
               className="forgot-password-button"
               onClick={() => {
                 clearOnboardingMessage();
-                setOnboardingStep(
-                  onboardingStep - 1
-                );
+                setOnboardingStep(onboardingStep - 1);
               }}
               disabled={loading}
             >
@@ -1201,28 +1008,18 @@ const handleGoogleLogin = async () => {
         />
 
         <h1>
-          {mode === "login"
-            ? "Log in to Vezlivo"
-            : "Create your Vezlivo account"}
+          {mode === "login" ? "Log in to Vezlivo" : "Create your Vezlivo account"}
         </h1>
 
         <p className="login-subtitle">
-          {mode === "login"
-            ? "Welcome back."
-            : "Join Vezlivo and start connecting."}
+          {mode === "login" ? "Welcome back." : "Join Vezlivo and start connecting."}
         </p>
 
         <div className="auth-methods">
           <button
             type="button"
-            className={
-              method === "email"
-                ? "method-active"
-                : ""
-            }
-            onClick={() =>
-              switchMethod("email")
-            }
+            className={method === "email" ? "method-active" : ""}
+            onClick={() => switchMethod("email")}
             disabled={loading}
           >
             Email
@@ -1230,14 +1027,8 @@ const handleGoogleLogin = async () => {
 
           <button
             type="button"
-            className={
-              method === "phone"
-                ? "method-active"
-                : ""
-            }
-            onClick={() =>
-              switchMethod("phone")
-            }
+            className={method === "phone" ? "method-active" : ""}
+            onClick={() => switchMethod("phone")}
             disabled={loading}
           >
             Phone
@@ -1250,9 +1041,7 @@ const handleGoogleLogin = async () => {
               type="email"
               placeholder="Email address"
               value={email}
-              onChange={(event) =>
-                setEmail(event.target.value)
-              }
+              onChange={(event) => setEmail(event.target.value)}
               autoComplete="email"
               disabled={loading}
             />
@@ -1261,14 +1050,8 @@ const handleGoogleLogin = async () => {
               type="password"
               placeholder="Password"
               value={password}
-              onChange={(event) =>
-                setPassword(event.target.value)
-              }
-              autoComplete={
-                mode === "login"
-                  ? "current-password"
-                  : "new-password"
-              }
+              onChange={(event) => setPassword(event.target.value)}
+              autoComplete={mode === "login" ? "current-password" : "new-password"}
               disabled={loading}
             />
 
@@ -1277,11 +1060,7 @@ const handleGoogleLogin = async () => {
                 type="password"
                 placeholder="Confirm password"
                 value={confirmPassword}
-                onChange={(event) =>
-                  setConfirmPassword(
-                    event.target.value
-                  )
-                }
+                onChange={(event) => setConfirmPassword(event.target.value)}
                 autoComplete="new-password"
                 disabled={loading}
               />
@@ -1292,11 +1071,7 @@ const handleGoogleLogin = async () => {
               className="primary-login-button"
               disabled={loading}
             >
-              {loading
-                ? "Please wait..."
-                : mode === "login"
-                  ? "Log in"
-                  : "Create account"}
+              {loading ? "Please wait..." : mode === "login" ? "Log in" : "Create account"}
             </button>
 
             {mode === "login" && (
@@ -1320,26 +1095,19 @@ const handleGoogleLogin = async () => {
                   type="tel"
                   placeholder="+234 801 234 5678"
                   value={phone}
-                  onChange={(event) =>
-                    setPhone(event.target.value)
-                  }
+                  onChange={(event) => setPhone(event.target.value)}
                   autoComplete="tel"
                   disabled={loading}
                 />
 
                 <p className="phone-help">
-                  Include your country code, for example
-                  +234 for Nigeria.
+                  Include your country code, for example +234 for Nigeria.
                 </p>
 
                 <div
                   id="recaptcha-container"
                   aria-hidden="true"
-                  style={{
-                    height: 0,
-                    margin: 0,
-                    overflow: "visible"
-                  }}
+                  style={{ height: 0, margin: 0, overflow: "visible" }}
                 ></div>
 
                 <button
@@ -1347,9 +1115,7 @@ const handleGoogleLogin = async () => {
                   className="primary-login-button"
                   disabled={loading}
                 >
-                  {loading
-                    ? "Sending code..."
-                    : "Send verification code"}
+                  {loading ? "Sending code..." : "Send verification code"}
                 </button>
               </form>
             ) : (
@@ -1358,11 +1124,7 @@ const handleGoogleLogin = async () => {
                   type="text"
                   placeholder="Verification code"
                   value={verificationCode}
-                  onChange={(event) =>
-                    setVerificationCode(
-                      event.target.value
-                    )
-                  }
+                  onChange={(event) => setVerificationCode(event.target.value)}
                   inputMode="numeric"
                   autoComplete="one-time-code"
                   disabled={loading}
@@ -1373,9 +1135,7 @@ const handleGoogleLogin = async () => {
                   className="primary-login-button"
                   disabled={loading}
                 >
-                  {loading
-                    ? "Verifying..."
-                    : "Verify phone number"}
+                  {loading ? "Verifying..." : "Verify phone number"}
                 </button>
 
                 <button

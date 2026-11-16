@@ -1,26 +1,14 @@
 // File: src/apiClient.js
 
-import { auth } from "./firebase.js";
-
+// Pointing directly to your 100% sovereign local backend
 const API_BASE_URL =
-  import.meta.env.VITE_API_URL || "https://vezlivo-api.vezlivo-api.workers.dev";
+  import.meta.env.VITE_API_URL || "http://localhost:8787";
 
 async function apiRequest(path, options = {}) {
-  const user = auth.currentUser;
-  let token = null;
-
-  if (user) {
-    token = await user.getIdToken();
-  }
-
   const headers = {
     "Content-Type": "application/json",
     ...(options.headers || {}),
   };
-
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-  }
 
   const response = await fetch(
     `${API_BASE_URL}${path}`,
@@ -74,14 +62,13 @@ export async function apiDelete(path) {
   });
 }
 
-export async function apiUpload(path, formData) {
-  const user = auth.currentUser;
-  const headers = {};
+// Custom direct Velox sync function matching your SDK snippet
+export async function veloxSync(userData) {
+  return apiPost("/identity/sync", userData);
+}
 
-  if (user) {
-    headers.Authorization = await user.getIdToken()
-      .then((token) => `Bearer ${token}`);
-  }
+export async function apiUpload(path, formData) {
+  const headers = {};
 
   const response = await fetch(
     `${API_BASE_URL}${path}`,

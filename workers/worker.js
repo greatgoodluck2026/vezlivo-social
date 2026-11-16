@@ -194,10 +194,14 @@ export default {
           try {
             await sql`
               INSERT INTO users (uid, display_name, profile_url, created_at)
-              VALUES (${userId}, ${effectiveName}, ${effectivePhoto}, NOW())
+              VALUES (${userId}, NULLIF(${effectiveName}, 'User'), NULLIF(${effectivePhoto}, ''), NOW())
               ON CONFLICT (uid) DO UPDATE SET
                 display_name = COALESCE(NULLIF(EXCLUDED.display_name, 'User'), users.display_name),
-                profile_url = COALESCE(NULLIF(EXCLUDED.profile_url, ''), users.profile_url)
+                profile_url = CASE 
+                  WHEN EXCLUDED.profile_url IS NOT NULL AND EXCLUDED.profile_url != '' 
+                  THEN EXCLUDED.profile_url 
+                  ELSE users.profile_url 
+                END
             `;
           } catch (e) {}
 
