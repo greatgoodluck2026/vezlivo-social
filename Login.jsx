@@ -122,26 +122,30 @@ function Login({ onBack }) {
     const safeBase = base || "vezlivo";
     const usersPublicRef = ref(database, "usersPublic");
 
-    for (let attempt = 0; attempt < 25; attempt += 1) {
-      const suffix = attempt === 0
-        ? ""
-        : String(Math.floor(100 + Math.random() * 900));
-      const candidate = `${safeBase}${suffix}`.slice(0, 30);
+    try {
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        const suffix = attempt === 0
+          ? ""
+          : String(Math.floor(100 + Math.random() * 900));
+        const candidate = `${safeBase}${suffix}`.slice(0, 30);
 
-      const existing = await get(
-        query(
-          usersPublicRef,
-          orderByChild("username"),
-          equalTo(candidate)
-        )
-      );
+        const existing = await get(
+          query(
+            usersPublicRef,
+            orderByChild("username"),
+            equalTo(candidate)
+          )
+        );
 
-      if (!existing.exists()) {
-        return candidate;
+        if (!existing.exists()) {
+          return candidate;
+        }
       }
+    } catch (err) {
+      console.warn("Database query check skipped, utilizing sovereign fallback username:", err);
     }
 
-    return `vezlivo${Date.now().toString().slice(-8)}`;
+    return `${safeBase}${Math.floor(1000 + Math.random() * 9000)}`;
   };
 
   const beginOnboarding = async (user) => {
@@ -495,7 +499,6 @@ function Login({ onBack }) {
     showMessage("Password reset is managed through your sovereign Velox core account settings.");
   };
 
-  // Replaced Firebase Google Popup with Sovereign Velox Sync
   const handleGoogleLogin = async () => {
     clearMessage();
     setLoading(true);
