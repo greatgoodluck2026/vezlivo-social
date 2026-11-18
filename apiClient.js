@@ -1,8 +1,12 @@
 // File: src/apiClient.js
 
-// Pointing directly to your 100% sovereign local backend
+// Replace "192.168.43.150" below with your HP EliteBook's actual IPv4 address from ipconfig
+const LAPTOP_LOCAL_IP = "192.168.43.150";
+
 const API_BASE_URL =
-  import.meta.env.VITE_API_URL || "http://localhost:8787";
+  window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+    ? "http://localhost:3000"
+    : `http://${LAPTOP_LOCAL_IP}:3000`;
 
 async function apiRequest(path, options = {}) {
   const headers = {
