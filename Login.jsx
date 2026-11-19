@@ -75,6 +75,13 @@ function Login({ onBack }) {
     return `${safeBase}${suffix}`.slice(0, 30);
   };
 
+  const completeSessionAndExit = (user) => {
+    localStorage.setItem("vezlivo_session_active", "true");
+    localStorage.setItem("vezlivo_current_user", JSON.stringify(user));
+    setOnboardingUser(null);
+    onBack?.();
+  };
+
   const beginOnboarding = async (user) => {
     if (!user) return;
     setOnboardingUser(user);
@@ -103,7 +110,7 @@ function Login({ onBack }) {
 
     try {
       let profileImageBase64 = null;
-      if (profileFile) {
+      if (profileFile && !profileSkipped) {
         profileImageBase64 = await new Promise((resolve, reject) => {
           const reader = new FileReader();
           reader.readAsDataURL(profileFile);
@@ -127,10 +134,9 @@ function Login({ onBack }) {
         onboardingCompletedAt: Date.now(),
       };
 
-      await apiPost("/identity/sync", profileData);
-
-      setOnboardingUser(null);
-      onBack?.();
+      const syncResponse = await apiPost("/identity/sync", profileData);
+      const updatedUser = syncResponse.user || { ...onboardingUser, ...profileData };
+      completeSessionAndExit(updatedUser);
     } catch (error) {
       console.error("Unable to save sovereign onboarding:", error);
       showOnboardingMessage(error.message || "Unable to save your profile setup. Please try again.");
@@ -210,18 +216,25 @@ function Login({ onBack }) {
       const uid = "user_" + cleanEmail.replace(/[^a-z0-9]/g, "_");
       const defaultName = cleanEmail.split("@")[0];
 
-      // Route directly through your sovereign SDK
       const result = await veloxSync({
         uid,
         email: cleanEmail,
+        password,
         displayName: defaultName,
         authMode: mode,
       });
 
       if (result.success) {
-        showMessage(mode === "login" ? "Login successful." : "Account created successfully.", "success");
+        const activeUser = result.user || { uid, email: cleanEmail, displayName: defaultName };
         localStorage.setItem("vezlivo_session_active", "true");
-        await beginOnboarding(result.user || { uid, email: cleanEmail, displayName: defaultName });
+        localStorage.setItem("vezlivo_current_user", JSON.stringify(activeUser));
+        showMessage(mode === "login" ? "Login successful." : "Account created successfully.", "success");
+
+        if (activeUser.onboardingComplete) {
+          onBack?.();
+        } else {
+          await beginOnboarding(activeUser);
+        }
       } else {
         showMessage(result.error || "Authentication failed.");
       }
@@ -242,24 +255,30 @@ function Login({ onBack }) {
       const googleEmail = `googleuser_${Math.floor(10000 + Math.random() * 90000)}@gmail.com`;
       const defaultName = "Sovereign Google User";
 
-      // Route Google authentication straight through your local SDK ledger
       const result = await veloxSync({
         uid: googleUid,
         email: googleEmail,
         displayName: defaultName,
-        authMode: "login",
+        authMode: "signup",
       });
 
       if (result.success) {
+        const activeUser = result.user || { uid: googleUid, email: googleEmail, displayName: defaultName };
         localStorage.setItem("vezlivo_session_active", "true");
+        localStorage.setItem("vezlivo_current_user", JSON.stringify(activeUser));
         showMessage("Google sign-in successful.", "success");
-        await beginOnboarding(result.user || { uid: googleUid, email: googleEmail, displayName: defaultName });
+
+        if (activeUser.onboardingComplete) {
+          onBack?.();
+        } else {
+          await beginOnboarding(activeUser);
+        }
       } else {
         showMessage(result.error || "Google authentication failed.");
       }
     } catch (error) {
       console.error("Sovereign Google login error:", error);
-      showMessage("Google sign-in failed. Make sure your laptop server is running.");
+      showMessage(error.message || "Google sign-in failed. Make sure your laptop server is running.");
     } finally {
       setLoading(false);
     }
@@ -277,7 +296,7 @@ function Login({ onBack }) {
       setLoading(false);
       setConfirmationPending(true);
       showMessage("Verification code sent successfully.", "success");
-    }, 1000);
+    }, 600);
   };
 
   const handleVerifyPhoneCode = async (event) => {
@@ -294,14 +313,19 @@ function Login({ onBack }) {
         uid: phoneUid,
         email: `${phoneUid}@vezlivo.local`,
         displayName: "Phone User",
-        authMode: "login",
+        authMode: "signup",
       });
       if (result.success) {
+        const activeUser = result.user || { uid: phoneUid, email: `${phoneUid}@vezlivo.local`, displayName: "Phone User" };
+        localStorage.setItem("vezlivo_session_active", "true");
+        localStorage.setItem("vezlivo_current_user", JSON.stringify(activeUser));
         showMessage("Phone verification successful.", "success");
-        await beginOnboarding(result.user || { uid: phoneUid, email: `${phoneUid}@vezlivo.local`, displayName: "Phone User" });
+        await beginOnboarding(activeUser);
+      } else {
+        showMessage(result.error || "Phone verification failed.");
       }
     } catch (err) {
-      showMessage("Phone verification failed.");
+      showMessage(err.message || "Phone verification failed.");
     } finally {
       setLoading(false);
     }
@@ -406,7 +430,17 @@ function Login({ onBack }) {
                   Select profile picture
                 </label>
                 <input id="photo-upload" type="file" accept="image/*" onChange={handleProfileFileChange} hidden />
-                <button type="button" className="forgot-password-button" onClick={() => setProfileSkipped(true)}>Skip for now</button>
+                <button
+                  type="button"
+                  className="forgot-password-button"
+                  onClick={() => {
+                    setProfileSkipped(true);
+                    setProfileFile(null);
+                    setProfilePreview("");
+                  }}
+                >
+                  Skip for now
+                </button>
               </div>
             </>
           )}
