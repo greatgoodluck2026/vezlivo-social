@@ -8,6 +8,7 @@ function Login({ onBack }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
 
   const [phone, setPhone] = useState("");
   const [verificationCode, setVerificationCode] = useState("");
@@ -336,6 +337,7 @@ function Login({ onBack }) {
     setEmail("");
     setPassword("");
     setConfirmPassword("");
+    setShowPassword(false);
     clearMessage();
   };
 
@@ -470,11 +472,54 @@ function Login({ onBack }) {
 
         {method === "email" && (
           <form onSubmit={handleEmailAuth}>
-            <input type="email" placeholder="Email address" value={email} onChange={(e) => setEmail(e.target.value)} disabled={loading} />
-            <input type="password" placeholder="Password" value={password} onChange={(e) => setPassword(e.target.value)} disabled={loading} />
+            <input
+              type="email"
+              placeholder="Email address"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              disabled={loading}
+            />
+
+            <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+              <input
+                type={showPassword ? "text" : "password"}
+                placeholder="Password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                disabled={loading}
+                style={{ width: "100%", paddingRight: "64px" }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((prev) => !prev)}
+                disabled={loading}
+                aria-label={showPassword ? "Hide password" : "Show password"}
+                style={{
+                  position: "absolute",
+                  right: "10px",
+                  background: "transparent",
+                  border: "none",
+                  color: "#94a3b8",
+                  fontSize: "13px",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  padding: "4px 6px",
+                }}
+              >
+                {showPassword ? "Hide" : "Show"}
+              </button>
+            </div>
+
             {mode === "signup" && (
-              <input type="password" placeholder="Confirm password" value={confirmPassword} onChange={(e) => setConfirmPassword(e.target.value)} disabled={loading} />
+              <input
+                type={showPassword ? "text" : "password"}
+                placeholder="Confirm password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                disabled={loading}
+              />
             )}
+
             <button type="submit" className="primary-login-button" disabled={loading}>
               {loading ? "Please wait..." : mode === "login" ? "Log in" : "Create account"}
             </button>
