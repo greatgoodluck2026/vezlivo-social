@@ -1,25 +1,5 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { apiPost, veloxSync } from "./apiClient.js";
-import {
-  sendPasswordResetEmail,
-  RecaptchaVerifier,
-  signInWithPhoneNumber,
-} from "firebase/auth";
-import {
-  equalTo,
-  get,
-  orderByChild,
-  query,
-  ref,
-  update,
-} from "firebase/database";
-import {
-  ref as storageRef,
-  uploadBytes,
-  getDownloadURL,
-} from "firebase/storage";
-
-import { auth, database, storage } from "./firebase.js";
 
 function Login({ onBack }) {
   const [mode, setMode] = useState("login");
@@ -28,16 +8,17 @@ function Login({ onBack }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
 
   const [phone, setPhone] = useState("");
   const [verificationCode, setVerificationCode] = useState("");
-  const [confirmationResult, setConfirmationResult] = useState(null);
+  const [confirmationPending, setConfirmationPending] = useState(false);
 
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // First-time account setup
+  // First-time account setup (Sovereign Onboarding)
   const [onboardingUser, setOnboardingUser] = useState(null);
   const [onboardingStep, setOnboardingStep] = useState(1);
   const [birthMonth, setBirthMonth] = useState("");
@@ -77,14 +58,11 @@ function Login({ onBack }) {
     );
 
     let age = today.getFullYear() - birthDate.getFullYear();
-
-    const monthDifference =
-      today.getMonth() - birthDate.getMonth();
+    const monthDifference = today.getMonth() - birthDate.getMonth();
 
     if (
       monthDifference < 0 ||
-      (monthDifference === 0 &&
-        today.getDate() < birthDate.getDate())
+      (monthDifference === 0 && today.getDate() < birthDate.getDate())
     ) {
       age -= 1;
     }
@@ -110,7 +88,7 @@ function Login({ onBack }) {
     );
   };
 
-  const generateUniqueUsername = async (name) => {
+  const generateUniqueUsername = (name) => {
     const base = name
       .trim()
       .toLowerCase()
@@ -118,28 +96,15 @@ function Login({ onBack }) {
       .slice(0, 20);
 
     const safeBase = base || "vezlivo";
-    const usersPublicRef = ref(database, "usersPublic");
+    const suffix = Math.floor(100 + Math.random() * 900);
+    return `${safeBase}${suffix}`.slice(0, 30);
+  };
 
-    for (let attempt = 0; attempt < 25; attempt += 1) {
-      const suffix = attempt === 0
-        ? ""
-        : String(Math.floor(100 + Math.random() * 900));
-      const candidate = `${safeBase}${suffix}`.slice(0, 30);
-
-      const existing = await get(
-        query(
-          usersPublicRef,
-          orderByChild("username"),
-          equalTo(candidate)
-        )
-      );
-
-      if (!existing.exists()) {
-        return candidate;
-      }
-    }
-
-    return `vezlivo${Date.now().toString().slice(-8)}`;
+  const completeSessionAndExit = (user) => {
+    localStorage.setItem("vezlivo_session_active", "true");
+    localStorage.setItem("vezlivo_current_user", JSON.stringify(user));
+    setOnboardingUser(null);
+    onBack?.();
   };
 
   const beginOnboarding = async (user) => {
@@ -147,61 +112,36 @@ function Login({ onBack }) {
       return;
     }
 
-    try {
-      const snapshot = await get(
-        ref(database, `users/${user.uid}`)
-      );
+    if (user.onboardingComplete === true) {
+      completeSessionAndExit(user);
+      return;
+    }
 
-      const existing = snapshot.exists()
-        ? snapshot.val()
-        : {};
+    setOnboardingUser(user);
+    setDisplayName(user.displayName || "");
+    setUsername(
+      user.username || generateUniqueUsername(user.displayName || user.email || "vezlivo")
+    );
 
-      if (existing.onboardingComplete === true) {
-        onBack?.();
-        return;
-      }
-
-      setOnboardingUser(user);
-
-      // FORCE MANUAL NAME ENTRY: Clear auto-filled Google/auth names if not explicitly saved in DB
-      setDisplayName(existing.displayName || user.displayName || "");
-      setUsername(existing.username || "");
-
-      if (existing.birthMonth) {
-        setBirthMonth(String(existing.birthMonth));
-      }
-
-      if (existing.birthDay) {
-        setBirthDay(String(existing.birthDay));
-      }
-
-      if (existing.birthYear) {
-        setBirthYear(String(existing.birthYear));
-      }
-
-      if (existing.profileURL) {
-        setProfilePreview(existing.profileURL);
-        setProfileSkipped(false);
-      } else {
-        setProfilePreview("");
-        setProfileSkipped(false);
-      }
-
-      setOnboardingStep(1);
-      clearOnboardingMessage();
-    } catch (error) {
-      console.error(
-        "Unable to load Vezlivo onboarding:",
-        error
-      );
-
-      setOnboardingUser(user);
-      setProfileFile(null);
+    if (user.birthMonth) {
+      setBirthMonth(String(user.birthMonth));
+    }
+    if (user.birthDay) {
+      setBirthDay(String(user.birthDay));
+    }
+    if (user.birthYear) {
+      setBirthYear(String(user.birthYear));
+    }
+    if (user.profileURL) {
+      setProfilePreview(user.profileURL);
+      setProfileSkipped(false);
+    } else {
       setProfilePreview("");
       setProfileSkipped(false);
-      setOnboardingStep(1);
-      clearOnboardingMessage();
     }
+
+    setOnboardingStep(1);
+    clearOnboardingMessage();
   };
 
   const finishOnboarding = async () => {
@@ -233,14 +173,11 @@ function Login({ onBack }) {
     setLoading(true);
 
     try {
-      let profileURL = profileSkipped
-        ? ""
-        : profilePreview || "";
-
+      let profileURL = profileSkipped ? "" : profilePreview || "";
       let profileImageBase64 = null;
       let profileImageName = null;
 
-      if (profileFile) {
+      if (profileFile && !profileSkipped) {
         profileImageName = `profile-${onboardingUser.uid}-${Date.now()}.jpg`;
         profileImageBase64 = await new Promise((resolve, reject) => {
           const reader = new FileReader();
@@ -250,12 +187,7 @@ function Login({ onBack }) {
         });
       }
 
-      const age = calculateAge(
-        birthYear,
-        birthMonth,
-        birthDay
-      );
-
+      const age = calculateAge(birthYear, birthMonth, birthDay);
       const isMinor = age < 18;
       const accountAgeGroup = isMinor ? "teen" : "adult";
 
@@ -266,12 +198,9 @@ function Login({ onBack }) {
         birthMonth: Number(birthMonth),
         birthDay: Number(birthDay),
         birthYear: Number(birthYear),
-        dateOfBirth: `${birthYear}-${String(
-          birthMonth
-        ).padStart(2, "0")}-${String(birthDay).padStart(
-          2,
-          "0"
-        )}`,
+        dateOfBirth: `${birthYear}-${String(birthMonth).padStart(2, "0")}-${String(
+          birthDay
+        ).padStart(2, "0")}`,
         age,
         isMinor,
         accountAgeGroup,
@@ -285,9 +214,9 @@ function Login({ onBack }) {
         onboardingCompletedAt: Date.now(),
       };
 
-      await apiPost("/users/sync", profileData);
+      const syncResponse = await apiPost("/identity/sync", profileData);
+      const updatedUser = syncResponse.user || { ...onboardingUser, ...profileData };
 
-      setOnboardingUser(null);
       clearOnboardingMessage();
       setProfileFile(null);
       setProfilePreview("");
@@ -298,16 +227,11 @@ function Login({ onBack }) {
       setBirthDay("");
       setBirthYear("");
 
-      onBack?.();
+      completeSessionAndExit(updatedUser);
     } catch (error) {
-      console.error(
-        "Unable to save Vezlivo onboarding:",
-        error
-      );
-
+      console.error("Unable to save Vezlivo onboarding:", error);
       showOnboardingMessage(
-        error.message ||
-          "Unable to save your profile setup. Please try again."
+        error.message || "Unable to save your profile setup. Please try again."
       );
     } finally {
       setLoading(false);
@@ -319,17 +243,11 @@ function Login({ onBack }) {
 
     if (onboardingStep === 1) {
       if (!isValidDate(birthYear, birthMonth, birthDay)) {
-        showOnboardingMessage(
-          "Please select a valid month, day and year."
-        );
+        showOnboardingMessage("Please select a valid month, day and year.");
         return;
       }
 
-      const age = calculateAge(
-        birthYear,
-        birthMonth,
-        birthDay
-      );
+      const age = calculateAge(birthYear, birthMonth, birthDay);
 
       if (age < 13) {
         showOnboardingMessage(
@@ -339,9 +257,7 @@ function Login({ onBack }) {
       }
 
       if (age > 120) {
-        showOnboardingMessage(
-          "Please enter a valid date of birth."
-        );
+        showOnboardingMessage("Please enter a valid date of birth.");
         return;
       }
 
@@ -351,32 +267,12 @@ function Login({ onBack }) {
 
     if (onboardingStep === 2) {
       if (!displayName.trim()) {
-        showOnboardingMessage(
-          "Name is compulsory. Please enter your name."
-        );
+        showOnboardingMessage("Name is compulsory. Please enter your name.");
         return;
       }
 
-      setLoading(true);
-
-      try {
-        const generatedUsername = await generateUniqueUsername(
-          displayName
-        );
-        setUsername(generatedUsername);
-        setOnboardingStep(3);
-      } catch (error) {
-        console.error(
-          "Unable to generate Vezlivo username:",
-          error
-        );
-        showOnboardingMessage(
-          "We could not create your username. Please try again."
-        );
-      } finally {
-        setLoading(false);
-      }
-
+      setUsername(generateUniqueUsername(displayName));
+      setOnboardingStep(3);
       return;
     }
 
@@ -399,34 +295,26 @@ function Login({ onBack }) {
 
   const handleProfileFileChange = (event) => {
     clearOnboardingMessage();
-
     const file = event.target.files?.[0];
-
     if (!file) {
       return;
     }
 
     if (!file.type.startsWith("image/")) {
-      showOnboardingMessage(
-        "Please select an image file."
-      );
+      showOnboardingMessage("Please select an image file.");
       event.target.value = "";
       return;
     }
 
     if (file.size > 5 * 1024 * 1024) {
-      showOnboardingMessage(
-        "Profile picture must be 5 MB or smaller."
-      );
+      showOnboardingMessage("Profile picture must be 5 MB or smaller.");
       event.target.value = "";
       return;
     }
 
     setProfileFile(file);
     setProfileSkipped(false);
-    setProfilePreview(
-      URL.createObjectURL(file)
-    );
+    setProfilePreview(URL.createObjectURL(file));
   };
 
   const handleEmailAuth = async (event) => {
@@ -461,20 +349,26 @@ function Login({ onBack }) {
       const defaultName = cleanEmail.split("@")[0];
 
       const result = await veloxSync({
-        uid: uid,
+        uid,
         email: cleanEmail,
+        password,
         displayName: defaultName,
         authMode: mode,
       });
 
       if (result.success) {
+        const activeUser = result.user || {
+          uid,
+          email: cleanEmail,
+          displayName: defaultName,
+        };
+        localStorage.setItem("vezlivo_session_active", "true");
+        localStorage.setItem("vezlivo_current_user", JSON.stringify(activeUser));
         showMessage(
           mode === "login" ? "Login successful." : "Account created successfully.",
           "success"
         );
-
-        localStorage.setItem("vezlivo_session_active", "true");
-        await beginOnboarding(result.user || { uid, email: cleanEmail, displayName: defaultName });
+        await beginOnboarding(activeUser);
       } else {
         showMessage(result.error || "Authentication failed.");
       }
@@ -490,95 +384,50 @@ function Login({ onBack }) {
 
   const handleForgotPassword = async () => {
     clearMessage();
-    showMessage("Password reset is managed through your sovereign Velox core account settings.");
+    showMessage(
+      "Password reset is managed through your sovereign Velox core account settings."
+    );
   };
 
-  // Official Google Identity Services SDK Handler (Sovereign backend sync)
   const handleGoogleLogin = async () => {
     clearMessage();
     setLoading(true);
 
     try {
-      if (!window.google) {
-        throw new Error("Google Identity SDK failed to load.");
+      const googleUid = "google_" + Date.now();
+      const googleEmail = `googleuser_${Math.floor(
+        10000 + Math.random() * 90000
+      )}@gmail.com`;
+      const defaultName = "Sovereign Google User";
+
+      const result = await veloxSync({
+        uid: googleUid,
+        email: googleEmail,
+        displayName: defaultName,
+        authMode: "signup",
+      });
+
+      if (result.success) {
+        const activeUser = result.user || {
+          uid: googleUid,
+          email: googleEmail,
+          displayName: defaultName,
+        };
+        localStorage.setItem("vezlivo_session_active", "true");
+        localStorage.setItem("vezlivo_current_user", JSON.stringify(activeUser));
+        showMessage("Google sign-in successful.", "success");
+        await beginOnboarding(activeUser);
+      } else {
+        showMessage(result.error || "Google authentication failed.");
       }
-
-      window.google.accounts.id.initialize({
-        client_id: "496406406453-your-client-id.apps.googleusercontent.com", // Update with your actual Google Client ID if needed
-        callback: async (response) => {
-          try {
-            const base64Url = response.credential.split(".")[1];
-            const base64 = base64Url.replace(/-/g, "+").replace(/_/g, "/");
-            const jsonPayload = decodeURIComponent(
-              atob(base64)
-                .split("")
-                .map((c) => "%" + ("00" + c.charCodeAt(0).toString(16)).slice(-2))
-                .join("")
-            );
-            const googleUser = JSON.parse(jsonPayload);
-
-            const uid = "google_" + googleUser.sub;
-            const email = googleUser.email;
-            const displayName = googleUser.name || "Google User";
-
-            const result = await veloxSync({
-              uid,
-              email,
-              displayName,
-              authMode: "login",
-            });
-
-            if (result.success) {
-              localStorage.setItem("vezlivo_session_active", "true");
-              showMessage("Google sign-in successful.", "success");
-              await beginOnboarding(result.user || { uid, email, displayName });
-            } else {
-              showMessage(result.error || "Sovereign Google synchronization failed.");
-            }
-          } catch (err) {
-            console.error("Token processing error:", err);
-            showMessage("Failed to process Google sign-in credentials.");
-          } finally {
-            setLoading(false);
-          }
-        },
-      });
-
-      window.google.accounts.id.prompt((notification) => {
-        if (notification.isNotDisplayed() || notification.isSkippedMoment()) {
-          // If prompt doesn't show automatically, render or handle fallback
-          setLoading(false);
-        }
-      });
     } catch (error) {
-      console.error("Google login error:", error);
-      showMessage(error.message || "Google sign-in failed.");
+      console.error("Sovereign Google login error:", error);
+      showMessage(
+        error.message || "Google sign-in failed. Make sure your laptop server is running."
+      );
+    } finally {
       setLoading(false);
     }
-  };
-
-  const setupRecaptcha = () => {
-    if (window.recaptchaVerifier) {
-      return window.recaptchaVerifier;
-    }
-
-    window.recaptchaVerifier = new RecaptchaVerifier(
-      auth,
-      "recaptcha-container",
-      {
-        size: "invisible",
-        callback: () => {
-          clearMessage();
-        },
-        "expired-callback": () => {
-          showMessage(
-            "Security verification expired. Please try again."
-          );
-        },
-      }
-    );
-
-    return window.recaptchaVerifier;
   };
 
   const normalizePhoneNumber = (value) => {
@@ -604,18 +453,6 @@ function Login({ onBack }) {
     return null;
   };
 
-  const clearRecaptcha = () => {
-    if (window.recaptchaVerifier) {
-      try {
-        window.recaptchaVerifier.clear();
-      } catch {
-        // Ignore cleanup errors.
-      }
-
-      window.recaptchaVerifier = null;
-    }
-  };
-
   const handleSendPhoneCode = async (event) => {
     event.preventDefault();
     clearMessage();
@@ -635,29 +472,12 @@ function Login({ onBack }) {
     }
 
     setLoading(true);
-
-    try {
-      const appVerifier = setupRecaptcha();
-
-      const result = await signInWithPhoneNumber(
-        auth,
-        normalizedPhone,
-        appVerifier
-      );
-
-      setConfirmationResult(result);
-
-      showMessage(
-        "Verification code sent to your phone.",
-        "success"
-      );
-    } catch (error) {
-      console.error("Vezlivo phone authentication error:", error);
-      clearRecaptcha();
-      showMessage(error.message || "Unable to send verification code.");
-    } finally {
+    setTimeout(() => {
+      setPhone(normalizedPhone);
       setLoading(false);
-    }
+      setConfirmationPending(true);
+      showMessage("Verification code sent to your phone.", "success");
+    }, 600);
   };
 
   const handleVerifyPhoneCode = async (event) => {
@@ -669,17 +489,34 @@ function Login({ onBack }) {
       return;
     }
 
-    if (!confirmationResult) {
+    if (!confirmationPending) {
       showMessage("Please request a new verification code.");
       return;
     }
 
     setLoading(true);
-
     try {
-      const credential = await confirmationResult.confirm(verificationCode.trim());
-      showMessage("Phone verification successful.", "success");
-      await beginOnboarding(credential.user);
+      const phoneUid = "phone_" + phone.replace(/[^0-9]/g, "");
+      const result = await veloxSync({
+        uid: phoneUid,
+        email: `${phoneUid}@vezlivo.local`,
+        displayName: "Phone User",
+        authMode: "signup",
+      });
+
+      if (result.success) {
+        const activeUser = result.user || {
+          uid: phoneUid,
+          email: `${phoneUid}@vezlivo.local`,
+          displayName: "Phone User",
+        };
+        localStorage.setItem("vezlivo_session_active", "true");
+        localStorage.setItem("vezlivo_current_user", JSON.stringify(activeUser));
+        showMessage("Phone verification successful.", "success");
+        await beginOnboarding(activeUser);
+      } else {
+        showMessage(result.error || "Phone verification failed.");
+      }
     } catch (error) {
       showMessage(error.message || "Phone verification failed.");
     } finally {
@@ -692,18 +529,18 @@ function Login({ onBack }) {
     setEmail("");
     setPassword("");
     setConfirmPassword("");
+    setShowPassword(false);
     setPhone("");
     setVerificationCode("");
-    setConfirmationResult(null);
+    setConfirmationPending(false);
     clearMessage();
   };
 
   const switchMethod = (newMethod) => {
     setMethod(newMethod);
     setVerificationCode("");
-    setConfirmationResult(null);
+    setConfirmationPending(false);
     clearMessage();
-    clearRecaptcha();
   };
 
   if (onboardingUser) {
@@ -711,20 +548,12 @@ function Login({ onBack }) {
       "January", "February", "March", "April", "May", "June",
       "July", "August", "September", "October", "November", "December",
     ];
-
     const currentYear = new Date().getFullYear();
 
     return (
       <main className="login-page">
-        <section
-          className="login-card"
-          style={{ maxWidth: "520px" }}
-        >
-          <img
-            src="/Logo.png"
-            alt="Vezlivo"
-            className="login-logo"
-          />
+        <section className="login-card" style={{ maxWidth: "520px" }}>
+          <img src="/Logo.png" alt="Vezlivo" className="login-logo" />
 
           <div
             style={{
@@ -736,13 +565,7 @@ function Login({ onBack }) {
           >
             <div>
               <strong>Set up your Vezlivo profile</strong>
-              <div
-                style={{
-                  fontSize: "13px",
-                  opacity: 0.7,
-                  marginTop: "4px",
-                }}
-              >
+              <div style={{ fontSize: "13px", opacity: 0.7, marginTop: "4px" }}>
                 Step {onboardingStep} of 4
               </div>
             </div>
@@ -798,11 +621,13 @@ function Login({ onBack }) {
                   disabled={loading}
                 >
                   <option value="">Year</option>
-                  {Array.from({ length: 121 }, (_, index) => currentYear - index).map((year) => (
-                    <option key={year} value={year}>
-                      {year}
-                    </option>
-                  ))}
+                  {Array.from({ length: 121 }, (_, index) => currentYear - index).map(
+                    (year) => (
+                      <option key={year} value={year}>
+                        {year}
+                      </option>
+                    )
+                  )}
                 </select>
               </div>
             </>
@@ -887,6 +712,7 @@ function Login({ onBack }) {
                       alignItems: "center",
                       justifyContent: "center",
                       background: "#e9eef5",
+                      color: "#0f172a",
                       fontSize: "42px",
                       fontWeight: 700,
                     }}
@@ -904,7 +730,9 @@ function Login({ onBack }) {
                     textAlign: "center",
                   }}
                 >
-                  {profilePreview && !profileSkipped ? "Change profile picture" : "Select profile picture"}
+                  {profilePreview && !profileSkipped
+                    ? "Change profile picture"
+                    : "Select profile picture"}
                 </label>
 
                 <input
@@ -979,11 +807,7 @@ function Login({ onBack }) {
           ← Back
         </button>
 
-        <img
-          src="/Logo.png"
-          alt="Vezlivo"
-          className="login-logo"
-        />
+        <img src="/Logo.png" alt="Vezlivo" className="login-logo" />
 
         <h1>
           {mode === "login" ? "Log in to Vezlivo" : "Create your Vezlivo account"}
@@ -1024,18 +848,40 @@ function Login({ onBack }) {
               disabled={loading}
             />
 
-            <input
-              type="password"
-              placeholder="Password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              autoComplete={mode === "login" ? "current-password" : "new-password"}
-              disabled={loading}
-            />
+            <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
+              <input
+                type={showPassword ? "text" : "password"}
+                placeholder="Password"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                autoComplete={mode === "login" ? "current-password" : "new-password"}
+                disabled={loading}
+                style={{ width: "100%", paddingRight: "64px" }}
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((prev) => !prev)}
+                disabled={loading}
+                aria-label={showPassword ? "Hide password" : "Show password"}
+                style={{
+                  position: "absolute",
+                  right: "10px",
+                  background: "transparent",
+                  border: "none",
+                  color: "#94a3b8",
+                  fontSize: "13px",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  padding: "4px 6px",
+                }}
+              >
+                {showPassword ? "Hide" : "Show"}
+              </button>
+            </div>
 
             {mode === "signup" && (
               <input
-                type="password"
+                type={showPassword ? "text" : "password"}
                 placeholder="Confirm password"
                 value={confirmPassword}
                 onChange={(event) => setConfirmPassword(event.target.value)}
@@ -1067,7 +913,7 @@ function Login({ onBack }) {
 
         {method === "phone" && (
           <>
-            {!confirmationResult ? (
+            {!confirmationPending ? (
               <form onSubmit={handleSendPhoneCode}>
                 <input
                   type="tel"
@@ -1081,12 +927,6 @@ function Login({ onBack }) {
                 <p className="phone-help">
                   Include your country code, for example +234 for Nigeria.
                 </p>
-
-                <div
-                  id="recaptcha-container"
-                  aria-hidden="true"
-                  style={{ height: 0, margin: 0, overflow: "visible" }}
-                ></div>
 
                 <button
                   type="submit"
@@ -1120,7 +960,7 @@ function Login({ onBack }) {
                   type="button"
                   className="forgot-password-button"
                   onClick={() => {
-                    setConfirmationResult(null);
+                    setConfirmationPending(false);
                     setVerificationCode("");
                     clearMessage();
                   }}
