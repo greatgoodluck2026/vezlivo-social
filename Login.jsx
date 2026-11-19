@@ -51,12 +51,22 @@ function Login({ onBack }) {
 
   const calculateAge = (year, month, day) => {
     const today = new Date();
-    const birthDate = new Date(Number(year), Number(month) - 1, Number(day));
+    const birthDate = new Date(
+      Number(year),
+      Number(month) - 1,
+      Number(day)
+    );
+
     let age = today.getFullYear() - birthDate.getFullYear();
     const monthDifference = today.getMonth() - birthDate.getMonth();
-    if (monthDifference < 0 || (monthDifference === 0 && today.getDate() < birthDate.getDate())) {
+
+    if (
+      monthDifference < 0 ||
+      (monthDifference === 0 && today.getDate() < birthDate.getDate())
+    ) {
       age -= 1;
     }
+
     return age;
   };
 
@@ -64,13 +74,27 @@ function Login({ onBack }) {
     const y = Number(year);
     const m = Number(month);
     const d = Number(day);
-    if (!y || !m || !d) return false;
+
+    if (!y || !m || !d) {
+      return false;
+    }
+
     const date = new Date(y, m - 1, d);
-    return date.getFullYear() === y && date.getMonth() === m - 1 && date.getDate() === d;
+
+    return (
+      date.getFullYear() === y &&
+      date.getMonth() === m - 1 &&
+      date.getDate() === d
+    );
   };
 
   const generateUniqueUsername = (name) => {
-    const base = name.trim().toLowerCase().replace(/[^a-z0-9]/g, "").slice(0, 20);
+    const base = name
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, "")
+      .slice(0, 20);
+
     const safeBase = base || "vezlivo";
     const suffix = Math.floor(100 + Math.random() * 900);
     return `${safeBase}${suffix}`.slice(0, 30);
@@ -84,34 +108,77 @@ function Login({ onBack }) {
   };
 
   const beginOnboarding = async (user) => {
-    if (!user) return;
+    if (!user) {
+      return;
+    }
+
+    if (user.onboardingComplete === true) {
+      completeSessionAndExit(user);
+      return;
+    }
+
     setOnboardingUser(user);
     setDisplayName(user.displayName || "");
-    setUsername(generateUniqueUsername(user.displayName || user.email || "vezlivo"));
+    setUsername(
+      user.username || generateUniqueUsername(user.displayName || user.email || "vezlivo")
+    );
+
+    if (user.birthMonth) {
+      setBirthMonth(String(user.birthMonth));
+    }
+    if (user.birthDay) {
+      setBirthDay(String(user.birthDay));
+    }
+    if (user.birthYear) {
+      setBirthYear(String(user.birthYear));
+    }
+    if (user.profileURL) {
+      setProfilePreview(user.profileURL);
+      setProfileSkipped(false);
+    } else {
+      setProfilePreview("");
+      setProfileSkipped(false);
+    }
+
     setOnboardingStep(1);
     clearOnboardingMessage();
   };
 
   const finishOnboarding = async () => {
-    if (!onboardingUser) return;
-    clearOnboardingMessage();
-
-    if (!displayName.trim()) {
-      showOnboardingMessage("Display name is compulsory. Please enter your name.");
+    if (!onboardingUser) {
       return;
     }
 
-    const cleanUsername = username.trim().toLowerCase().replace(/[^a-z0-9._]/g, "");
+    clearOnboardingMessage();
+
+    if (!displayName.trim()) {
+      showOnboardingMessage(
+        "Display name is compulsory. Please enter your name."
+      );
+      return;
+    }
+
+    const cleanUsername = username
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9._]/g, "");
+
     if (cleanUsername.length < 3) {
-      showOnboardingMessage("Username must be at least 3 characters.");
+      showOnboardingMessage(
+        "Username must be at least 3 characters."
+      );
       return;
     }
 
     setLoading(true);
 
     try {
+      let profileURL = profileSkipped ? "" : profilePreview || "";
       let profileImageBase64 = null;
+      let profileImageName = null;
+
       if (profileFile && !profileSkipped) {
+        profileImageName = `profile-${onboardingUser.uid}-${Date.now()}.jpg`;
         profileImageBase64 = await new Promise((resolve, reject) => {
           const reader = new FileReader();
           reader.readAsDataURL(profileFile);
@@ -122,25 +189,50 @@ function Login({ onBack }) {
 
       const age = calculateAge(birthYear, birthMonth, birthDay);
       const isMinor = age < 18;
+      const accountAgeGroup = isMinor ? "teen" : "adult";
 
       const profileData = {
         uid: onboardingUser.uid,
         displayName: displayName.trim(),
         username: cleanUsername,
-        dateOfBirth: `${birthYear}-${String(birthMonth).padStart(2, "0")}-${String(birthDay).padStart(2, "0")}`,
+        birthMonth: Number(birthMonth),
+        birthDay: Number(birthDay),
+        birthYear: Number(birthYear),
+        dateOfBirth: `${birthYear}-${String(birthMonth).padStart(2, "0")}-${String(
+          birthDay
+        ).padStart(2, "0")}`,
         age,
         isMinor,
+        accountAgeGroup,
+        canAccessMatureContent: !isMinor,
+        canGoLive: !isMinor,
+        canJoinLive: !isMinor,
+        profileURL,
         profileImageBase64,
+        profileImageName,
         onboardingComplete: true,
         onboardingCompletedAt: Date.now(),
       };
 
       const syncResponse = await apiPost("/identity/sync", profileData);
       const updatedUser = syncResponse.user || { ...onboardingUser, ...profileData };
+
+      clearOnboardingMessage();
+      setProfileFile(null);
+      setProfilePreview("");
+      setProfileSkipped(false);
+      setDisplayName("");
+      setUsername("");
+      setBirthMonth("");
+      setBirthDay("");
+      setBirthYear("");
+
       completeSessionAndExit(updatedUser);
     } catch (error) {
-      console.error("Unable to save sovereign onboarding:", error);
-      showOnboardingMessage(error.message || "Unable to save your profile setup. Please try again.");
+      console.error("Unable to save Vezlivo onboarding:", error);
+      showOnboardingMessage(
+        error.message || "Unable to save your profile setup. Please try again."
+      );
     } finally {
       setLoading(false);
     }
@@ -154,26 +246,44 @@ function Login({ onBack }) {
         showOnboardingMessage("Please select a valid month, day and year.");
         return;
       }
+
       const age = calculateAge(birthYear, birthMonth, birthDay);
+
       if (age < 13) {
-        showOnboardingMessage("You must meet Vezlivo's minimum age requirement.");
+        showOnboardingMessage(
+          "You must meet Vezlivo's minimum age requirement to create an account."
+        );
         return;
       }
+
+      if (age > 120) {
+        showOnboardingMessage("Please enter a valid date of birth.");
+        return;
+      }
+
       setOnboardingStep(2);
       return;
     }
 
     if (onboardingStep === 2) {
       if (!displayName.trim()) {
-        showOnboardingMessage("Name is compulsory.");
+        showOnboardingMessage("Name is compulsory. Please enter your name.");
         return;
       }
+
       setUsername(generateUniqueUsername(displayName));
       setOnboardingStep(3);
       return;
     }
 
     if (onboardingStep === 3) {
+      if (!username || username.trim().length < 3) {
+        showOnboardingMessage(
+          "We could not create your username. Please go back and try again."
+        );
+        return;
+      }
+
       setOnboardingStep(4);
       return;
     }
@@ -186,11 +296,22 @@ function Login({ onBack }) {
   const handleProfileFileChange = (event) => {
     clearOnboardingMessage();
     const file = event.target.files?.[0];
-    if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      showOnboardingMessage("Please select an image file.");
+    if (!file) {
       return;
     }
+
+    if (!file.type.startsWith("image/")) {
+      showOnboardingMessage("Please select an image file.");
+      event.target.value = "";
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      showOnboardingMessage("Profile picture must be 5 MB or smaller.");
+      event.target.value = "";
+      return;
+    }
+
     setProfileFile(file);
     setProfileSkipped(false);
     setProfilePreview(URL.createObjectURL(file));
@@ -200,13 +321,23 @@ function Login({ onBack }) {
     event.preventDefault();
     clearMessage();
 
-    if (!email.trim() || !password) {
-      showMessage("Please enter your email address and password.");
+    if (!email.trim()) {
+      showMessage("Please enter your email address.");
+      return;
+    }
+
+    if (!password) {
+      showMessage("Please enter your password.");
       return;
     }
 
     if (mode === "signup" && password !== confirmPassword) {
       showMessage("Passwords do not match.");
+      return;
+    }
+
+    if (mode === "signup" && password.length < 6) {
+      showMessage("Password must be at least 6 characters.");
       return;
     }
 
@@ -226,25 +357,36 @@ function Login({ onBack }) {
       });
 
       if (result.success) {
-        const activeUser = result.user || { uid, email: cleanEmail, displayName: defaultName };
+        const activeUser = result.user || {
+          uid,
+          email: cleanEmail,
+          displayName: defaultName,
+        };
         localStorage.setItem("vezlivo_session_active", "true");
         localStorage.setItem("vezlivo_current_user", JSON.stringify(activeUser));
-        showMessage(mode === "login" ? "Login successful." : "Account created successfully.", "success");
-
-        if (activeUser.onboardingComplete) {
-          onBack?.();
-        } else {
-          await beginOnboarding(activeUser);
-        }
+        showMessage(
+          mode === "login" ? "Login successful." : "Account created successfully.",
+          "success"
+        );
+        await beginOnboarding(activeUser);
       } else {
         showMessage(result.error || "Authentication failed.");
       }
     } catch (error) {
       console.error("Sovereign authentication error:", error);
-      showMessage(error.message || "Could not connect to your Velox Sovereign backend.");
+      showMessage(
+        error.message || "Could not connect to your Velox Sovereign backend."
+      );
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleForgotPassword = async () => {
+    clearMessage();
+    showMessage(
+      "Password reset is managed through your sovereign Velox core account settings."
+    );
   };
 
   const handleGoogleLogin = async () => {
@@ -253,7 +395,9 @@ function Login({ onBack }) {
 
     try {
       const googleUid = "google_" + Date.now();
-      const googleEmail = `googleuser_${Math.floor(10000 + Math.random() * 90000)}@gmail.com`;
+      const googleEmail = `googleuser_${Math.floor(
+        10000 + Math.random() * 90000
+      )}@gmail.com`;
       const defaultName = "Sovereign Google User";
 
       const result = await veloxSync({
@@ -264,49 +408,92 @@ function Login({ onBack }) {
       });
 
       if (result.success) {
-        const activeUser = result.user || { uid: googleUid, email: googleEmail, displayName: defaultName };
+        const activeUser = result.user || {
+          uid: googleUid,
+          email: googleEmail,
+          displayName: defaultName,
+        };
         localStorage.setItem("vezlivo_session_active", "true");
         localStorage.setItem("vezlivo_current_user", JSON.stringify(activeUser));
         showMessage("Google sign-in successful.", "success");
-
-        if (activeUser.onboardingComplete) {
-          onBack?.();
-        } else {
-          await beginOnboarding(activeUser);
-        }
+        await beginOnboarding(activeUser);
       } else {
         showMessage(result.error || "Google authentication failed.");
       }
     } catch (error) {
       console.error("Sovereign Google login error:", error);
-      showMessage(error.message || "Google sign-in failed. Make sure your laptop server is running.");
+      showMessage(
+        error.message || "Google sign-in failed. Make sure your laptop server is running."
+      );
     } finally {
       setLoading(false);
     }
   };
 
+  const normalizePhoneNumber = (value) => {
+    const raw = String(value || "").trim();
+    const compact = raw.replace(/[\s().-]/g, "");
+
+    if (!compact) {
+      return "";
+    }
+
+    if (/^0\d{10}$/.test(compact)) {
+      return `+234${compact.slice(1)}`;
+    }
+
+    if (/^234\d{10}$/.test(compact)) {
+      return `+${compact}`;
+    }
+
+    if (/^\+\d{8,15}$/.test(compact)) {
+      return compact;
+    }
+
+    return null;
+  };
+
   const handleSendPhoneCode = async (event) => {
     event.preventDefault();
     clearMessage();
+
+    const normalizedPhone = normalizePhoneNumber(phone);
+
     if (!phone.trim()) {
       showMessage("Enter your phone number.");
       return;
     }
+
+    if (!normalizedPhone) {
+      showMessage(
+        "Enter a valid phone number, for example 07055749970 or +2347055749970."
+      );
+      return;
+    }
+
     setLoading(true);
     setTimeout(() => {
+      setPhone(normalizedPhone);
       setLoading(false);
       setConfirmationPending(true);
-      showMessage("Verification code sent successfully.", "success");
+      showMessage("Verification code sent to your phone.", "success");
     }, 600);
   };
 
   const handleVerifyPhoneCode = async (event) => {
     event.preventDefault();
     clearMessage();
+
     if (!verificationCode.trim()) {
       showMessage("Enter the verification code.");
       return;
     }
+
+    if (!confirmationPending) {
+      showMessage("Please request a new verification code.");
+      return;
+    }
+
     setLoading(true);
     try {
       const phoneUid = "phone_" + phone.replace(/[^0-9]/g, "");
@@ -316,8 +503,13 @@ function Login({ onBack }) {
         displayName: "Phone User",
         authMode: "signup",
       });
+
       if (result.success) {
-        const activeUser = result.user || { uid: phoneUid, email: `${phoneUid}@vezlivo.local`, displayName: "Phone User" };
+        const activeUser = result.user || {
+          uid: phoneUid,
+          email: `${phoneUid}@vezlivo.local`,
+          displayName: "Phone User",
+        };
         localStorage.setItem("vezlivo_session_active", "true");
         localStorage.setItem("vezlivo_current_user", JSON.stringify(activeUser));
         showMessage("Phone verification successful.", "success");
@@ -325,8 +517,8 @@ function Login({ onBack }) {
       } else {
         showMessage(result.error || "Phone verification failed.");
       }
-    } catch (err) {
-      showMessage(err.message || "Phone verification failed.");
+    } catch (error) {
+      showMessage(error.message || "Phone verification failed.");
     } finally {
       setLoading(false);
     }
@@ -338,11 +530,16 @@ function Login({ onBack }) {
     setPassword("");
     setConfirmPassword("");
     setShowPassword(false);
+    setPhone("");
+    setVerificationCode("");
+    setConfirmationPending(false);
     clearMessage();
   };
 
   const switchMethod = (newMethod) => {
     setMethod(newMethod);
+    setVerificationCode("");
+    setConfirmationPending(false);
     clearMessage();
   };
 
@@ -358,36 +555,79 @@ function Login({ onBack }) {
         <section className="login-card" style={{ maxWidth: "520px" }}>
           <img src="/Logo.png" alt="Vezlivo" className="login-logo" />
 
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "18px" }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: "18px",
+            }}
+          >
             <div>
               <strong>Set up your Vezlivo profile</strong>
-              <div style={{ fontSize: "13px", opacity: 0.7, marginTop: "4px" }}>Step {onboardingStep} of 4</div>
+              <div style={{ fontSize: "13px", opacity: 0.7, marginTop: "4px" }}>
+                Step {onboardingStep} of 4
+              </div>
             </div>
-            <div style={{ fontSize: "13px", opacity: 0.7 }}>{Math.round((onboardingStep / 4) * 100)}%</div>
+
+            <div style={{ fontSize: "13px", opacity: 0.7 }}>
+              {Math.round((onboardingStep / 4) * 100)}%
+            </div>
           </div>
 
           {onboardingStep === 1 && (
             <>
               <h1>When were you born?</h1>
-              <p className="login-subtitle">Enter your date of birth for age safety settings.</p>
-              <div style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr 1.2fr", gap: "10px" }}>
-                <select value={birthMonth} onChange={(e) => setBirthMonth(e.target.value)} disabled={loading}>
+              <p className="login-subtitle">
+                Enter your date of birth. This helps Vezlivo apply the right age and safety settings to your account.
+              </p>
+
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1.5fr 1fr 1.2fr",
+                  gap: "10px",
+                }}
+              >
+                <select
+                  value={birthMonth}
+                  onChange={(event) => setBirthMonth(event.target.value)}
+                  disabled={loading}
+                >
                   <option value="">Month</option>
-                  {monthNames.map((m, idx) => (
-                    <option key={m} value={idx + 1}>{m}</option>
+                  {monthNames.map((month, index) => (
+                    <option key={month} value={index + 1}>
+                      {month}
+                    </option>
                   ))}
                 </select>
-                <select value={birthDay} onChange={(e) => setBirthDay(e.target.value)} disabled={loading}>
+
+                <select
+                  value={birthDay}
+                  onChange={(event) => setBirthDay(event.target.value)}
+                  disabled={loading}
+                >
                   <option value="">Day</option>
-                  {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
-                    <option key={d} value={d}>{d}</option>
+                  {Array.from({ length: 31 }, (_, index) => index + 1).map((day) => (
+                    <option key={day} value={day}>
+                      {day}
+                    </option>
                   ))}
                 </select>
-                <select value={birthYear} onChange={(e) => setBirthYear(e.target.value)} disabled={loading}>
+
+                <select
+                  value={birthYear}
+                  onChange={(event) => setBirthYear(event.target.value)}
+                  disabled={loading}
+                >
                   <option value="">Year</option>
-                  {Array.from({ length: 121 }, (_, i) => currentYear - i).map((y) => (
-                    <option key={y} value={y}>{y}</option>
-                  ))}
+                  {Array.from({ length: 121 }, (_, index) => currentYear - index).map(
+                    (year) => (
+                      <option key={year} value={year}>
+                        {year}
+                      </option>
+                    )
+                  )}
                 </select>
               </div>
             </>
@@ -396,14 +636,18 @@ function Login({ onBack }) {
           {onboardingStep === 2 && (
             <>
               <h1>Choose your name</h1>
-              <p className="login-subtitle">Enter your display name.</p>
+              <p className="login-subtitle">
+                Name is compulsory. Enter the name people will see on your Vezlivo profile.
+              </p>
+
               <input
                 type="text"
                 placeholder="Your display name"
                 value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
+                onChange={(event) => setDisplayName(event.target.value)}
                 maxLength={50}
                 disabled={loading}
+                autoComplete="name"
               />
             </>
           )}
@@ -411,35 +655,105 @@ function Login({ onBack }) {
           {onboardingStep === 3 && (
             <>
               <h1>Your Vezlivo username</h1>
-              <p className="login-subtitle">Your sovereign unique handle.</p>
-              <input type="text" value={`@${username}`} readOnly disabled />
+              <p className="login-subtitle">
+                Vezlivo automatically chose an available username for you.
+              </p>
+
+              <input
+                type="text"
+                value={`@${username}`}
+                readOnly
+                disabled={loading}
+                aria-label="Your Vezlivo username"
+              />
+
+              <p style={{ fontSize: "13px", opacity: 0.7, marginTop: "-4px" }}>
+                You do not need to choose a username. You can change it later from Account information.
+              </p>
             </>
           )}
 
           {onboardingStep === 4 && (
             <>
               <h1>Add a profile picture</h1>
-              <p className="login-subtitle">Select a photo or skip for now.</p>
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: "14px", margin: "20px 0" }}>
-                {profilePreview ? (
-                  <img src={profilePreview} alt="Preview" style={{ width: "120px", height: "120px", borderRadius: "50%", objectFit: "cover" }} />
+              <p className="login-subtitle">
+                Add a profile picture so people can recognize you. You can skip this for now.
+              </p>
+
+              <div
+                style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  gap: "14px",
+                  margin: "20px 0",
+                }}
+              >
+                {profilePreview && !profileSkipped ? (
+                  <img
+                    src={profilePreview}
+                    alt="Profile preview"
+                    style={{
+                      width: "120px",
+                      height: "120px",
+                      borderRadius: "50%",
+                      objectFit: "cover",
+                      border: "4px solid #fff",
+                      boxShadow: "0 4px 18px rgba(0,0,0,.18)",
+                    }}
+                  />
                 ) : (
-                  <div style={{ width: "120px", height: "120px", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", background: "#334155", fontSize: "42px", color: "#fff" }}>
-                    {(displayName || "V").charAt(0).toUpperCase()}
+                  <div
+                    style={{
+                      width: "120px",
+                      height: "120px",
+                      borderRadius: "50%",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      background: "#e9eef5",
+                      color: "#0f172a",
+                      fontSize: "42px",
+                      fontWeight: 700,
+                    }}
+                  >
+                    {(displayName || onboardingUser.email || "V").charAt(0).toUpperCase()}
                   </div>
                 )}
-                <label htmlFor="photo-upload" className="primary-login-button" style={{ cursor: "pointer", textAlign: "center", display: "block" }}>
-                  Select profile picture
+
+                <label
+                  htmlFor="onboarding-profile-photo"
+                  className="primary-login-button"
+                  style={{
+                    cursor: loading ? "default" : "pointer",
+                    display: "inline-block",
+                    textAlign: "center",
+                  }}
+                >
+                  {profilePreview && !profileSkipped
+                    ? "Change profile picture"
+                    : "Select profile picture"}
                 </label>
-                <input id="photo-upload" type="file" accept="image/*" onChange={handleProfileFileChange} hidden />
+
+                <input
+                  id="onboarding-profile-photo"
+                  type="file"
+                  accept="image/*"
+                  onChange={handleProfileFileChange}
+                  disabled={loading}
+                  hidden
+                />
+
                 <button
                   type="button"
                   className="forgot-password-button"
                   onClick={() => {
-                    setProfileSkipped(true);
                     setProfileFile(null);
                     setProfilePreview("");
+                    setProfileSkipped(true);
+                    clearOnboardingMessage();
                   }}
+                  disabled={loading}
                 >
                   Skip for now
                 </button>
@@ -447,11 +761,35 @@ function Login({ onBack }) {
             </>
           )}
 
-          {onboardingMessage && <p className="login-message" style={{ marginTop: "14px" }}>{onboardingMessage}</p>}
+          {onboardingMessage && (
+            <p className="login-message" style={{ marginTop: "14px" }}>
+              {onboardingMessage}
+            </p>
+          )}
 
-          <button type="button" className="primary-login-button" onClick={handleOnboardingNext} disabled={loading} style={{ marginTop: "18px" }}>
+          <button
+            type="button"
+            className="primary-login-button"
+            onClick={handleOnboardingNext}
+            disabled={loading}
+            style={{ marginTop: "18px" }}
+          >
             {loading ? "Saving..." : onboardingStep === 4 ? "Finish setup" : "Continue"}
           </button>
+
+          {onboardingStep > 1 && (
+            <button
+              type="button"
+              className="forgot-password-button"
+              onClick={() => {
+                clearOnboardingMessage();
+                setOnboardingStep(onboardingStep - 1);
+              }}
+              disabled={loading}
+            >
+              ← Previous
+            </button>
+          )}
         </section>
       </main>
     );
@@ -460,14 +798,43 @@ function Login({ onBack }) {
   return (
     <main className="login-page">
       <section className="login-card">
-        <button type="button" className="back-button" onClick={onBack} disabled={loading}>← Back</button>
+        <button
+          type="button"
+          className="back-button"
+          onClick={onBack}
+          disabled={loading}
+        >
+          ← Back
+        </button>
+
         <img src="/Logo.png" alt="Vezlivo" className="login-logo" />
-        <h1>{mode === "login" ? "Log in to Vezlivo" : "Create your Vezlivo account"}</h1>
-        <p className="login-subtitle">{mode === "login" ? "Welcome back." : "Join your sovereign network."}</p>
+
+        <h1>
+          {mode === "login" ? "Log in to Vezlivo" : "Create your Vezlivo account"}
+        </h1>
+
+        <p className="login-subtitle">
+          {mode === "login" ? "Welcome back." : "Join Vezlivo and start connecting."}
+        </p>
 
         <div className="auth-methods">
-          <button type="button" className={method === "email" ? "method-active" : ""} onClick={() => switchMethod("email")}>Email</button>
-          <button type="button" className={method === "phone" ? "method-active" : ""} onClick={() => switchMethod("phone")}>Phone</button>
+          <button
+            type="button"
+            className={method === "email" ? "method-active" : ""}
+            onClick={() => switchMethod("email")}
+            disabled={loading}
+          >
+            Email
+          </button>
+
+          <button
+            type="button"
+            className={method === "phone" ? "method-active" : ""}
+            onClick={() => switchMethod("phone")}
+            disabled={loading}
+          >
+            Phone
+          </button>
         </div>
 
         {method === "email" && (
@@ -476,7 +843,8 @@ function Login({ onBack }) {
               type="email"
               placeholder="Email address"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(event) => setEmail(event.target.value)}
+              autoComplete="email"
               disabled={loading}
             />
 
@@ -485,7 +853,8 @@ function Login({ onBack }) {
                 type={showPassword ? "text" : "password"}
                 placeholder="Password"
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(event) => setPassword(event.target.value)}
+                autoComplete={mode === "login" ? "current-password" : "new-password"}
                 disabled={loading}
                 style={{ width: "100%", paddingRight: "64px" }}
               />
@@ -515,14 +884,30 @@ function Login({ onBack }) {
                 type={showPassword ? "text" : "password"}
                 placeholder="Confirm password"
                 value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
+                onChange={(event) => setConfirmPassword(event.target.value)}
+                autoComplete="new-password"
                 disabled={loading}
               />
             )}
 
-            <button type="submit" className="primary-login-button" disabled={loading}>
+            <button
+              type="submit"
+              className="primary-login-button"
+              disabled={loading}
+            >
               {loading ? "Please wait..." : mode === "login" ? "Log in" : "Create account"}
             </button>
+
+            {mode === "login" && (
+              <button
+                type="button"
+                className="forgot-password-button"
+                onClick={handleForgotPassword}
+                disabled={loading}
+              >
+                Forgot password?
+              </button>
+            )}
           </form>
         )}
 
@@ -530,28 +915,98 @@ function Login({ onBack }) {
           <>
             {!confirmationPending ? (
               <form onSubmit={handleSendPhoneCode}>
-                <input type="tel" placeholder="+234 801 234 5678" value={phone} onChange={(e) => setPhone(e.target.value)} disabled={loading} />
-                <button type="submit" className="primary-login-button" disabled={loading}>Send verification code</button>
+                <input
+                  type="tel"
+                  placeholder="+234 801 234 5678"
+                  value={phone}
+                  onChange={(event) => setPhone(event.target.value)}
+                  autoComplete="tel"
+                  disabled={loading}
+                />
+
+                <p className="phone-help">
+                  Include your country code, for example +234 for Nigeria.
+                </p>
+
+                <button
+                  type="submit"
+                  className="primary-login-button"
+                  disabled={loading}
+                >
+                  {loading ? "Sending code..." : "Send verification code"}
+                </button>
               </form>
             ) : (
               <form onSubmit={handleVerifyPhoneCode}>
-                <input type="text" placeholder="Verification code" value={verificationCode} onChange={(e) => setVerificationCode(e.target.value)} disabled={loading} />
-                <button type="submit" className="primary-login-button" disabled={loading}>Verify phone number</button>
+                <input
+                  type="text"
+                  placeholder="Verification code"
+                  value={verificationCode}
+                  onChange={(event) => setVerificationCode(event.target.value)}
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  disabled={loading}
+                />
+
+                <button
+                  type="submit"
+                  className="primary-login-button"
+                  disabled={loading}
+                >
+                  {loading ? "Verifying..." : "Verify phone number"}
+                </button>
+
+                <button
+                  type="button"
+                  className="forgot-password-button"
+                  onClick={() => {
+                    setConfirmationPending(false);
+                    setVerificationCode("");
+                    clearMessage();
+                  }}
+                  disabled={loading}
+                >
+                  Use a different number
+                </button>
               </form>
             )}
           </>
         )}
 
-        <div className="divider"><span>OR</span></div>
+        <div className="divider">
+          <span>OR</span>
+        </div>
 
-        <button type="button" className="google-button" onClick={handleGoogleLogin} disabled={loading}>
+        <button
+          type="button"
+          className="google-button"
+          onClick={handleGoogleLogin}
+          disabled={loading}
+        >
           Continue with Google
         </button>
 
-        {message && <p className={messageType === "success" ? "login-message success" : "login-message"}>{message}</p>}
+        {message && (
+          <p
+            className={
+              messageType === "success"
+                ? "login-message success"
+                : "login-message"
+            }
+          >
+            {message}
+          </p>
+        )}
 
-        <button type="button" className="switch-auth-button" onClick={switchMode} disabled={loading}>
-          {mode === "login" ? "Create a new account" : "Already have an account? Log in"}
+        <button
+          type="button"
+          className="switch-auth-button"
+          onClick={switchMode}
+          disabled={loading}
+        >
+          {mode === "login"
+            ? "Create a new account"
+            : "Already have an account? Log in"}
         </button>
       </section>
     </main>

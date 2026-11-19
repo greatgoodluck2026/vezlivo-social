@@ -1,1016 +1,946 @@
-import React, { useState } from "react";
-import { apiPost, veloxSync } from "./apiClient.js";
+import React, {
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 
-function Login({ onBack }) {
-  const [mode, setMode] = useState("login");
-  const [method, setMethod] = useState("email");
+import { createRoot } from "react-dom/client";
 
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
+import "./style.css";
 
-  const [phone, setPhone] = useState("");
-  const [verificationCode, setVerificationCode] = useState("");
-  const [confirmationPending, setConfirmationPending] = useState(false);
+import { apiGet, apiPost } from "./apiClient.js";
+import UserProfile from "./UserProfile.jsx";
+import Comments from "./Comments.jsx";
+import SplashScreen from "./SplashScreen.jsx";
+import Login from "./Login.jsx";
+import Profile from "./Profile.jsx";
+import Settings from "./Settings.jsx";
+import Create from "./Create.jsx";
+import Home from "./Home.jsx";
+import Discover from "./Discover.jsx";
+import Activity from "./Activity.jsx";
+import Inbox from "./Inbox.jsx";
 
-  const [message, setMessage] = useState("");
-  const [messageType, setMessageType] = useState("");
-  const [loading, setLoading] = useState(false);
 
-  // First-time account setup (Sovereign Onboarding)
-  const [onboardingUser, setOnboardingUser] = useState(null);
-  const [onboardingStep, setOnboardingStep] = useState(1);
-  const [birthMonth, setBirthMonth] = useState("");
-  const [birthDay, setBirthDay] = useState("");
-  const [birthYear, setBirthYear] = useState("");
-  const [profileFile, setProfileFile] = useState(null);
-  const [profilePreview, setProfilePreview] = useState("");
-  const [profileSkipped, setProfileSkipped] = useState(false);
-  const [displayName, setDisplayName] = useState("");
-  const [username, setUsername] = useState("");
-  const [onboardingMessage, setOnboardingMessage] = useState("");
+/* =========================================================
+   HELPERS
+========================================================= */
 
-  const showMessage = (text, type = "error") => {
-    setMessage(text);
-    setMessageType(type);
-  };
+function formatCount(number) {
+  const value = Number(number || 0);
 
-  const clearMessage = () => {
-    setMessage("");
-    setMessageType("");
-  };
+  if (value >= 1000000000) {
+    return `${(value / 1000000000).toFixed(1)}B`;
+  }
 
-  const showOnboardingMessage = (text) => {
-    setOnboardingMessage(text);
-  };
+  if (value >= 1000000) {
+    return `${(value / 1000000).toFixed(1)}M`;
+  }
 
-  const clearOnboardingMessage = () => {
-    setOnboardingMessage("");
-  };
+  if (value >= 1000) {
+    return `${(value / 1000).toFixed(1)}K`;
+  }
 
-  const calculateAge = (year, month, day) => {
-    const today = new Date();
-    const birthDate = new Date(
-      Number(year),
-      Number(month) - 1,
-      Number(day)
-    );
+  return String(value);
+}
 
-    let age = today.getFullYear() - birthDate.getFullYear();
-    const monthDifference = today.getMonth() - birthDate.getMonth();
 
-    if (
-      monthDifference < 0 ||
-      (monthDifference === 0 && today.getDate() < birthDate.getDate())
-    ) {
-      age -= 1;
+function formatDate(timestamp) {
+  if (!timestamp) {
+    return "";
+  }
+
+  const date = new Date(timestamp);
+
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  const now = Date.now();
+  const difference = now - date.getTime();
+
+  const seconds = Math.floor(
+    difference / 1000
+  );
+
+  if (seconds < 60) {
+    return "just now";
+  }
+
+  const minutes = Math.floor(
+    seconds / 60
+  );
+
+  if (minutes < 60) {
+    return `${minutes}m`;
+  }
+
+  const hours = Math.floor(
+    minutes / 60
+  );
+
+  if (hours < 24) {
+    return `${hours}h`;
+  }
+
+  const days = Math.floor(
+    hours / 24
+  );
+
+  if (days < 7) {
+    return `${days}d`;
+  }
+
+  return date.toLocaleDateString();
+}
+
+
+function getPostUsername(post) {
+  return (
+    post?.username ||
+    post?.displayName ||
+    post?.userEmail?.split("@")[0] ||
+    "Vezlivo user"
+  );
+}
+
+
+function getPostAvatar(post) {
+  return (
+    post?.userPhotoURL ||
+    post?.photoURL ||
+    post?.profile_url ||
+    ""
+  );
+}
+
+
+function readSavedUser() {
+  try {
+    const saved = localStorage.getItem("vezlivo_current_user");
+    if (!saved) {
+      return null;
     }
-
-    return age;
-  };
-
-  const isValidDate = (year, month, day) => {
-    const y = Number(year);
-    const m = Number(month);
-    const d = Number(day);
-
-    if (!y || !m || !d) {
-      return false;
+    const parsed = JSON.parse(saved);
+    if (!parsed || typeof parsed !== "object") {
+      return null;
     }
-
-    const date = new Date(y, m - 1, d);
-
-    return (
-      date.getFullYear() === y &&
-      date.getMonth() === m - 1 &&
-      date.getDate() === d
-    );
-  };
-
-  const generateUniqueUsername = (name) => {
-    const base = name
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]/g, "")
-      .slice(0, 20);
-
-    const safeBase = base || "vezlivo";
-    const suffix = Math.floor(100 + Math.random() * 900);
-    return `${safeBase}${suffix}`.slice(0, 30);
-  };
-
-  const completeSessionAndExit = (user) => {
-    localStorage.setItem("vezlivo_session_active", "true");
-    localStorage.setItem("vezlivo_current_user", JSON.stringify(user));
-    setOnboardingUser(null);
-    onBack?.();
-  };
-
-  const beginOnboarding = async (user) => {
-    if (!user) {
-      return;
-    }
-
-    if (user.onboardingComplete === true) {
-      completeSessionAndExit(user);
-      return;
-    }
-
-    setOnboardingUser(user);
-    setDisplayName(user.displayName || "");
-    setUsername(
-      user.username || generateUniqueUsername(user.displayName || user.email || "vezlivo")
-    );
-
-    if (user.birthMonth) {
-      setBirthMonth(String(user.birthMonth));
-    }
-    if (user.birthDay) {
-      setBirthDay(String(user.birthDay));
-    }
-    if (user.birthYear) {
-      setBirthYear(String(user.birthYear));
-    }
-    if (user.profileURL) {
-      setProfilePreview(user.profileURL);
-      setProfileSkipped(false);
-    } else {
-      setProfilePreview("");
-      setProfileSkipped(false);
-    }
-
-    setOnboardingStep(1);
-    clearOnboardingMessage();
-  };
-
-  const finishOnboarding = async () => {
-    if (!onboardingUser) {
-      return;
-    }
-
-    clearOnboardingMessage();
-
-    if (!displayName.trim()) {
-      showOnboardingMessage(
-        "Display name is compulsory. Please enter your name."
-      );
-      return;
-    }
-
-    const cleanUsername = username
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9._]/g, "");
-
-    if (cleanUsername.length < 3) {
-      showOnboardingMessage(
-        "Username must be at least 3 characters."
-      );
-      return;
-    }
-
-    setLoading(true);
-
-    try {
-      let profileURL = profileSkipped ? "" : profilePreview || "";
-      let profileImageBase64 = null;
-      let profileImageName = null;
-
-      if (profileFile && !profileSkipped) {
-        profileImageName = `profile-${onboardingUser.uid}-${Date.now()}.jpg`;
-        profileImageBase64 = await new Promise((resolve, reject) => {
-          const reader = new FileReader();
-          reader.readAsDataURL(profileFile);
-          reader.onload = () => resolve(reader.result);
-          reader.onerror = (error) => reject(error);
-        });
-      }
-
-      const age = calculateAge(birthYear, birthMonth, birthDay);
-      const isMinor = age < 18;
-      const accountAgeGroup = isMinor ? "teen" : "adult";
-
-      const profileData = {
-        uid: onboardingUser.uid,
-        displayName: displayName.trim(),
-        username: cleanUsername,
-        birthMonth: Number(birthMonth),
-        birthDay: Number(birthDay),
-        birthYear: Number(birthYear),
-        dateOfBirth: `${birthYear}-${String(birthMonth).padStart(2, "0")}-${String(
-          birthDay
-        ).padStart(2, "0")}`,
-        age,
-        isMinor,
-        accountAgeGroup,
-        canAccessMatureContent: !isMinor,
-        canGoLive: !isMinor,
-        canJoinLive: !isMinor,
-        profileURL,
-        profileImageBase64,
-        profileImageName,
-        onboardingComplete: true,
-        onboardingCompletedAt: Date.now(),
-      };
-
-      const syncResponse = await apiPost("/identity/sync", profileData);
-      const updatedUser = syncResponse.user || { ...onboardingUser, ...profileData };
-
-      clearOnboardingMessage();
-      setProfileFile(null);
-      setProfilePreview("");
-      setProfileSkipped(false);
-      setDisplayName("");
-      setUsername("");
-      setBirthMonth("");
-      setBirthDay("");
-      setBirthYear("");
-
-      completeSessionAndExit(updatedUser);
-    } catch (error) {
-      console.error("Unable to save Vezlivo onboarding:", error);
-      showOnboardingMessage(
-        error.message || "Unable to save your profile setup. Please try again."
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleOnboardingNext = async () => {
-    clearOnboardingMessage();
-
-    if (onboardingStep === 1) {
-      if (!isValidDate(birthYear, birthMonth, birthDay)) {
-        showOnboardingMessage("Please select a valid month, day and year.");
-        return;
-      }
-
-      const age = calculateAge(birthYear, birthMonth, birthDay);
-
-      if (age < 13) {
-        showOnboardingMessage(
-          "You must meet Vezlivo's minimum age requirement to create an account."
-        );
-        return;
-      }
-
-      if (age > 120) {
-        showOnboardingMessage("Please enter a valid date of birth.");
-        return;
-      }
-
-      setOnboardingStep(2);
-      return;
-    }
-
-    if (onboardingStep === 2) {
-      if (!displayName.trim()) {
-        showOnboardingMessage("Name is compulsory. Please enter your name.");
-        return;
-      }
-
-      setUsername(generateUniqueUsername(displayName));
-      setOnboardingStep(3);
-      return;
-    }
-
-    if (onboardingStep === 3) {
-      if (!username || username.trim().length < 3) {
-        showOnboardingMessage(
-          "We could not create your username. Please go back and try again."
-        );
-        return;
-      }
-
-      setOnboardingStep(4);
-      return;
-    }
-
-    if (onboardingStep === 4) {
-      await finishOnboarding();
-    }
-  };
-
-  const handleProfileFileChange = (event) => {
-    clearOnboardingMessage();
-    const file = event.target.files?.[0];
-    if (!file) {
-      return;
-    }
-
-    if (!file.type.startsWith("image/")) {
-      showOnboardingMessage("Please select an image file.");
-      event.target.value = "";
-      return;
-    }
-
-    if (file.size > 5 * 1024 * 1024) {
-      showOnboardingMessage("Profile picture must be 5 MB or smaller.");
-      event.target.value = "";
-      return;
-    }
-
-    setProfileFile(file);
-    setProfileSkipped(false);
-    setProfilePreview(URL.createObjectURL(file));
-  };
-
-  const handleEmailAuth = async (event) => {
-    event.preventDefault();
-    clearMessage();
-
-    if (!email.trim()) {
-      showMessage("Please enter your email address.");
-      return;
-    }
-
-    if (!password) {
-      showMessage("Please enter your password.");
-      return;
-    }
-
-    if (mode === "signup" && password !== confirmPassword) {
-      showMessage("Passwords do not match.");
-      return;
-    }
-
-    if (mode === "signup" && password.length < 6) {
-      showMessage("Password must be at least 6 characters.");
-      return;
-    }
-
-    setLoading(true);
-
-    try {
-      const cleanEmail = email.trim().toLowerCase();
-      const uid = "user_" + cleanEmail.replace(/[^a-z0-9]/g, "_");
-      const defaultName = cleanEmail.split("@")[0];
-
-      const result = await veloxSync({
-        uid,
-        email: cleanEmail,
-        password,
-        displayName: defaultName,
-        authMode: mode,
-      });
-
-      if (result.success) {
-        const activeUser = result.user || {
-          uid,
-          email: cleanEmail,
-          displayName: defaultName,
-        };
-        localStorage.setItem("vezlivo_session_active", "true");
-        localStorage.setItem("vezlivo_current_user", JSON.stringify(activeUser));
-        showMessage(
-          mode === "login" ? "Login successful." : "Account created successfully.",
-          "success"
-        );
-        await beginOnboarding(activeUser);
-      } else {
-        showMessage(result.error || "Authentication failed.");
-      }
-    } catch (error) {
-      console.error("Sovereign authentication error:", error);
-      showMessage(
-        error.message || "Could not connect to your Velox Sovereign backend."
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleForgotPassword = async () => {
-    clearMessage();
-    showMessage(
-      "Password reset is managed through your sovereign Velox core account settings."
-    );
-  };
-
-  const handleGoogleLogin = async () => {
-    clearMessage();
-    setLoading(true);
-
-    try {
-      const googleUid = "google_" + Date.now();
-      const googleEmail = `googleuser_${Math.floor(
-        10000 + Math.random() * 90000
-      )}@gmail.com`;
-      const defaultName = "Sovereign Google User";
-
-      const result = await veloxSync({
-        uid: googleUid,
-        email: googleEmail,
-        displayName: defaultName,
-        authMode: "signup",
-      });
-
-      if (result.success) {
-        const activeUser = result.user || {
-          uid: googleUid,
-          email: googleEmail,
-          displayName: defaultName,
-        };
-        localStorage.setItem("vezlivo_session_active", "true");
-        localStorage.setItem("vezlivo_current_user", JSON.stringify(activeUser));
-        showMessage("Google sign-in successful.", "success");
-        await beginOnboarding(activeUser);
-      } else {
-        showMessage(result.error || "Google authentication failed.");
-      }
-    } catch (error) {
-      console.error("Sovereign Google login error:", error);
-      showMessage(
-        error.message || "Google sign-in failed. Make sure your laptop server is running."
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const normalizePhoneNumber = (value) => {
-    const raw = String(value || "").trim();
-    const compact = raw.replace(/[\s().-]/g, "");
-
-    if (!compact) {
-      return "";
-    }
-
-    if (/^0\d{10}$/.test(compact)) {
-      return `+234${compact.slice(1)}`;
-    }
-
-    if (/^234\d{10}$/.test(compact)) {
-      return `+${compact}`;
-    }
-
-    if (/^\+\d{8,15}$/.test(compact)) {
-      return compact;
-    }
-
+    return {
+      ...parsed,
+      uid: parsed.uid || parsed.id || "",
+    };
+  } catch {
     return null;
-  };
+  }
+}
 
-  const handleSendPhoneCode = async (event) => {
-    event.preventDefault();
-    clearMessage();
 
-    const normalizedPhone = normalizePhoneNumber(phone);
+/* =========================================================
+   POST CARD (Sovereign Backend via apiClient.js)
+========================================================= */
 
-    if (!phone.trim()) {
-      showMessage("Enter your phone number.");
+function PostCard({
+  post,
+  user,
+  onLogin,
+}) {
+  const [liked, setLiked] = useState(false);
+  const [likeCount, setLikeCount] = useState(
+    Number(post.likes_count || post.likes || 0)
+  );
+  const [saved, setSaved] = useState(false);
+  const [viewed, setViewed] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const videoRef = useRef(null);
+  const currentUid = user?.uid || user?.id;
+
+  useEffect(() => {
+    if (!currentUid || !post.id) {
       return;
     }
 
-    if (!normalizedPhone) {
-      showMessage(
-        "Enter a valid phone number, for example 07055749970 or +2347055749970."
-      );
+    async function checkLikeStatus() {
+      try {
+        const data = await apiGet(
+          `/users/${encodeURIComponent(currentUid)}/likes`
+        );
+        if (data?.likedIds && data.likedIds[String(post.id)]) {
+          setLiked(true);
+        }
+      } catch (error) {
+        console.error("Check like status error:", error);
+      }
+    }
+
+    checkLikeStatus();
+  }, [post.id, currentUid]);
+
+  const handleLike = async () => {
+    if (!currentUid) {
+      onLogin();
       return;
     }
 
-    setLoading(true);
-    setTimeout(() => {
-      setPhone(normalizedPhone);
-      setLoading(false);
-      setConfirmationPending(true);
-      showMessage("Verification code sent to your phone.", "success");
-    }, 600);
-  };
+    if (busy) return;
+    setBusy(true);
 
-  const handleVerifyPhoneCode = async (event) => {
-    event.preventDefault();
-    clearMessage();
-
-    if (!verificationCode.trim()) {
-      showMessage("Enter the verification code.");
-      return;
-    }
-
-    if (!confirmationPending) {
-      showMessage("Please request a new verification code.");
-      return;
-    }
-
-    setLoading(true);
     try {
-      const phoneUid = "phone_" + phone.replace(/[^0-9]/g, "");
-      const result = await veloxSync({
-        uid: phoneUid,
-        email: `${phoneUid}@vezlivo.local`,
-        displayName: "Phone User",
-        authMode: "signup",
+      const action = liked ? "unlike" : "like";
+      const previousLiked = liked;
+      const previousCount = likeCount;
+
+      setLiked(!previousLiked);
+      setLikeCount(
+        previousLiked ? Math.max(0, previousCount - 1) : previousCount + 1
+      );
+
+      const data = await apiPost("/like", {
+        userId: currentUid,
+        postId: String(post.id),
+        action,
       });
 
-      if (result.success) {
-        const activeUser = result.user || {
-          uid: phoneUid,
-          email: `${phoneUid}@vezlivo.local`,
-          displayName: "Phone User",
-        };
-        localStorage.setItem("vezlivo_session_active", "true");
-        localStorage.setItem("vezlivo_current_user", JSON.stringify(activeUser));
-        showMessage("Phone verification successful.", "success");
-        await beginOnboarding(activeUser);
-      } else {
-        showMessage(result.error || "Phone verification failed.");
+      if (data && data.success === false) {
+        setLiked(previousLiked);
+        setLikeCount(previousCount);
       }
     } catch (error) {
-      showMessage(error.message || "Phone verification failed.");
+      console.error("Like error:", error);
     } finally {
-      setLoading(false);
+      setBusy(false);
     }
   };
 
-  const switchMode = () => {
-    setMode(mode === "login" ? "signup" : "login");
-    setEmail("");
-    setPassword("");
-    setConfirmPassword("");
-    setShowPassword(false);
-    setPhone("");
-    setVerificationCode("");
-    setConfirmationPending(false);
-    clearMessage();
+  const handleSave = async () => {
+    if (!currentUid) {
+      onLogin();
+      return;
+    }
+
+    try {
+      const action = saved ? "unsave" : "save";
+      const data = await apiPost("/save", {
+        userId: currentUid,
+        postId: String(post.id),
+        action,
+      });
+
+      if (!data || data.success !== false) {
+        setSaved((prev) => !prev);
+      }
+    } catch (error) {
+      console.error("Save error:", error);
+    }
   };
 
-  const switchMethod = (newMethod) => {
-    setMethod(newMethod);
-    setVerificationCode("");
-    setConfirmationPending(false);
-    clearMessage();
+
+  const handleView = async () => {
+    if (viewed || !post.id) {
+      return;
+    }
+
+    setViewed(true);
   };
 
-  if (onboardingUser) {
-    const monthNames = [
-      "January", "February", "March", "April", "May", "June",
-      "July", "August", "September", "October", "November", "December",
-    ];
-    const currentYear = new Date().getFullYear();
 
-    return (
-      <main className="login-page">
-        <section className="login-card" style={{ maxWidth: "520px" }}>
-          <img src="/Logo.png" alt="Vezlivo" className="login-logo" />
+  const handleShare = async () => {
+    const shareUrl =
+      window.location.origin +
+      `/?post=${encodeURIComponent(
+        `${post.uid}:${post.id}`
+      )}`;
 
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              marginBottom: "18px",
-            }}
-          >
-            <div>
-              <strong>Set up your Vezlivo profile</strong>
-              <div style={{ fontSize: "13px", opacity: 0.7, marginTop: "4px" }}>
-                Step {onboardingStep} of 4
-              </div>
-            </div>
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: "Vezlivo",
+          text:
+            post.caption ||
+            "Check out this post on Vezlivo",
+          url: shareUrl,
+        });
+      } else if (navigator.clipboard) {
+        await navigator.clipboard.writeText(shareUrl);
+        alert("Vezlivo post link copied.");
+      }
+    } catch (error) {
+      if (error?.name !== "AbortError") {
+        console.error("Share error:", error);
+      }
+    }
+  };
 
-            <div style={{ fontSize: "13px", opacity: 0.7 }}>
-              {Math.round((onboardingStep / 4) * 100)}%
-            </div>
-          </div>
 
-          {onboardingStep === 1 && (
-            <>
-              <h1>When were you born?</h1>
-              <p className="login-subtitle">
-                Enter your date of birth. This helps Vezlivo apply the right age and safety settings to your account.
-              </p>
+  const username = getPostUsername(post);
+  const avatar = getPostAvatar(post);
 
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1.5fr 1fr 1.2fr",
-                  gap: "10px",
-                }}
-              >
-                <select
-                  value={birthMonth}
-                  onChange={(event) => setBirthMonth(event.target.value)}
-                  disabled={loading}
-                >
-                  <option value="">Month</option>
-                  {monthNames.map((month, index) => (
-                    <option key={month} value={index + 1}>
-                      {month}
-                    </option>
-                  ))}
-                </select>
+  const hashtags = Array.isArray(post.hashtags)
+    ? post.hashtags
+    : typeof post.hashtags === "string"
+    ? (() => {
+        try {
+          return JSON.parse(post.hashtags);
+        } catch {
+          return post.hashtags.split(",").map((s) => s.trim());
+        }
+      })()
+    : [];
 
-                <select
-                  value={birthDay}
-                  onChange={(event) => setBirthDay(event.target.value)}
-                  disabled={loading}
-                >
-                  <option value="">Day</option>
-                  {Array.from({ length: 31 }, (_, index) => index + 1).map((day) => (
-                    <option key={day} value={day}>
-                      {day}
-                    </option>
-                  ))}
-                </select>
+  const mentions = Array.isArray(post.mentions) ? post.mentions : [];
 
-                <select
-                  value={birthYear}
-                  onChange={(event) => setBirthYear(event.target.value)}
-                  disabled={loading}
-                >
-                  <option value="">Year</option>
-                  {Array.from({ length: 121 }, (_, index) => currentYear - index).map(
-                    (year) => (
-                      <option key={year} value={year}>
-                        {year}
-                      </option>
-                    )
-                  )}
-                </select>
-              </div>
-            </>
+  const isVideo =
+    post.mediaType === "video" ||
+    Boolean(post.videoURL) ||
+    Boolean(post.video_url);
+
+  const mediaUrl =
+    post.videoURL || post.video_url || post.mediaURL || post.url || "";
+
+
+  return (
+    <article className="vezlivo-post-card">
+
+      <div className="post-user-row">
+
+        <div className="post-user-avatar">
+
+          {avatar ? (
+            <img
+              src={avatar}
+              alt={username}
+            />
+          ) : (
+            <span>
+              {username
+                .charAt(0)
+                .toUpperCase()}
+            </span>
           )}
 
-          {onboardingStep === 2 && (
-            <>
-              <h1>Choose your name</h1>
-              <p className="login-subtitle">
-                Name is compulsory. Enter the name people will see on your Vezlivo profile.
-              </p>
+        </div>
 
-              <input
-                type="text"
-                placeholder="Your display name"
-                value={displayName}
-                onChange={(event) => setDisplayName(event.target.value)}
-                maxLength={50}
-                disabled={loading}
-                autoComplete="name"
-              />
-            </>
-          )}
+        <div className="post-user-info">
+          <strong>
+            {username}
+          </strong>
 
-          {onboardingStep === 3 && (
-            <>
-              <h1>Your Vezlivo username</h1>
-              <p className="login-subtitle">
-                Vezlivo automatically chose an available username for you.
-              </p>
+          <span>
+            {formatDate(
+              post.createdAt || post.created_at
+            )}
+          </span>
+        </div>
 
-              <input
-                type="text"
-                value={`@${username}`}
-                readOnly
-                disabled={loading}
-                aria-label="Your Vezlivo username"
-              />
+        <button
+          type="button"
+          className="post-more-button"
+          aria-label="Post options"
+          onClick={() =>
+            alert(
+              "Post options will be connected next."
+            )
+          }
+        >
+          ⋯
+        </button>
 
-              <p style={{ fontSize: "13px", opacity: 0.7, marginTop: "-4px" }}>
-                You do not need to choose a username. You can change it later from Account information.
-              </p>
-            </>
-          )}
+      </div>
 
-          {onboardingStep === 4 && (
-            <>
-              <h1>Add a profile picture</h1>
-              <p className="login-subtitle">
-                Add a profile picture so people can recognize you. You can skip this for now.
-              </p>
 
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  gap: "14px",
-                  margin: "20px 0",
-                }}
-              >
-                {profilePreview && !profileSkipped ? (
-                  <img
-                    src={profilePreview}
-                    alt="Profile preview"
+      {post.caption && (
+        <div className="post-caption" style={{ padding: "0 16px 12px 16px" }}>
+
+          <p style={{ margin: "0 0 8px 0", fontSize: "14px", lineHeight: "1.5", color: "#111" }}>
+            {post.caption}
+          </p>
+
+          {hashtags.length > 0 && (
+            <div className="post-hashtags" style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "6px" }}>
+              {hashtags.map(
+                (tag) => (
+                  <span
+                    key={tag}
                     style={{
-                      width: "120px",
-                      height: "120px",
-                      borderRadius: "50%",
-                      objectFit: "cover",
-                      border: "4px solid #fff",
-                      boxShadow: "0 4px 18px rgba(0,0,0,.18)",
-                    }}
-                  />
-                ) : (
-                  <div
-                    style={{
-                      width: "120px",
-                      height: "120px",
-                      borderRadius: "50%",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      background: "#e9eef5",
-                      color: "#0f172a",
-                      fontSize: "42px",
-                      fontWeight: 700,
+                      fontSize: "13px",
+                      fontWeight: "600",
+                      color: "#0056b3",
+                      background: "#f0f4f8",
+                      padding: "2px 8px",
+                      borderRadius: "6px"
                     }}
                   >
-                    {(displayName || onboardingUser.email || "V").charAt(0).toUpperCase()}
-                  </div>
-                )}
-
-                <label
-                  htmlFor="onboarding-profile-photo"
-                  className="primary-login-button"
-                  style={{
-                    cursor: loading ? "default" : "pointer",
-                    display: "inline-block",
-                    textAlign: "center",
-                  }}
-                >
-                  {profilePreview && !profileSkipped
-                    ? "Change profile picture"
-                    : "Select profile picture"}
-                </label>
-
-                <input
-                  id="onboarding-profile-photo"
-                  type="file"
-                  accept="image/*"
-                  onChange={handleProfileFileChange}
-                  disabled={loading}
-                  hidden
-                />
-
-                <button
-                  type="button"
-                  className="forgot-password-button"
-                  onClick={() => {
-                    setProfileFile(null);
-                    setProfilePreview("");
-                    setProfileSkipped(true);
-                    clearOnboardingMessage();
-                  }}
-                  disabled={loading}
-                >
-                  Skip for now
-                </button>
-              </div>
-            </>
+                    {tag.startsWith("#") ? tag : `#${tag}`}
+                  </span>
+                )
+              )}
+            </div>
           )}
 
-          {onboardingMessage && (
-            <p className="login-message" style={{ marginTop: "14px" }}>
-              {onboardingMessage}
-            </p>
+          {mentions.length > 0 && (
+            <div className="post-mentions" style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginTop: "6px" }}>
+              {mentions.map(
+                (mention) => (
+                  <span
+                    key={mention}
+                    style={{
+                      fontSize: "13px",
+                      fontWeight: "600",
+                      color: "#111",
+                      background: "#eaeaea",
+                      padding: "2px 8px",
+                      borderRadius: "6px"
+                    }}
+                  >
+                    {mention.startsWith("@") ? mention : `@${mention}`}
+                  </span>
+                )
+              )}
+            </div>
           )}
 
-          <button
-            type="button"
-            className="primary-login-button"
-            onClick={handleOnboardingNext}
-            disabled={loading}
-            style={{ marginTop: "18px" }}
-          >
-            {loading ? "Saving..." : onboardingStep === 4 ? "Finish setup" : "Continue"}
-          </button>
+        </div>
+      )}
 
-          {onboardingStep > 1 && (
-            <button
-              type="button"
-              className="forgot-password-button"
-              onClick={() => {
-                clearOnboardingMessage();
-                setOnboardingStep(onboardingStep - 1);
+
+      {mediaUrl && (
+        <div className="post-media">
+
+          {isVideo ? (
+            <video
+              ref={videoRef}
+              src={mediaUrl}
+              controls
+              playsInline
+              preload="metadata"
+              onPlay={handleView}
+              onLoadedMetadata={() => {
+                if (videoRef.current) {
+                  videoRef.current.setAttribute(
+                    "webkit-playsinline",
+                    "true"
+                  );
+                }
               }}
-              disabled={loading}
-            >
-              ← Previous
-            </button>
+            />
+          ) : (
+            <img
+              src={mediaUrl}
+              alt={post.caption || "Vezlivo post"}
+              loading="lazy"
+              onLoad={handleView}
+            />
           )}
-        </section>
-      </main>
+
+        </div>
+      )}
+
+
+      <div className="post-stats">
+
+        <span>
+          {formatCount(likeCount)} likes
+        </span>
+
+        <span>
+          {formatCount(post.comments || post.comments_count)} comments
+        </span>
+
+        <span>
+          {formatCount(post.views)} views
+        </span>
+
+      </div>
+
+
+      <div className="post-actions">
+
+        <button
+          type="button"
+          onClick={handleLike}
+          className={liked ? "post-action active" : "post-action"}
+          disabled={busy}
+        >
+          {liked ? "♥" : "♡"}
+          <span>Like</span>
+        </button>
+
+        <button
+          type="button"
+          className="post-action"
+          onClick={() => {
+            if (!currentUid) {
+              onLogin();
+              return;
+            }
+
+            window.dispatchEvent(
+              new CustomEvent("vezlivo:open-comments", {
+                detail: {
+                  postId: post.id || post.postId,
+                  postOwnerId: post.uid || post.user_id,
+                },
+              })
+            );
+          }}
+        >
+          💬
+          <span>Comment</span>
+        </button>
+
+        <button
+          type="button"
+          className={saved ? "post-action active" : "post-action"}
+          onClick={handleSave}
+        >
+          🔖
+          <span>Save</span>
+        </button>
+
+
+        <button
+          type="button"
+          className="post-action"
+          onClick={handleShare}
+        >
+          ↗
+          <span>Share</span>
+        </button>
+
+      </div>
+
+    </article>
+  );
+}
+
+
+/* =========================================================
+   HOME PAGE WRAPPER
+========================================================= */
+
+function HomePage({
+  user,
+  commentsOpen,
+  onLogin,
+  onCreate,
+  onDiscover,
+  onActivity,
+  onInbox,
+}) {
+  return (
+    <Home
+      user={user}
+      commentsOpen={commentsOpen}
+      onLogin={onLogin}
+      onCreate={onCreate}
+      onDiscover={onDiscover}
+      onActivity={onActivity}
+      onInbox={onInbox}
+    />
+  );
+}
+
+
+/* =========================================================
+   APP
+========================================================= */
+
+function App() {
+  const [page, setPage] = useState("home");
+  const [commentsData, setCommentsData] = useState(null);
+
+  useEffect(() => {
+    const handleOpenComments = (event) => {
+      const { postId, postOwnerId } = event.detail || {};
+      if (postId) {
+        setCommentsData({ postId, postOwnerId });
+      }
+    };
+
+    window.addEventListener("vezlivo:open-comments", handleOpenComments);
+    return () => window.removeEventListener("vezlivo:open-comments", handleOpenComments);
+  }, []);
+
+  const [user, setUser] = useState(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [showSplash, setShowSplash] = useState(true);
+  const [draftToOpen, setDraftToOpen] = useState("");
+  const [userProfileToOpen, setUserProfileToOpen] = useState("");
+
+  const lastBackPress = useRef(0);
+
+  useEffect(() => {
+    const syncSavedSession = () => {
+      const savedUser = readSavedUser();
+      setUser(savedUser);
+      setAuthReady(true);
+
+      if (savedUser) {
+        localStorage.setItem("vezlivo_session_active", "true");
+      } else {
+        localStorage.removeItem("vezlivo_session_active");
+      }
+    };
+
+    syncSavedSession();
+    window.addEventListener("storage", syncSavedSession);
+    return () => window.removeEventListener("storage", syncSavedSession);
+  }, []);
+
+  useEffect(() => {
+    const handleOpenUserProfile = (event) => {
+      const uid = event?.detail?.uid;
+      if (!uid) {
+        return;
+      }
+
+      setUserProfileToOpen(String(uid));
+      navigate("user-profile");
+    };
+
+    window.addEventListener(
+      "vezlivo:open-user-profile",
+      handleOpenUserProfile
+    );
+
+    return () => {
+      window.removeEventListener(
+        "vezlivo:open-user-profile",
+        handleOpenUserProfile
+      );
+    };
+  }, []);
+
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setShowSplash(false);
+    }, 2000);
+
+    return () => clearTimeout(timer);
+  }, []);
+
+
+  useEffect(() => {
+    window.history.replaceState(
+      {
+        vezlivo: true,
+        page: "home",
+      },
+      "",
+      window.location.href
+    );
+
+
+    const handlePopState = () => {
+      if (
+        page === "profile" ||
+        page === "settings" ||
+        page === "login" ||
+        page === "create" ||
+        page === "discover" ||
+        page === "activity" ||
+        page === "inbox" ||
+        page === "user-profile"
+      ) {
+        setPage("home");
+
+        window.history.pushState(
+          {
+            vezlivo: true,
+            page: "home",
+          },
+          "",
+          window.location.href
+        );
+
+        return;
+      }
+
+
+      const now = Date.now();
+
+      if (now - lastBackPress.current < 2000) {
+        window.history.back();
+        return;
+      }
+
+      lastBackPress.current = now;
+
+      window.history.pushState(
+        {
+          vezlivo: true,
+          page: "home",
+        },
+        "",
+        window.location.href
+      );
+
+      alert("Press back again to exit Vezlivo.");
+    };
+
+
+    window.addEventListener("popstate", handlePopState);
+
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [page]);
+
+
+  const navigate = (nextPage) => {
+    setPage(nextPage);
+
+    window.history.pushState(
+      {
+        vezlivo: true,
+        page: nextPage,
+      },
+      "",
+      window.location.href
+    );
+  };
+
+
+  if (showSplash || !authReady) {
+    return (
+      <SplashScreen
+        onComplete={() => setShowSplash(false)}
+      />
+    );
+  }
+
+
+  let content = null;
+
+  if (page === "login" && !user) {
+    content = (
+      <Login
+        onBack={() => {
+          const savedUser = readSavedUser();
+          setUser(savedUser);
+          setPage("home");
+        }}
+      />
+    );
+  } else if (page === "user-profile") {
+    if (!userProfileToOpen) {
+      navigate("home");
+      return null;
+    }
+    content = (
+      <UserProfile
+        uid={userProfileToOpen}
+        currentUser={user}
+        onBack={() => {
+          setUserProfileToOpen("");
+          navigate("home");
+        }}
+      />
+    );
+  } else if (page === "profile") {
+    content = (
+      <Profile
+        onBack={() => {
+          const savedUser = readSavedUser();
+          setUser(savedUser);
+          setPage("home");
+        }}
+        onOpenDraft={(draftId) => {
+          setDraftToOpen(draftId || "");
+          navigate("create");
+        }}
+      />
+    );
+  } else if (page === "settings") {
+    content = (
+      <Settings
+        user={user}
+        onBack={() => setPage("profile")}
+      />
+    );
+  } else if (page === "create") {
+    content = (
+      <Create
+        draftId={draftToOpen}
+        onNavigate={(section) => {
+          if (section === "Home") navigate("home");
+        }}
+      />
+    );
+  } else if (page === "discover") {
+    content = (
+      <Discover
+        onBack={() => navigate("home")}
+      />
+    );
+  } else if (page === "activity") {
+    if (!user) {
+      navigate("login");
+      return null;
+    }
+    content = (
+      <Activity
+        onBack={() => navigate("home")}
+      />
+    );
+  } else if (page === "inbox") {
+    if (!user) {
+      navigate("login");
+      return null;
+    }
+    content = (
+      <Inbox
+        onBack={() => navigate("home")}
+        onOpenUser={(uid) => {
+          setUserProfileToOpen(String(uid || ""));
+          navigate("user-profile");
+        }}
+      />
+    );
+  } else {
+    content = (
+      <HomePage
+        user={user}
+        commentsOpen={Boolean(commentsData)}
+        onLogin={() => navigate("login")}
+        onCreate={() => {
+          if (!user) {
+            navigate("login");
+            return;
+          }
+          setDraftToOpen("");
+          navigate("create");
+        }}
+        onDiscover={() => navigate("discover")}
+        onActivity={() => {
+          if (!user) {
+            navigate("login");
+            return;
+          }
+          navigate("activity");
+        }}
+        onProfile={() => {
+          if (!user) {
+            navigate("login");
+            return;
+          }
+          navigate("profile");
+        }}
+        onInbox={() => {
+          if (!user) {
+            navigate("login");
+            return;
+          }
+          navigate("inbox");
+        }}
+      />
     );
   }
 
   return (
-    <main className="login-page">
-      <section className="login-card">
-        <button
-          type="button"
-          className="back-button"
-          onClick={onBack}
-          disabled={loading}
-        >
-          ← Back
-        </button>
+    <div style={{ position: "fixed", inset: 0, width: "100vw", height: "100dvh", overflow: "hidden", background: "#000000" }}>
+      <div style={{ width: "100%", height: "calc(100dvh - 68px)", overflowY: "auto", WebkitOverflowScrolling: "touch" }}>
+        {content}
+      </div>
 
-        <img src="/Logo.png" alt="Vezlivo" className="login-logo" />
-
-        <h1>
-          {mode === "login" ? "Log in to Vezlivo" : "Create your Vezlivo account"}
-        </h1>
-
-        <p className="login-subtitle">
-          {mode === "login" ? "Welcome back." : "Join Vezlivo and start connecting."}
-        </p>
-
-        <div className="auth-methods">
+      {!commentsData && (
+        <nav className="bottom-navigation" style={{ zIndex: 99999, pointerEvents: "auto", position: "fixed", bottom: 0, left: 0, right: 0, display: "flex", justifyContent: "space-around", background: "rgba(15,15,18,0.97)", borderTop: "1px solid #27272a", height: "68px", alignItems: "center", padding: "0 8px" }}>
           <button
             type="button"
-            className={method === "email" ? "method-active" : ""}
-            onClick={() => switchMethod("email")}
-            disabled={loading}
+            className={`nav-item ${page === "home" ? "active" : ""}`}
+            onClick={() => {
+              navigate("home");
+              window.scrollTo({ top: 0, behavior: "smooth" });
+            }}
+            style={{ background: "transparent", border: "none", color: page === "home" ? "#fff" : "#71717a", display: "flex", flexDirection: "column", alignItems: "center", cursor: "pointer", fontSize: "11px", fontWeight: "600" }}
           >
-            Email
+            <span style={{ fontSize: "18px" }}>🏠</span>
+            <small>Home</small>
           </button>
 
           <button
             type="button"
-            className={method === "phone" ? "method-active" : ""}
-            onClick={() => switchMethod("phone")}
-            disabled={loading}
+            className={`nav-item ${page === "discover" ? "active" : ""}`}
+            onClick={() => navigate("discover")}
+            style={{ background: "transparent", border: "none", color: page === "discover" ? "#fff" : "#71717a", display: "flex", flexDirection: "column", alignItems: "center", cursor: "pointer", fontSize: "11px", fontWeight: "600" }}
           >
-            Phone
+            <span style={{ fontSize: "18px" }}>🔎</span>
+            <small>Discover</small>
           </button>
-        </div>
 
-        {method === "email" && (
-          <form onSubmit={handleEmailAuth}>
-            <input
-              type="email"
-              placeholder="Email address"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              autoComplete="email"
-              disabled={loading}
-            />
-
-            <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
-              <input
-                type={showPassword ? "text" : "password"}
-                placeholder="Password"
-                value={password}
-                onChange={(event) => setPassword(event.target.value)}
-                autoComplete={mode === "login" ? "current-password" : "new-password"}
-                disabled={loading}
-                style={{ width: "100%", paddingRight: "64px" }}
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword((prev) => !prev)}
-                disabled={loading}
-                aria-label={showPassword ? "Hide password" : "Show password"}
-                style={{
-                  position: "absolute",
-                  right: "10px",
-                  background: "transparent",
-                  border: "none",
-                  color: "#94a3b8",
-                  fontSize: "13px",
-                  fontWeight: 600,
-                  cursor: "pointer",
-                  padding: "4px 6px",
-                }}
-              >
-                {showPassword ? "Hide" : "Show"}
-              </button>
-            </div>
-
-            {mode === "signup" && (
-              <input
-                type={showPassword ? "text" : "password"}
-                placeholder="Confirm password"
-                value={confirmPassword}
-                onChange={(event) => setConfirmPassword(event.target.value)}
-                autoComplete="new-password"
-                disabled={loading}
-              />
-            )}
-
-            <button
-              type="submit"
-              className="primary-login-button"
-              disabled={loading}
-            >
-              {loading ? "Please wait..." : mode === "login" ? "Log in" : "Create account"}
-            </button>
-
-            {mode === "login" && (
-              <button
-                type="button"
-                className="forgot-password-button"
-                onClick={handleForgotPassword}
-                disabled={loading}
-              >
-                Forgot password?
-              </button>
-            )}
-          </form>
-        )}
-
-        {method === "phone" && (
-          <>
-            {!confirmationPending ? (
-              <form onSubmit={handleSendPhoneCode}>
-                <input
-                  type="tel"
-                  placeholder="+234 801 234 5678"
-                  value={phone}
-                  onChange={(event) => setPhone(event.target.value)}
-                  autoComplete="tel"
-                  disabled={loading}
-                />
-
-                <p className="phone-help">
-                  Include your country code, for example +234 for Nigeria.
-                </p>
-
-                <button
-                  type="submit"
-                  className="primary-login-button"
-                  disabled={loading}
-                >
-                  {loading ? "Sending code..." : "Send verification code"}
-                </button>
-              </form>
-            ) : (
-              <form onSubmit={handleVerifyPhoneCode}>
-                <input
-                  type="text"
-                  placeholder="Verification code"
-                  value={verificationCode}
-                  onChange={(event) => setVerificationCode(event.target.value)}
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  disabled={loading}
-                />
-
-                <button
-                  type="submit"
-                  className="primary-login-button"
-                  disabled={loading}
-                >
-                  {loading ? "Verifying..." : "Verify phone number"}
-                </button>
-
-                <button
-                  type="button"
-                  className="forgot-password-button"
-                  onClick={() => {
-                    setConfirmationPending(false);
-                    setVerificationCode("");
-                    clearMessage();
-                  }}
-                  disabled={loading}
-                >
-                  Use a different number
-                </button>
-              </form>
-            )}
-          </>
-        )}
-
-        <div className="divider">
-          <span>OR</span>
-        </div>
-
-        <button
-          type="button"
-          className="google-button"
-          onClick={handleGoogleLogin}
-          disabled={loading}
-        >
-          Continue with Google
-        </button>
-
-        {message && (
-          <p
-            className={
-              messageType === "success"
-                ? "login-message success"
-                : "login-message"
-            }
+          <button
+            type="button"
+            className="nav-item"
+            onClick={() => {
+              if (!user) {
+                navigate("login");
+                return;
+              }
+              setDraftToOpen("");
+              navigate("create");
+            }}
+            style={{ background: "linear-gradient(135deg, #6366f1, #38bdf8)", border: "none", color: "#fff", width: "44px", height: "32px", borderRadius: "8px", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", fontSize: "22px", fontWeight: "800" }}
           >
-            {message}
-          </p>
-        )}
+            ＋
+          </button>
 
-        <button
-          type="button"
-          className="switch-auth-button"
-          onClick={switchMode}
-          disabled={loading}
-        >
-          {mode === "login"
-            ? "Create a new account"
-            : "Already have an account? Log in"}
-        </button>
-      </section>
-    </main>
+          <button
+            type="button"
+            className={`nav-item ${page === "activity" ? "active" : ""}`}
+            onClick={() => {
+              if (!user) {
+                navigate("login");
+                return;
+              }
+              navigate("activity");
+            }}
+            style={{ background: "transparent", border: "none", color: page === "activity" ? "#fff" : "#71717a", display: "flex", flexDirection: "column", alignItems: "center", cursor: "pointer", fontSize: "11px", fontWeight: "600" }}
+          >
+            <span style={{ fontSize: "18px" }}>🔔</span>
+            <small>Activity</small>
+          </button>
+
+          <button
+            type="button"
+            className={`nav-item ${page === "profile" ? "active" : ""}`}
+            onClick={() => {
+              if (!user) {
+                navigate("login");
+                return;
+              }
+              navigate("profile");
+            }}
+            style={{ background: "transparent", border: "none", color: page === "profile" ? "#fff" : "#71717a", display: "flex", flexDirection: "column", alignItems: "center", cursor: "pointer", fontSize: "11px", fontWeight: "600" }}
+          >
+            <span style={{ fontSize: "18px" }}>👤</span>
+            <small>Profile</small>
+          </button>
+        </nav>
+      )}
+
+      {commentsData && (
+        <Comments
+          postId={commentsData.postId}
+          postOwnerId={commentsData.postOwnerId}
+          onClose={() => setCommentsData(null)}
+        />
+      )}
+    </div>
   );
 }
 
-export default Login;
+
+/* =========================================================
+   START VEZLIVO
+========================================================= */
+
+const rootElement = document.getElementById("root");
+
+if (!rootElement) {
+  throw new Error("Vezlivo root element was not found.");
+}
+
+createRoot(rootElement).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);

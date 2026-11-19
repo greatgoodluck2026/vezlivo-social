@@ -1,10 +1,7 @@
 import React, { useEffect, useState } from "react";
-import { onAuthStateChanged } from "firebase/auth";
-import { auth } from "./firebase.js";
 import Report from "./Report.jsx";
 import SoundFeed from "./SoundFeed.jsx";
-import { apiGet, apiPost } from "./apiClient.js"; 
-import '@mux/mux-video';
+import { apiGet, apiPost } from "./apiClient.js";
 
 export default function Home({ commentsOpen, onNavigate, onCreate, onProfile, onActivity, onDiscover }) {
   const [user, setUser] = useState(null);
@@ -23,7 +20,7 @@ export default function Home({ commentsOpen, onNavigate, onCreate, onProfile, on
   const [openMenuPostId, setOpenMenuPostId] = useState(null);
   const [reportPost, setReportPost] = useState(null);
   const [viewedPostIds, setViewedPostIds] = useState({});
-  
+
   // Clean Modal & Toast states
   const [deleteConfirmPost, setDeleteConfirmPost] = useState(null);
   const [toastMessage, setToastMessage] = useState("");
@@ -31,12 +28,20 @@ export default function Home({ commentsOpen, onNavigate, onCreate, onProfile, on
   // Background upload banner state
   const [backgroundPublish, setBackgroundPublish] = useState(null);
 
-  // Auth listener
+  // Sovereign auth listener via localStorage
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-    });
-    return () => unsubscribe();
+    const loadSavedUser = () => {
+      try {
+        const saved = localStorage.getItem("vezlivo_current_user");
+        setUser(saved ? JSON.parse(saved) : null);
+      } catch {
+        setUser(null);
+      }
+    };
+
+    loadSavedUser();
+    window.addEventListener("storage", loadSavedUser);
+    return () => window.removeEventListener("storage", loadSavedUser);
   }, []);
 
   useEffect(() => {
@@ -52,13 +57,13 @@ export default function Home({ commentsOpen, onNavigate, onCreate, onProfile, on
         if (currentProg >= 98) {
           clearInterval(interval);
         } else {
-          setBackgroundPublish((prev) => prev ? { ...prev, progress: currentProg } : null);
+          setBackgroundPublish((prev) => (prev ? { ...prev, progress: currentProg } : null));
         }
       }, 1000);
 
       setTimeout(() => {
         clearInterval(interval);
-        setBackgroundPublish((prev) => prev ? { ...prev, progress: 100 } : null);
+        setBackgroundPublish((prev) => (prev ? { ...prev, progress: 100 } : null));
         setTimeout(() => setBackgroundPublish(null), 2000);
       }, 12000);
     };
@@ -85,7 +90,7 @@ export default function Home({ commentsOpen, onNavigate, onCreate, onProfile, on
     async function loadFeedPosts() {
       try {
         const data = await apiGet("/posts");
-        
+
         if (cancelled) return;
 
         const postList = Array.isArray(data) ? data : (data.posts || []);
@@ -212,7 +217,6 @@ export default function Home({ commentsOpen, onNavigate, onCreate, onProfile, on
     const wasLiked = Boolean(likedIds[postId]);
     const newAction = wasLiked ? "unlike" : "like";
 
-    // Instant optimistic UI update
     setLikedIds((current) => ({ ...current, [postId]: !wasLiked }));
     setPosts((currentPosts) =>
       currentPosts.map((p) => {
@@ -355,7 +359,7 @@ export default function Home({ commentsOpen, onNavigate, onCreate, onProfile, on
     const postOwnerId = post.user_id || post.uid;
     window.dispatchEvent(
       new CustomEvent("vezlivo:open-comments", {
-        detail: { postId, postOwnerId }
+        detail: { postId, postOwnerId },
       })
     );
   };
@@ -452,7 +456,7 @@ export default function Home({ commentsOpen, onNavigate, onCreate, onProfile, on
   useEffect(() => {
     const observerCallback = (entries) => {
       entries.forEach((entry) => {
-        const videoEl = entry.target.querySelector("video, mux-video");
+        const videoEl = entry.target.querySelector("video");
         if (!videoEl) return;
 
         if (entry.isIntersecting) {
@@ -479,16 +483,11 @@ export default function Home({ commentsOpen, onNavigate, onCreate, onProfile, on
   return (
     <div style={styles.page}>
       <style>{`
-        mux-video, video {
+        video {
           width: 100% !important;
           height: 100% !important;
           object-fit: contain !important;
           background-color: #000000 !important;
-        }
-        mux-video::part(video) {
-          width: 100% !important;
-          height: 100% !important;
-          object-fit: contain !important;
         }
         @keyframes spinner-rotate {
           0% { transform: rotate(0deg); }
@@ -505,13 +504,12 @@ export default function Home({ commentsOpen, onNavigate, onCreate, onProfile, on
         }
       `}</style>
 
-      {/* Background Publishing Reminder Banner */}
       {backgroundPublish && (
         <div style={styles.backgroundPublishBanner}>
           <div style={styles.bgBannerTextRow}>
             <strong>
-              {backgroundPublish.progress === 100 
-                ? `Your ${backgroundPublish.title} is live!` 
+              {backgroundPublish.progress === 100
+                ? `Your ${backgroundPublish.title} is live!`
                 : `Publishing your ${backgroundPublish.title} (${backgroundPublish.progress}%)`}
             </strong>
             <span style={styles.bgBannerSub}>
@@ -643,10 +641,9 @@ export default function Home({ commentsOpen, onNavigate, onCreate, onProfile, on
         </div>
       )}
 
-      {/* Feed container dynamically shrinks to 50vh when comments are open, matching TikTok */}
       <main style={{
         ...styles.feed,
-        ...(commentsOpen ? { height: "50vh", maxHeight: "50vh" } : {})
+        ...(commentsOpen ? { height: "50vh", maxHeight: "50vh" } : {}),
       }}>
         {loading ? (
           <div style={styles.centerMessage}>
@@ -674,89 +671,71 @@ export default function Home({ commentsOpen, onNavigate, onCreate, onProfile, on
             </button>
           </div>
         ) : (
-         filteredPosts.map((post) => {
-           const media = post.media || post.video || post.asset || {};
-           const muxPlaybackId =
-             post.muxPlaybackId || post.mux_playback_id ||
-             post.playbackId || post.playback_id ||
-             media.playbackId || media.playback_id || "";
+          filteredPosts.map((post) => {
+            const media = post.media || post.video || post.asset || {};
+            const videoUrl =
+              (typeof post.video_url === "string" && post.video_url) ||
+              (typeof post.videoUrl === "string" && post.videoUrl) ||
+              (typeof post.mediaURL === "string" && post.mediaURL) ||
+              (typeof post.mediaUrl === "string" && post.mediaUrl) ||
+              (typeof post.videoURL === "string" && post.videoURL) ||
+              (typeof post.url === "string" && post.url) ||
+              (typeof post.secure_url === "string" && post.secure_url) ||
+              (typeof post.fileUrl === "string" && post.fileUrl) ||
+              (typeof post.fileURL === "string" && post.fileURL) ||
+              media.url || media.playbackUrl || media.playback_url || "";
 
-           const videoUrl = (muxPlaybackId
-             ? `https://stream.mux.com/${muxPlaybackId}/high.mp4`
-             : "") ||
-             (typeof post.video_url === "string" && post.video_url) ||
-             (typeof post.videoUrl === "string" && post.videoUrl) ||
-             (typeof post.mediaURL === "string" && post.mediaURL) ||
-             (typeof post.mediaUrl === "string" && post.mediaUrl) ||
-             (typeof post.videoURL === "string" && post.videoURL) ||
-             (typeof post.url === "string" && post.url) ||
-             (typeof post.secure_url === "string" && post.secure_url) ||
-             (typeof post.fileUrl === "string" && post.fileUrl) ||
-             (typeof post.fileURL === "string" && post.fileURL) ||
-             media.url || media.playbackUrl || media.playback_url || "";
-             
-           const posterUrl = post.coverURL || post.coverUrl || post.thumbnailURL || post.thumbnail_url || media.poster || "";
-           const profileUrl = post.profile_url || post.profileURL || post.photoURL || post.avatarURL || "";
-           const postIdKey = String(post.id || post.postId || "");
-           const postOwnerUid = post.user_id || post.uid;
+            const posterUrl = post.coverURL || post.coverUrl || post.thumbnailURL || post.thumbnail_url || media.poster || "";
+            const profileUrl = post.profile_url || post.profileURL || post.photoURL || post.avatarURL || "";
+            const postIdKey = String(post.id || post.postId || "");
+            const postOwnerUid = post.user_id || post.uid;
 
-           const isOwner = user && postOwnerUid === user.uid;
-           const isLiked = Boolean(likedIds[postIdKey]);
+            const isOwner = user && postOwnerUid === user.uid;
+            const isLiked = Boolean(likedIds[postIdKey]);
 
-        return (
-             <article
-               key={`${postOwnerUid || "user"}-${postIdKey}`}
-               style={{
-                 ...styles.post,
-                 ...(commentsOpen ? { height: "50vh" } : {})
-               }}
-             >
-               <div
-                 style={styles.mediaFrame}
-                 onClick={(e) => {
-                   const videoEl = e.currentTarget.querySelector("video, mux-video");
-                   if (videoEl) {
-                     if (videoEl.paused) {
-                       videoEl.play();
-                     } else {
-                       videoEl.pause();
-                     }
-                   }
-                 }}
-               >
-               {muxPlaybackId ? (
-                   <mux-video
-                     playback-id={muxPlaybackId}
-                     poster={posterUrl || undefined}
-                     muted
-                     loop
-                     playsInline
-                     preload="auto"
-                     onPlay={() => increaseViews(post)}
-                     style={styles.video}
-                   />
-                 ) : videoUrl && typeof videoUrl === "string" && videoUrl.trim() !== "" ? (
-                   <video
-                     src={videoUrl.trim()}
-                     poster={posterUrl || undefined}
-                     muted
-                     loop
-                     playsInline
-                     preload="metadata"
-                     onPlay={() => increaseViews(post)}
-                     style={styles.video}
-                   />
-                 ) : posterUrl ? (
-                   <img src={posterUrl} alt={post.caption || "Vezlivo post"} style={styles.imagePost} />
-                 ) : (
-                   <div style={styles.videoUnavailable}>
-                     <span style={styles.videoIcon}>▶</span>
-                     <span>Media unavailable</span>
-                   </div>
-                 )}
-                  {/* Right Action Buttons */}
+            return (
+              <article
+                key={`${postOwnerUid || "user"}-${postIdKey}`}
+                style={{
+                  ...styles.post,
+                  ...(commentsOpen ? { height: "50vh" } : {}),
+                }}
+              >
+                <div
+                  style={styles.mediaFrame}
+                  onClick={(e) => {
+                    const videoEl = e.currentTarget.querySelector("video");
+                    if (videoEl) {
+                      if (videoEl.paused) {
+                        videoEl.play();
+                      } else {
+                        videoEl.pause();
+                      }
+                    }
+                  }}
+                >
+                  {videoUrl && typeof videoUrl === "string" && videoUrl.trim() !== "" ? (
+                    <video
+                      src={videoUrl.trim()}
+                      poster={posterUrl || undefined}
+                      muted
+                      loop
+                      playsInline
+                      preload="metadata"
+                      onPlay={() => increaseViews(post)}
+                      style={styles.video}
+                    />
+                  ) : posterUrl ? (
+                    <img src={posterUrl} alt={post.caption || "Vezlivo post"} style={styles.imagePost} />
+                  ) : (
+                    <div style={styles.videoUnavailable}>
+                      <span style={styles.videoIcon}>▶</span>
+                      <span>Media unavailable</span>
+                    </div>
+                  )}
+
                   <div style={styles.videoRightActions} onClick={(e) => e.stopPropagation()}>
-                    <div 
+                    <div
                       style={styles.floatingAvatarWrapper}
                       onClick={(e) => {
                         e.stopPropagation();
@@ -779,8 +758,8 @@ export default function Home({ commentsOpen, onNavigate, onCreate, onProfile, on
                       </div>
 
                       {user && postOwnerUid && postOwnerUid !== user.uid && !followingIds[postOwnerUid] && (
-                        <button 
-                          style={styles.vezlivoPlusButton} 
+                        <button
+                          style={styles.vezlivoPlusButton}
                           aria-label="Follow user"
                           onClick={async (e) => {
                             e.stopPropagation();
@@ -805,10 +784,10 @@ export default function Home({ commentsOpen, onNavigate, onCreate, onProfile, on
                       style={styles.vezlivoActionBtn}
                       onClick={() => likePost(post)}
                     >
-                      <span style={{ 
+                      <span style={{
                         fontSize: "28px",
                         color: isLiked ? "#38bdf8" : "#ffffff",
-                        filter: isLiked ? "drop-shadow(0 2px 6px rgba(56, 189, 248, 0.5))" : "drop-shadow(0 1px 3px rgba(0,0,0,0.8))"
+                        filter: isLiked ? "drop-shadow(0 2px 6px rgba(56, 189, 248, 0.5))" : "drop-shadow(0 1px 3px rgba(0,0,0,0.8))",
                       }}>
                         {isLiked ? "♥" : "♡"}
                       </span>
@@ -879,7 +858,6 @@ export default function Home({ commentsOpen, onNavigate, onCreate, onProfile, on
                     </div>
                   </div>
 
-                  {/* Bottom-Left Clean Text Overlay */}
                   <div style={styles.videoLeftInfo}>
                     <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
                       <strong style={{ fontSize: "15px", color: "#ffffff", textShadow: "0 1px 2px rgba(0,0,0,0.8)" }}>
@@ -896,8 +874,8 @@ export default function Home({ commentsOpen, onNavigate, onCreate, onProfile, on
                       </p>
                     )}
 
-                    <div 
-                      style={styles.audioBadge} 
+                    <div
+                      style={styles.audioBadge}
                       onClick={(e) => {
                         e.stopPropagation();
                         const soundName = post.audioName || post.soundName || "Original Audio";
@@ -1089,7 +1067,6 @@ const styles = {
     fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif",
     overflow: "hidden",
   },
-
   floatingHeader: {
     position: "absolute",
     top: "12px",
@@ -1101,14 +1078,12 @@ const styles = {
     zIndex: 25,
     pointerEvents: "none",
   },
-
   floatingTabs: {
     display: "flex",
     alignItems: "center",
     gap: "18px",
     pointerEvents: "auto",
   },
-
   tab: {
     height: "36px",
     border: "none",
@@ -1120,12 +1095,10 @@ const styles = {
     padding: "0 4px",
     textShadow: "0 1px 4px rgba(0, 0, 0, 0.8)",
   },
-
   activeTab: {
     color: "#ffffff",
     borderBottom: "2px solid #ffffff",
   },
-
   floatingSearchBtn: {
     position: "absolute",
     right: "16px",
@@ -1137,7 +1110,6 @@ const styles = {
     pointerEvents: "auto",
     textShadow: "0 1px 4px rgba(0, 0, 0, 0.8)",
   },
-
   searchBox: {
     position: "absolute",
     top: "54px",
@@ -1151,7 +1123,6 @@ const styles = {
     zIndex: 35,
     boxShadow: "0 8px 32px rgba(0,0,0,0.6)",
   },
-
   searchInput: {
     width: "100%",
     boxSizing: "border-box",
@@ -1163,19 +1134,16 @@ const styles = {
     fontSize: "14px",
     outline: "none",
   },
-
   searchStatus: {
     padding: "8px 4px",
     color: "#a1a1aa",
     fontSize: "13px",
   },
-
   searchError: {
     padding: "8px 4px",
     color: "#f87171",
     fontSize: "13px",
   },
-
   searchUserRow: {
     width: "100%",
     display: "flex",
@@ -1189,7 +1157,6 @@ const styles = {
     textAlign: "left",
     cursor: "pointer",
   },
-
   searchUserAvatar: {
     width: "36px",
     height: "36px",
@@ -1202,30 +1169,25 @@ const styles = {
     fontWeight: "700",
     flexShrink: 0,
   },
-
   searchUserImage: {
     width: "100%",
     height: "100%",
     objectFit: "cover",
   },
-
   searchUserText: {
     flex: 1,
     display: "flex",
     flexDirection: "column",
     gap: "1px",
   },
-
   searchUserUsername: {
     color: "#a1a1aa",
     fontSize: "12px",
   },
-
   searchArrow: {
     color: "#71717a",
     fontSize: "18px",
   },
-
   feed: {
     width: "100vw",
     height: "calc(100dvh - 68px)",
@@ -1247,7 +1209,6 @@ const styles = {
     overflow: "hidden",
     transition: "height 0.3s ease",
   },
-
   mediaFrame: {
     position: "absolute",
     inset: 0,
@@ -1256,7 +1217,6 @@ const styles = {
     background: "#000000",
     overflow: "hidden",
   },
-
   video: {
     display: "block",
     width: "100%",
@@ -1266,7 +1226,6 @@ const styles = {
     position: "absolute",
     inset: 0,
   },
-
   videoLeftInfo: {
     position: "absolute",
     left: "0",
@@ -1286,7 +1245,6 @@ const styles = {
     objectFit: "cover",
     background: "#050505",
   },
-
   videoUnavailable: {
     position: "absolute",
     inset: 0,
@@ -1298,11 +1256,9 @@ const styles = {
     gap: "10px",
     color: "#71717a",
   },
-
   videoIcon: {
     fontSize: "40px",
   },
-
   videoRightActions: {
     position: "absolute",
     right: "12px",
@@ -1313,7 +1269,6 @@ const styles = {
     gap: "10px",
     zIndex: 20,
   },
-
   floatingAvatarWrapper: {
     position: "relative",
     width: "44px",
@@ -1321,7 +1276,6 @@ const styles = {
     marginBottom: "4px",
     cursor: "pointer",
   },
-
   avatarMiniLarge: {
     width: "40px",
     height: "40px",
@@ -1333,7 +1287,6 @@ const styles = {
     overflow: "hidden",
     border: "2px solid #ffffff",
   },
-
   vezlivoPlusButton: {
     position: "absolute",
     bottom: "-2px",
@@ -1353,7 +1306,6 @@ const styles = {
     cursor: "pointer",
     boxShadow: "0 2px 6px rgba(0,210,255,0.4)",
   },
-
   vezlivoActionBtn: {
     border: "none",
     background: "transparent",
@@ -1365,14 +1317,12 @@ const styles = {
     cursor: "pointer",
     padding: 0,
   },
-
   sideActionCount: {
     fontSize: "12px",
     fontWeight: "700",
     color: "#ffffff",
     textShadow: "0 1px 3px rgba(0,0,0,0.9)",
   },
-
   soundDiscButton: {
     width: "38px",
     height: "38px",
@@ -1386,7 +1336,6 @@ const styles = {
     marginTop: "2px",
     boxShadow: "0 4px 10px rgba(0,0,0,0.4)",
   },
-
   soundDiscInner: {
     width: "22px",
     height: "22px",
@@ -1399,13 +1348,11 @@ const styles = {
     color: "#ffffff",
     backgroundColor: "#6366f1",
   },
-
   avatarImage: {
     width: "100%",
     height: "100%",
     objectFit: "cover",
   },
-
   audioBadge: {
     display: "flex",
     alignItems: "center",
@@ -1418,14 +1365,12 @@ const styles = {
     marginTop: "4px",
     backdropFilter: "blur(4px)",
   },
-
   audioText: {
     fontSize: "12px",
     color: "#ffffff",
     fontWeight: "600",
     textShadow: "0 1px 2px rgba(0,0,0,0.8)",
   },
-
   postMenu: {
     position: "absolute",
     right: "16px",
@@ -1438,7 +1383,6 @@ const styles = {
     boxShadow: "0 12px 30px rgba(0,0,0,0.5)",
     zIndex: 30,
   },
-
   menuItem: {
     width: "100%",
     border: "none",
@@ -1450,13 +1394,11 @@ const styles = {
     cursor: "pointer",
     fontSize: "13px",
   },
-
   views: {
     color: "#d4d4d8",
     fontSize: "11px",
     textShadow: "0 1px 2px rgba(0,0,0,0.8)",
   },
-
   centerMessage: {
     minHeight: "70vh",
     display: "flex",
@@ -1466,7 +1408,6 @@ const styles = {
     textAlign: "center",
     padding: "30px",
   },
-
   empty: {
     minHeight: "65vh",
     display: "flex",
@@ -1476,30 +1417,25 @@ const styles = {
     textAlign: "center",
     padding: "30px",
   },
-
   emptyIcon: {
     fontSize: "48px",
     marginBottom: "12px",
   },
-
   emptyTitle: {
     margin: "4px 0",
     color: "#ffffff",
     fontSize: "18px",
     fontWeight: "600",
   },
-
   emptyText: {
     color: "#a1a1aa",
     margin: "6px 0",
     fontSize: "14px",
   },
-
   emptySmall: {
     color: "#71717a",
     fontSize: "12px",
   },
-
   emptyCreateButton: {
     marginTop: "16px",
     border: "none",
@@ -1511,7 +1447,6 @@ const styles = {
     fontWeight: "700",
     cursor: "pointer",
   },
-
   bottomNav: {
     position: "fixed",
     left: 0,
@@ -1527,7 +1462,6 @@ const styles = {
     pointerEvents: "auto",
     padding: "0 8px",
   },
-
   navButton: {
     minWidth: "56px",
     height: "50px",
@@ -1545,16 +1479,13 @@ const styles = {
     pointerEvents: "auto",
     zIndex: 2147483647,
   },
-
   navButtonActive: {
     color: "#ffffff",
   },
-
   navIcon: {
     fontSize: "18px",
     lineHeight: 1,
   },
-
   createButton: {
     width: "44px",
     height: "32px",
@@ -1571,7 +1502,6 @@ const styles = {
     pointerEvents: "auto",
     zIndex: 2147483647,
   },
-
   modalOverlay: {
     position: "fixed",
     inset: 0,
@@ -1582,7 +1512,6 @@ const styles = {
     zIndex: 99999,
     padding: "20px",
   },
-
   whiteModalCard: {
     width: "100%",
     maxWidth: "320px",
@@ -1593,26 +1522,22 @@ const styles = {
     textAlign: "center",
     boxShadow: "0 20px 40px rgba(0,0,0,0.3)",
   },
-
   modalTitle: {
     margin: "0 0 8px 0",
     fontSize: "18px",
     fontWeight: "700",
     color: "#111111",
   },
-
   modalText: {
     margin: "0 0 20px 0",
     fontSize: "14px",
     color: "#555555",
     lineHeight: "1.4",
   },
-
   modalButtons: {
     display: "flex",
     gap: "12px",
   },
-
   modalCancelBtn: {
     flex: 1,
     padding: "12px",
@@ -1624,7 +1549,6 @@ const styles = {
     fontWeight: "600",
     cursor: "pointer",
   },
-
   modalDeleteBtn: {
     flex: 1,
     padding: "12px",
@@ -1636,7 +1560,6 @@ const styles = {
     fontWeight: "600",
     cursor: "pointer",
   },
-
   backgroundPublishBanner: {
     position: "absolute",
     top: "64px",
@@ -1653,7 +1576,6 @@ const styles = {
     flexDirection: "column",
     gap: "8px",
   },
-
   bgBannerTextRow: {
     display: "flex",
     justifyContent: "space-between",
@@ -1661,13 +1583,11 @@ const styles = {
     fontSize: "13px",
     color: "#ffffff",
   },
-
   bgBannerSub: {
     color: "#38bdf8",
     fontSize: "11px",
     fontWeight: "700",
   },
-
   bgBannerTrack: {
     width: "100%",
     height: "5px",
@@ -1675,14 +1595,12 @@ const styles = {
     borderRadius: "4px",
     overflow: "hidden",
   },
-
   bgBannerFill: {
     height: "100%",
     background: "linear-gradient(135deg, #6366f1, #38bdf8)",
     borderRadius: "4px",
     transition: "width 0.4s ease",
   },
-
   toastCard: {
     position: "fixed",
     bottom: "90px",

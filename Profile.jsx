@@ -1,25 +1,12 @@
-// File: src/Profile.jsx
+// File: Profile.jsx
 
 import React, { useEffect, useState } from "react";
 import VipProfileBanner from "./VipProfileBanner.jsx";
-import { onAuthStateChanged, signOut } from "firebase/auth";
-import {
-  onValue,
-  ref,
-  get,
-  set,
-  update,
-} from "firebase/database";
-
-import { auth, database } from "./firebase.js";
 import Settings from "./Settings.jsx";
 import { apiGet, apiPost } from "./apiClient.js";
 
-const DISPLAY_NAME_COOLDOWN =
-  7 * 24 * 60 * 60 * 1000;
-
-const USERNAME_COOLDOWN =
-  30 * 24 * 60 * 60 * 1000;
+const DISPLAY_NAME_COOLDOWN = 7 * 24 * 60 * 60 * 1000;
+const USERNAME_COOLDOWN = 30 * 24 * 60 * 60 * 1000;
 
 const MAX_BIO_LENGTH = 160;
 const MAX_USERNAME_LENGTH = 30;
@@ -55,7 +42,7 @@ function Profile({ onBack, onOpenDraft }) {
 
   const [localProfilePreview, setLocalProfilePreview] = useState("");
 
-  // 🖼️ Profile Photo Cropper & Framing States
+  // Profile Photo Cropper & Framing States
   const [cropImageFile, setCropImageFile] = useState(null);
   const [cropPreviewUrl, setCropPreviewUrl] = useState("");
   const [zoomLevel, setZoomLevel] = useState(1);
@@ -68,163 +55,113 @@ function Profile({ onBack, onOpenDraft }) {
   const [adminActionLoading, setAdminActionLoading] = useState(false);
 
   const isAdmin = user?.email === "greatgoodluckp@gmail.com";
+  const currentUid = user?.uid || user?.id;
+
+  // Sovereign auth listener via localStorage
+  useEffect(() => {
+    const loadSavedUser = () => {
+      try {
+        const saved = localStorage.getItem("vezlivo_current_user");
+        setUser(saved ? JSON.parse(saved) : null);
+      } catch {
+        setUser(null);
+      }
+    };
+
+    loadSavedUser();
+    window.addEventListener("storage", loadSavedUser);
+    return () => window.removeEventListener("storage", loadSavedUser);
+  }, []);
 
   /*
-   * AUTH + PROFILE (Fetches from Neon PostgreSQL backend to guarantee persistence)
+   * AUTH + PROFILE (Fetches from backend API)
    */
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(
-      auth,
-      async (currentUser) => {
-        if (!currentUser) {
-          setUser(null);
-          setProfile(null);
-          setPosts([]);
-          setLikedVideos([]);
-          setFavoriteVideos([]);
-          setLoading(false);
-          setContentLoading(false);
-          return;
+    if (!currentUid) {
+      setProfile(null);
+      setPosts([]);
+      setLikedVideos([]);
+      setFavoriteVideos([]);
+      setLoading(false);
+      setContentLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setLoading(true);
+
+    async function loadProfile() {
+      try {
+        let dbProfile = {};
+        try {
+          const res = await apiGet(`/users/${encodeURIComponent(currentUid)}`);
+          if (res && res.profile) {
+            dbProfile = res.profile;
+          } else if (res && res.user) {
+            dbProfile = res.user;
+          } else if (res && typeof res === "object" && !res.error) {
+            dbProfile = res;
+          }
+        } catch (apiErr) {
+          console.log("Profile fetch fallback triggered:", apiErr);
         }
 
-        setUser(currentUser);
+        if (cancelled) return;
 
-        try {
-          // Fetch permanent profile from Neon PostgreSQL via Worker API
-          let dbProfile = {};
-          try {
-            const res = await apiGet(`/users/${currentUser.uid}`);
-            if (res && res.profile) {
-              dbProfile = res.profile;
-            }
-          } catch (apiErr) {
-            console.log("Neon profile fetch fallback triggered:", apiErr);
-          }
+        const mergedProfile = {
+          ...(user || {}),
+          ...dbProfile,
+          photoURL:
+            dbProfile.profileURL ||
+            dbProfile.photoURL ||
+            dbProfile.profile_url ||
+            dbProfile.photo_url ||
+            user?.photoURL ||
+            user?.profile_url ||
+            "",
+          displayName:
+            dbProfile.displayName ||
+            dbProfile.display_name ||
+            user?.displayName ||
+            user?.display_name ||
+            "",
+          username: dbProfile.username || user?.username || "",
+          bio: dbProfile.bio || user?.bio || "",
+          isPrivate:
+            dbProfile.isPrivate === true ||
+            dbProfile.is_private === true ||
+            user?.isPrivate === true,
+        };
 
-          const profileRef = ref(
-            database,
-            `users/${currentUser.uid}`
-          );
-          const snapshot = await get(profileRef);
-          const fbProfile = snapshot.exists() ? snapshot.val() || {} : {};
-
-       // Merge backend DB data and Firebase data, prioritizing DB for URLs
-          const mergedProfile = {
-            ...fbProfile,
-            ...dbProfile,
-            // Check all possible casing variations returned by Neon / Worker
-            photoURL: dbProfile.profileURL || dbProfile.photoURL || dbProfile.profile_url || dbProfile.photo_url || currentUser.photoURL || fbProfile.photoURL || "",
-            displayName: dbProfile.displayName || dbProfile.display_name || fbProfile.displayName || currentUser.displayName || "",
-            username: dbProfile.username || fbProfile.username || "",
-            bio: dbProfile.bio || fbProfile.bio || "",
-            isPrivate: dbProfile.isPrivate === true || dbProfile.is_private === true || fbProfile.isPrivate === true,
-          };
-
-          setProfile(mergedProfile);
+        setProfile(mergedProfile);
+        if (!editing) {
           setDisplayName(mergedProfile.displayName);
           setUsername(mergedProfile.username);
           setBio(mergedProfile.bio);
           setIsPrivate(mergedProfile.isPrivate);
-
-          if (!snapshot.exists()) {
-            const newProfile = {
-              uid: currentUser.uid,
-              displayName: mergedProfile.displayName,
-              username: mergedProfile.username,
-              email: currentUser.email || "",
-              photoURL: mergedProfile.photoURL,
-              bio: mergedProfile.bio,
-              isPrivate: mergedProfile.isPrivate,
-              isVip: false,
-              followersCount: 0,
-              followingCount: 0,
-              videosCount: 0,
-              likesCount: 0,
-              createdAt: Date.now(),
-            };
-            await set(profileRef, newProfile);
-          }
-        } catch (error) {
-          console.error(
-            "Profile loading error:",
-            error
-          );
-
-          setMessage(
-            "Unable to load your profile."
-          );
-          setMessageType("error");
-        } finally {
-          setLoading(false);
         }
+      } catch (error) {
+        console.error("Profile loading error:", error);
+        if (!cancelled) {
+          setMessage("Unable to load your profile.");
+          setMessageType("error");
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-    );
-
-    return () => unsubscribe();
-  }, []);
-
-  /*
-   * PROFILE SYNC (Ensures data stays updated in real-time)
-   */
-  useEffect(() => {
-    if (!user) {
-      return undefined;
     }
 
-    const profileRef = ref(
-      database,
-      `users/${user.uid}`
-    );
-
-    return onValue(
-      profileRef,
-      (snapshot) => {
-        if (!snapshot.exists()) {
-          return;
-        }
-
-        const nextProfile = snapshot.val() || {};
-
-       setProfile((prev) => ({
-          ...(prev || {}),
-          ...nextProfile,
-          photoURL: prev?.photoURL || nextProfile.photoURL || "",
-          profile_url: prev?.profile_url || nextProfile.profile_url || "",
-        }));
-
-        // Only update local input states if user is not actively editing
-        if (!editing) {
-          setDisplayName(
-            nextProfile.displayName || ""
-          );
-
-          setUsername(
-            nextProfile.username || ""
-          );
-
-          setBio(
-            nextProfile.bio || ""
-          );
-
-          setIsPrivate(
-            nextProfile.isPrivate === true
-          );
-        }
-      },
-      (error) => {
-        console.error(
-          "Profile sync error:",
-          error
-        );
-      }
-    );
-  }, [user, editing]);
+    loadProfile();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUid]);
 
   /*
-   * USER VIDEOS (Neon PostgreSQL Backend)
+   * USER VIDEOS
    */
   useEffect(() => {
-    if (!user) {
+    if (!currentUid) {
       setPosts([]);
       setContentLoading(false);
       return undefined;
@@ -236,18 +173,17 @@ function Profile({ onBack, onOpenDraft }) {
     async function loadUserVideos() {
       try {
         const data = await apiGet("/posts");
-        
         if (cancelled) return;
 
-        const allPosts = Array.isArray(data) ? data : (data.posts || []);
+        const allPosts = Array.isArray(data) ? data : (data?.posts || []);
 
         const userPosts = allPosts
-          .filter((post) => post.user_id === user.uid || post.uid === user.uid)
+          .filter((post) => post.user_id === currentUid || post.uid === currentUid)
           .map((post) => ({
             ...post,
             postId: post.id || post.postId,
-            mediaURL: post.video_url || post.mediaURL || post.videoURL,
-            thumbnailURL: post.thumbnail_url || post.thumbnailURL || post.thumbnail,
+            mediaURL: post.video_url || post.mediaURL || post.videoURL || post.url,
+            thumbnailURL: post.thumbnail_url || post.thumbnailURL || post.thumbnail || post.coverURL,
           }))
           .sort(
             (a, b) =>
@@ -265,136 +201,137 @@ function Profile({ onBack, onOpenDraft }) {
     }
 
     loadUserVideos();
-
     return () => {
       cancelled = true;
     };
-  }, [user]);
+  }, [currentUid]);
 
-  /* =====================================================
-     LOCAL DRAFTS
-  ===================================================== */
+  /*
+   * LOCAL DRAFTS (IndexedDB)
+   */
   useEffect(() => {
-    if (!user || !window.indexedDB) { setDrafts([]); return undefined; }
-    let active = true; let db; const urls = [];
+    if (!currentUid || !window.indexedDB) {
+      setDrafts([]);
+      return undefined;
+    }
+
+    let active = true;
+    let db;
+    const urls = [];
+
     (async () => {
       try {
         db = await new Promise((resolve, reject) => {
           const request = window.indexedDB.open("vezlivoDraftDatabase", 2);
-          request.onupgradeneeded = () => { const next = request.result; if (!next.objectStoreNames.contains("drafts")) next.createObjectStore("drafts", { keyPath: "id" }); };
-          request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
+          request.onupgradeneeded = () => {
+            const next = request.result;
+            if (!next.objectStoreNames.contains("drafts")) {
+              next.createObjectStore("drafts", { keyPath: "id" });
+            }
+          };
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => reject(request.error);
         });
+
         const rows = await new Promise((resolve, reject) => {
-          const tx = db.transaction("drafts", "readonly"); const request = tx.objectStore("drafts").getAll();
-          request.onsuccess = () => resolve(request.result || []); request.onerror = () => reject(request.error);
+          const tx = db.transaction("drafts", "readonly");
+          const request = tx.objectStore("drafts").getAll();
+          request.onsuccess = () => resolve(request.result || []);
+          request.onerror = () => reject(request.error);
         });
-        const mine = rows.filter(d => !d.uid || d.uid === user.uid).sort((a,b) => Number(b.savedAt||0)-Number(a.savedAt||0)).map(d => {
-          const thumbnailBlob = d.mediaBlob instanceof Blob ? d.mediaBlob : (d.mediaBlob ? new Blob([d.mediaBlob], { type: d.mediaMimeType || (d.mediaType === "video" ? "video/webm" : "image/jpeg") }) : null); const thumbnailURL = thumbnailBlob ? URL.createObjectURL(thumbnailBlob) : ""; if (thumbnailURL) urls.push(thumbnailURL); return {...d, thumbnailURL};
-        });
+
+        const mine = rows
+          .filter((d) => !d.uid || d.uid === currentUid)
+          .sort((a, b) => Number(b.savedAt || 0) - Number(a.savedAt || 0))
+          .map((d) => {
+            const thumbnailBlob =
+              d.mediaBlob instanceof Blob
+                ? d.mediaBlob
+                : d.mediaBlob
+                ? new Blob([d.mediaBlob], {
+                    type: d.mediaMimeType || (d.mediaType === "video" ? "video/webm" : "image/jpeg"),
+                  })
+                : null;
+            const thumbnailURL = thumbnailBlob ? URL.createObjectURL(thumbnailBlob) : "";
+            if (thumbnailURL) urls.push(thumbnailURL);
+            return { ...d, thumbnailURL };
+          });
+
         if (active) setDrafts(mine);
-      } catch (error) { console.error("Vezlivo drafts loading error:", error); if (active) setDrafts([]); }
+      } catch (error) {
+        console.error("Vezlivo drafts loading error:", error);
+        if (active) setDrafts([]);
+      }
     })();
-    return () => { active=false; urls.forEach(url => URL.revokeObjectURL(url)); if (db) db.close(); };
-  }, [user]);
+
+    return () => {
+      active = false;
+      urls.forEach((url) => URL.revokeObjectURL(url));
+      if (db) db.close();
+    };
+  }, [currentUid]);
 
   /*
    * LIKED + FAVORITE VIDEOS
    */
   useEffect(() => {
-    if (!user) {
+    if (!currentUid) {
       setLikedVideos([]);
       setFavoriteVideos([]);
       return undefined;
     }
 
-    const likedRef = ref(
-      database,
-      `users/${user.uid}/likedVideos`
-    );
-
-    const favoritesRef = ref(
-      database,
-      `users/${user.uid}/favoriteVideos`
-    );
-
     let active = true;
 
-    Promise.all([
-      get(likedRef),
-      get(favoritesRef),
-    ])
-      .then(([likedSnap, favoriteSnap]) => {
-        if (!active) {
-          return;
-        }
+    async function loadLikesAndFavorites() {
+      try {
+        const res = await apiGet(`/users/${encodeURIComponent(currentUid)}/likes`);
+        if (!active || !res) return;
 
-        const likedData =
-          likedSnap.val() || {};
+        const likedList = Array.isArray(res.likedVideos)
+          ? res.likedVideos
+          : objectToVideoList(res.likedVideos);
+        const favList = Array.isArray(res.favoriteVideos)
+          ? res.favoriteVideos
+          : Array.isArray(res.savedVideos)
+          ? res.savedVideos
+          : objectToVideoList(res.favoriteVideos || res.savedVideos);
 
-        const favoriteData =
-          favoriteSnap.val() || {};
-
-        setLikedVideos(
-          objectToVideoList(likedData)
-        );
-
-        setFavoriteVideos(
-          objectToVideoList(favoriteData)
-        );
-      })
-      .catch((error) => {
-        console.error(
-          "Liked/favorite videos loading error:",
-          error
-        );
-
+        setLikedVideos(likedList);
+        setFavoriteVideos(favList);
+      } catch (error) {
+        console.error("Liked/favorite videos loading error:", error);
         if (active) {
           setLikedVideos([]);
           setFavoriteVideos([]);
         }
-      });
+      }
+    }
 
+    loadLikesAndFavorites();
     return () => {
       active = false;
     };
-  }, [user]);
+  }, [currentUid]);
 
-  const getRemainingTime = (
-    changedAt,
-    cooldown
-  ) => {
-    if (!changedAt) {
-      return null;
-    }
-
-    const remaining =
-      Number(changedAt) +
-      cooldown -
-      Date.now();
-
-    if (remaining <= 0) {
-      return null;
-    }
-
-    return Math.ceil(
-      remaining /
-        (24 * 60 * 60 * 1000)
-    );
+  const getRemainingTime = (changedAt, cooldown) => {
+    if (!changedAt) return null;
+    const remaining = Number(changedAt) + cooldown - Date.now();
+    if (remaining <= 0) return null;
+    return Math.ceil(remaining / (24 * 60 * 60 * 1000));
   };
 
-  const displayNameDaysLeft =
-    getRemainingTime(
-      profile?.displayNameChangedAt,
-      DISPLAY_NAME_COOLDOWN
-    );
+  const displayNameDaysLeft = getRemainingTime(
+    profile?.displayNameChangedAt,
+    DISPLAY_NAME_COOLDOWN
+  );
 
-  const usernameDaysLeft =
-    getRemainingTime(
-      profile?.usernameChangedAt,
-      USERNAME_COOLDOWN
-    );
+  const usernameDaysLeft = getRemainingTime(
+    profile?.usernameChangedAt,
+    USERNAME_COOLDOWN
+  );
 
-  // Handle In-App Admin VIP Approval
+  // Handle In-App Admin VIP Approval via backend API
   const handleAdminApproveVip = async (status) => {
     const queryVal = targetVipInput.trim();
     if (!queryVal) {
@@ -407,41 +344,20 @@ function Profile({ onBack, onOpenDraft }) {
     setMessage("");
 
     try {
-      const usersRef = ref(database, "users");
-      const snapshot = await get(usersRef);
-
-      if (!snapshot.exists()) {
-        setMessage("No users found in database.");
-        setMessageType("error");
-        setAdminActionLoading(false);
-        return;
-      }
-
-      let targetUid = null;
-      snapshot.forEach((childSnap) => {
-        const uData = childSnap.val();
-        const cUid = childSnap.key;
-        if (
-          cUid === queryVal ||
-          uData.username?.toLowerCase() === queryVal.replace("@", "").toLowerCase()
-        ) {
-          targetUid = cUid;
-        }
+      const res = await apiPost("/admin/vip", {
+        target: queryVal.replace(/^@/, ""),
+        isVip: status,
+        adminUid: currentUid,
       });
 
-      if (!targetUid) {
-        setMessage(`User "${queryVal}" not found in database.`);
+      if (res && res.success === false) {
+        setMessage(res.message || `User "${queryVal}" not found.`);
         setMessageType("error");
-        setAdminActionLoading(false);
-        return;
+      } else {
+        setMessage(`Success! User VIP status set to: ${status}`);
+        setMessageType("success");
+        setTargetVipInput("");
       }
-
-      const targetUserRef = ref(database, `users/${targetUid}`);
-      await update(targetUserRef, { isVip: status });
-
-      setMessage(`Success! User VIP status set to: ${status}`);
-      setMessageType("success");
-      setTargetVipInput("");
     } catch (err) {
       console.error("Admin VIP update error:", err);
       setMessage("Failed to update VIP status.");
@@ -451,7 +367,6 @@ function Profile({ onBack, onOpenDraft }) {
     }
   };
 
-  // Helper: Convert File to Base64
   const fileToBase64 = (file) => {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
@@ -461,10 +376,10 @@ function Profile({ onBack, onOpenDraft }) {
     });
   };
 
-  // 🖼️ Step 1: Trigger Cropper Modal on Photo Select
+  // Step 1: Trigger Cropper Modal on Photo Select
   const handleProfilePhotoSelect = (event) => {
     const file = event.target.files?.[0];
-    if (!file || !user) return;
+    if (!file || !currentUid) return;
 
     if (!file.type.startsWith("image/")) {
       setMessage("Please select an image file.");
@@ -488,9 +403,10 @@ function Profile({ onBack, onOpenDraft }) {
     setImageOffset({ x: 0, y: 0 });
     event.target.value = "";
   };
-// 🖼️ Step 2: Upload Framed Image & Sync directly to Cloudflare Worker / Neon PostgreSQL
+
+  // Step 2: Upload Framed Image via backend API
   const handleConfirmCropAndUpload = async () => {
-    if (!cropImageFile || !user) return;
+    if (!cropImageFile || !currentUid) return;
 
     const file = cropImageFile;
     const previewURL = cropPreviewUrl;
@@ -504,12 +420,12 @@ function Profile({ onBack, onOpenDraft }) {
 
     try {
       const base64Data = await fileToBase64(file);
-      const filename = `profile-${user.uid}-${Date.now()}.jpg`;
+      const filename = `profile-${currentUid}-${Date.now()}.jpg`;
 
       const payload = {
-        uid: user.uid,
-        displayName: displayName || user.displayName || "Vezlivo User",
-        display_name: displayName || user.displayName || "Vezlivo User",
+        uid: currentUid,
+        displayName: displayName || user?.displayName || "Vezlivo User",
+        display_name: displayName || user?.displayName || "Vezlivo User",
         username: username || "",
         bio: bio || "",
         profile_url: base64Data,
@@ -518,25 +434,34 @@ function Profile({ onBack, onOpenDraft }) {
         profileImageName: filename,
       };
 
-      // 1. Sync directly with Neon PostgreSQL via Cloudflare Worker API
       const res = await apiPost("/users/update-profile", payload);
+      const serverProfileUrl =
+        res?.profileURL ||
+        res?.profile_url ||
+        res?.profile?.profile_url ||
+        res?.photoURL ||
+        previewURL;
 
-      // Extract the exact permanent URL returned by the backend worker API
-      const serverProfileUrl = res?.profileURL || res?.profile_url || res?.profile?.profile_url || res?.photoURL || previewURL;
-
-      // 2. Keep Firebase Auth/RTDB profile photo updated in sync
-      const profileRef = ref(database, `users/${user.uid}`);
-      await update(profileRef, { photoURL: serverProfileUrl, profile_url: serverProfileUrl });
-
-      // 3. Immediately update local profile state so the profile page updates instantly!
       setProfile((previousProfile) => ({
         ...(previousProfile || {}),
         photoURL: serverProfileUrl,
         profile_url: serverProfileUrl,
       }));
-      
+
+      try {
+        const updatedUser = {
+          ...(user || {}),
+          photoURL: serverProfileUrl,
+          profile_url: serverProfileUrl,
+        };
+        localStorage.setItem("vezlivo_current_user", JSON.stringify(updatedUser));
+        setUser(updatedUser);
+      } catch {
+        // Ignore storage write failure
+      }
+
       setLocalProfilePreview("");
-      setMessage("Profile picture updated successfully in Neon!");
+      setMessage("Profile picture updated successfully.");
       setMessageType("success");
     } catch (error) {
       console.error("Image upload error:", error);
@@ -546,118 +471,70 @@ function Profile({ onBack, onOpenDraft }) {
       setUploadingPhoto(false);
     }
   };
+
   const handleSaveProfile = async () => {
-    if (!user || !profile) {
-      return;
-    }
+    if (!currentUid || !profile) return;
 
-    const cleanDisplayName =
-      displayName.trim();
-
-    const cleanUsername =
-      username
-        .trim()
-        .toLowerCase();
-
-    const cleanBio =
-      bio.trim();
+    const cleanDisplayName = displayName.trim();
+    const cleanUsername = username.trim().toLowerCase();
+    const cleanBio = bio.trim();
 
     if (!cleanDisplayName) {
-      setMessage(
-        "Please enter your display name."
-      );
+      setMessage("Please enter your display name.");
       setMessageType("error");
       return;
     }
 
     if (!cleanUsername) {
-      setMessage(
-        "Please choose a username."
-      );
+      setMessage("Please choose a username.");
       setMessageType("error");
       return;
     }
 
-    if (
-      !/^[a-z0-9._]+$/.test(
-        cleanUsername
-      )
-    ) {
-      setMessage(
-        "Username can use lowercase letters, numbers, dots, and underscores."
-      );
+    if (!/^[a-z0-9._]+$/.test(cleanUsername)) {
+      setMessage("Username can use lowercase letters, numbers, dots, and underscores.");
       setMessageType("error");
       return;
     }
 
     if (cleanUsername.length < 3) {
-      setMessage(
-        "Username must be at least 3 characters."
-      );
+      setMessage("Username must be at least 3 characters.");
       setMessageType("error");
       return;
     }
 
-    if (
-      cleanUsername.length >
-      MAX_USERNAME_LENGTH
-    ) {
-      setMessage(
-        "Username must be 30 characters or less."
-      );
+    if (cleanUsername.length > MAX_USERNAME_LENGTH) {
+      setMessage("Username must be 30 characters or less.");
       setMessageType("error");
       return;
     }
 
-    if (
-      cleanBio.length >
-      MAX_BIO_LENGTH
-    ) {
-      setMessage(
-        "Bio must be 160 characters or less."
-      );
+    if (cleanBio.length > MAX_BIO_LENGTH) {
+      setMessage("Bio must be 160 characters or less.");
       setMessageType("error");
       return;
     }
 
-    const currentDisplayName =
-      profile.displayName || "";
+    const currentDisplayName = profile.displayName || "";
+    const currentUsername = profile.username || "";
 
-    const currentUsername =
-      profile.username || "";
+    const displayNameChanged = cleanDisplayName !== currentDisplayName;
+    const usernameChanged = cleanUsername !== currentUsername;
 
-    const displayNameChanged =
-      cleanDisplayName !==
-      currentDisplayName;
-
-    const usernameChanged =
-      cleanUsername !==
-      currentUsername;
-
-    if (
-      displayNameChanged &&
-      displayNameDaysLeft
-    ) {
+    if (displayNameChanged && displayNameDaysLeft) {
       setMessage(
         `You can change your display name again in ${displayNameDaysLeft} day${
-          displayNameDaysLeft === 1
-            ? ""
-            : "s"
+          displayNameDaysLeft === 1 ? "" : "s"
         }.`
       );
       setMessageType("error");
       return;
     }
 
-    if (
-      usernameChanged &&
-      usernameDaysLeft
-    ) {
+    if (usernameChanged && usernameDaysLeft) {
       setMessage(
         `You can change your username again in ${usernameDaysLeft} day${
-          usernameDaysLeft === 1
-            ? ""
-            : "s"
+          usernameDaysLeft === 1 ? "" : "s"
         }.`
       );
       setMessageType("error");
@@ -668,72 +545,55 @@ function Profile({ onBack, onOpenDraft }) {
     setMessage("");
 
     try {
-      // Direct Sync with Neon PostgreSQL backend via Cloudflare Worker
-      await apiPost("/users/update-profile", {
-        uid: user.uid,
-        display_name: cleanDisplayName,
+      const changes = {
         displayName: cleanDisplayName,
+        display_name: cleanDisplayName,
         username: cleanUsername,
         bio: cleanBio,
-        is_private: isPrivate,
-        isPrivate: isPrivate,
-        profile_url: profile?.photoURL || profile?.profile_url || "",
-      });
-
-      const profileRef = ref(
-        database,
-        `users/${user.uid}`
-      );
-
-      const changes = {
-        displayName:
-          cleanDisplayName,
-        username:
-          cleanUsername,
-        bio:
-          cleanBio,
         isPrivate,
+        is_private: isPrivate,
+        profile_url: profile?.photoURL || profile?.profile_url || "",
       };
 
       if (displayNameChanged) {
-        changes.displayNameChangedAt =
-          Date.now();
+        changes.displayNameChangedAt = Date.now();
       }
-
       if (usernameChanged) {
-        changes.usernameChangedAt =
-          Date.now();
+        changes.usernameChangedAt = Date.now();
       }
 
-      await update(
-        profileRef,
-        changes
-      );
+      await apiPost("/users/update-profile", {
+        uid: currentUid,
+        ...changes,
+      });
 
       const updatedProfile = {
         ...(profile || {}),
         ...changes,
       };
 
-      setProfile(
-        updatedProfile
-      );
-
+      setProfile(updatedProfile);
       setEditing(false);
 
-      setMessage(
-        "Profile updated successfully."
-      );
+      try {
+        const updatedUser = {
+          ...(user || {}),
+          displayName: cleanDisplayName,
+          display_name: cleanDisplayName,
+          username: cleanUsername,
+          bio: cleanBio,
+        };
+        localStorage.setItem("vezlivo_current_user", JSON.stringify(updatedUser));
+        setUser(updatedUser);
+      } catch {
+        // Ignore storage write failure
+      }
+
+      setMessage("Profile updated successfully.");
       setMessageType("success");
     } catch (error) {
-      console.error(
-        "Profile save error:",
-        error
-      );
-
-      setMessage(
-        "Unable to save your profile. Please try again."
-      );
+      console.error("Profile save error:", error);
+      setMessage("Unable to save your profile. Please try again.");
       setMessageType("error");
     } finally {
       setSaving(false);
@@ -745,17 +605,14 @@ function Profile({ onBack, onOpenDraft }) {
     setMessage("");
 
     try {
-      await signOut(auth);
+      localStorage.removeItem("vezlivo_current_user");
+      localStorage.removeItem("vezlivo_session_active");
+      setUser(null);
+      setProfile(null);
       onBack?.();
     } catch (error) {
-      console.error(
-        "Sign-out error:",
-        error
-      );
-
-      setMessage(
-        "Unable to sign out. Please try again."
-      );
+      console.error("Sign-out error:", error);
+      setMessage("Unable to sign out. Please try again.");
       setMessageType("error");
     } finally {
       setSigningOut(false);
@@ -774,27 +631,10 @@ function Profile({ onBack, onOpenDraft }) {
 
   const cancelEditing = () => {
     setEditing(false);
-
-    setDisplayName(
-      profile?.displayName ||
-        user?.displayName ||
-        ""
-    );
-
-    setUsername(
-      profile?.username ||
-        ""
-    );
-
-    setBio(
-      profile?.bio ||
-        ""
-    );
-
-    setIsPrivate(
-      profile?.isPrivate === true
-    );
-
+    setDisplayName(profile?.displayName || user?.displayName || "");
+    setUsername(profile?.username || "");
+    setBio(profile?.bio || "");
+    setIsPrivate(profile?.isPrivate === true);
     setMessage("");
     setMessageType("");
   };
@@ -812,20 +652,10 @@ function Profile({ onBack, onOpenDraft }) {
     user?.displayName ||
     "Vezlivo User";
 
-  const usernameText =
-    profile?.username
-      ? `@${profile.username}`
-      : "@username";
+  const usernameText = profile?.username ? `@${profile.username}` : "@username";
 
-  const followersCount =
-    Number(
-      profile?.followersCount || 0
-    );
-
-  const followingCount =
-    Number(
-      profile?.followingCount || 0
-    );
+  const followersCount = Number(profile?.followersCount || profile?.followers_count || 0);
+  const followingCount = Number(profile?.followingCount || profile?.following_count || 0);
 
   const activeContent =
     activeSection === "liked"
@@ -855,76 +685,39 @@ function Profile({ onBack, onOpenDraft }) {
       : "Videos you post on Vezlivo will appear here.";
 
   if (showSettings) {
-    return (
-      <Settings
-        onBack={() =>
-          setShowSettings(false)
-        }
-      />
-    );
+    return <Settings onBack={() => setShowSettings(false)} />;
   }
 
   if (loading) {
     return (
-      <main
-        className="profile-page"
-        style={styles.page}
-      >
-        <section
-          className="profile-card"
-          style={styles.loadingCard}
-        >
-          <div style={styles.loadingSpinner}>
-            ◌
-          </div>
-          <p style={styles.loadingText}>
-            Loading profile...
-          </p>
+      <main className="profile-page" style={styles.page}>
+        <section className="profile-card" style={styles.loadingCard}>
+          <div style={styles.loadingSpinner}>◌</div>
+          <p style={styles.loadingText}>Loading profile...</p>
         </section>
       </main>
     );
   }
 
-  if (!user) {
+  if (!currentUid) {
     return (
-      <main
-        className="profile-page"
-        style={styles.page}
-      >
-        <section
-          className="profile-card"
-          style={styles.loadingCard}
-        >
-          <button
-            type="button"
-            onClick={onBack}
-            style={styles.backButton}
-          >
+      <main className="profile-page" style={styles.page}>
+        <section className="profile-card" style={styles.loadingCard}>
+          <button type="button" onClick={onBack} style={styles.backButton}>
             ← Back
           </button>
 
-          <h1 style={styles.emptyTitle}>
-            Profile
-          </h1>
+          <h1 style={styles.emptyTitle}>Profile</h1>
 
-          <p style={styles.emptyText}>
-            Please log in to view your profile.
-          </p>
+          <p style={styles.emptyText}>Please log in to view your profile.</p>
         </section>
       </main>
     );
   }
 
   return (
-    <main
-      className="profile-page"
-      style={styles.page}
-    >
-      <section
-        className="profile-card"
-        style={styles.profileCard}
-      >
-        {/* TOP NAVIGATION */}
+    <main className="profile-page" style={styles.page}>
+      <section className="profile-card" style={styles.profileCard}>
         <header style={styles.topBar}>
           <button
             type="button"
@@ -935,9 +728,7 @@ function Profile({ onBack, onOpenDraft }) {
             ←
           </button>
 
-          <div style={styles.topTitle}>
-            Profile
-          </div>
+          <div style={styles.topTitle}>Profile</div>
 
           <div style={styles.topRightActions}>
             <button
@@ -960,17 +751,15 @@ function Profile({ onBack, onOpenDraft }) {
           </div>
         </header>
 
-        {/* PROFILE HEADER */}
         <div style={styles.profileHeader}>
           <div style={styles.avatarWrap}>
-         <div style={styles.avatarRing}>
+            <div style={styles.avatarRing}>
               {profilePhoto ? (
                 <img
                   src={profilePhoto}
                   alt={profileName}
                   style={styles.avatar}
                   onError={(e) => {
-                    console.error("Avatar image failed to load:", profilePhoto);
                     e.target.style.display = "none";
                   }}
                 />
@@ -986,14 +775,8 @@ function Profile({ onBack, onOpenDraft }) {
               title="Change profile picture"
               style={{
                 ...styles.avatarCamera,
-                opacity:
-                  uploadingPhoto
-                    ? 0.55
-                    : 1,
-                pointerEvents:
-                  uploadingPhoto
-                    ? "none"
-                    : "auto",
+                opacity: uploadingPhoto ? 0.55 : 1,
+                pointerEvents: uploadingPhoto ? "none" : "auto",
               }}
             >
               📷
@@ -1003,22 +786,15 @@ function Profile({ onBack, onOpenDraft }) {
               id="profile-photo-input"
               type="file"
               accept="image/*"
-              onChange={
-                handleProfilePhotoSelect
-              }
-              disabled={
-                uploadingPhoto ||
-                saving
-              }
+              onChange={handleProfilePhotoSelect}
+              disabled={uploadingPhoto || saving}
               hidden
             />
           </div>
 
           <div style={styles.nameArea}>
             <div style={styles.nameLine}>
-              <h1 style={styles.profileName}>
-                {profileName}
-              </h1>
+              <h1 style={styles.profileName}>{profileName}</h1>
 
               {profile?.verified === true && (
                 <span
@@ -1031,47 +807,53 @@ function Profile({ onBack, onOpenDraft }) {
               )}
             </div>
 
-            <p style={styles.username}>
-              {usernameText}
-            </p>
+            <p style={styles.username}>{usernameText}</p>
 
             <p style={styles.bio}>
-              {profile?.bio ||
-                "Welcome to my Vezlivo profile."}
+              {profile?.bio || "Welcome to my Vezlivo profile."}
             </p>
 
             <div style={styles.accountState}>
               <span>
-                {profile?.isPrivate
-                  ? "🔒 Private account"
-                  : "🌎 Public account"}
+                {profile?.isPrivate ? "🔒 Private account" : "🌎 Public account"}
               </span>
             </div>
           </div>
         </div>
 
-       {/* STATS */}
         <div style={styles.statsRow}>
-          <button type="button" onClick={() => setActiveSection("following")} style={styles.statButton}>
+          <button
+            type="button"
+            onClick={() => setActiveSection("following")}
+            style={styles.statButton}
+          >
             <strong style={styles.statNumber}>{followingCount}</strong>
             <span style={styles.statLabel}>Following</span>
           </button>
 
-          <button type="button" onClick={() => setActiveSection("followers")} style={styles.statButton}>
+          <button
+            type="button"
+            onClick={() => setActiveSection("followers")}
+            style={styles.statButton}
+          >
             <strong style={styles.statNumber}>{followersCount}</strong>
             <span style={styles.statLabel}>Followers</span>
           </button>
 
-          <button type="button" onClick={() => setActiveSection("liked")} style={styles.statButton}>
-            <strong style={styles.statNumber}>{Number(profile?.likesCount || 0)}</strong>
+          <button
+            type="button"
+            onClick={() => setActiveSection("liked")}
+            style={styles.statButton}
+          >
+            <strong style={styles.statNumber}>
+              {Number(profile?.likesCount || profile?.likes_count || 0)}
+            </strong>
             <span style={styles.statLabel}>Likes</span>
           </button>
         </div>
 
-        {/* 👑 VIP PROFILE BANNER CARD */}
         <VipProfileBanner user={user} />
 
-        {/* 👑 IN-APP ADMIN VIP MANAGER (Only visible to greatgoodluckp@gmail.com) */}
         {isAdmin && (
           <section style={styles.adminPanel}>
             <div style={styles.adminHeader}>
@@ -1079,7 +861,7 @@ function Profile({ onBack, onOpenDraft }) {
               <h3 style={styles.adminTitle}>Admin VIP Manager</h3>
             </div>
             <p style={styles.adminSubtitle}>
-              Paste a user's UID or username from your email notification to instantly approve or revoke VIP status.
+              Paste a user's UID or username from your notification to approve or revoke VIP status.
             </p>
             <div style={styles.adminInputRow}>
               <input
@@ -1112,14 +894,11 @@ function Profile({ onBack, onOpenDraft }) {
           </section>
         )}
 
-        {/* EDIT FORM */}
         {editing && (
           <section style={styles.editPanel}>
             <div style={styles.editPanelHeader}>
               <div>
-                <h2 style={styles.editPanelTitle}>
-                  Edit profile
-                </h2>
+                <h2 style={styles.editPanelTitle}>Edit profile</h2>
                 <p style={styles.editPanelDescription}>
                   Update your profile information.
                 </p>
@@ -1136,89 +915,60 @@ function Profile({ onBack, onOpenDraft }) {
 
             <div style={styles.formGrid}>
               <label style={styles.field}>
-                <span style={styles.fieldLabel}>
-                  Display name
-                </span>
+                <span style={styles.fieldLabel}>Display name</span>
 
                 <input
                   type="text"
                   value={displayName}
-                  onChange={(event) =>
-                    setDisplayName(
-                      event.target.value
-                    )
-                  }
+                  onChange={(event) => setDisplayName(event.target.value)}
                   disabled={saving}
                   style={styles.input}
                 />
 
                 {displayNameDaysLeft && (
                   <small style={styles.fieldHint}>
-                    You can change this again in{" "}
-                    {displayNameDaysLeft} day
-                    {displayNameDaysLeft === 1
-                      ? ""
-                      : "s"}.
+                    You can change this again in {displayNameDaysLeft} day
+                    {displayNameDaysLeft === 1 ? "" : "s"}.
                   </small>
                 )}
               </label>
 
               <label style={styles.field}>
-                <span style={styles.fieldLabel}>
-                  Username
-                </span>
+                <span style={styles.fieldLabel}>Username</span>
 
                 <input
                   type="text"
                   value={username}
-                  onChange={(event) =>
-                    setUsername(
-                      event.target.value
-                    )
-                  }
+                  onChange={(event) => setUsername(event.target.value)}
                   disabled={saving}
                   placeholder="username"
-                  maxLength={
-                    MAX_USERNAME_LENGTH
-                  }
+                  maxLength={MAX_USERNAME_LENGTH}
                   style={styles.input}
                 />
 
                 {usernameDaysLeft && (
                   <small style={styles.fieldHint}>
-                    You can change this again in{" "}
-                    {usernameDaysLeft} day
-                    {usernameDaysLeft === 1
-                      ? ""
-                      : "s"}.
+                    You can change this again in {usernameDaysLeft} day
+                    {usernameDaysLeft === 1 ? "" : "s"}.
                   </small>
                 )}
               </label>
 
               <label style={styles.fieldFull}>
-                <span style={styles.fieldLabel}>
-                  Bio
-                </span>
+                <span style={styles.fieldLabel}>Bio</span>
 
                 <textarea
                   value={bio}
-                  onChange={(event) =>
-                    setBio(
-                      event.target.value
-                    )
-                  }
+                  onChange={(event) => setBio(event.target.value)}
                   disabled={saving}
-                  maxLength={
-                    MAX_BIO_LENGTH
-                  }
+                  maxLength={MAX_BIO_LENGTH}
                   rows={4}
                   placeholder="Tell people about yourself..."
                   style={styles.textarea}
                 />
 
                 <small style={styles.characterCount}>
-                  {bio.length}/
-                  {MAX_BIO_LENGTH}
+                  {bio.length}/{MAX_BIO_LENGTH}
                 </small>
               </label>
 
@@ -1226,17 +976,11 @@ function Profile({ onBack, onOpenDraft }) {
                 <input
                   type="checkbox"
                   checked={isPrivate}
-                  onChange={(event) =>
-                    setIsPrivate(
-                      event.target.checked
-                    )
-                  }
+                  onChange={(event) => setIsPrivate(event.target.checked)}
                   disabled={saving}
                 />
 
-                <span>
-                  Private account
-                </span>
+                <span>Private account</span>
               </label>
             </div>
 
@@ -1252,50 +996,36 @@ function Profile({ onBack, onOpenDraft }) {
 
               <button
                 type="button"
-                onClick={
-                  handleSaveProfile
-                }
+                onClick={handleSaveProfile}
                 disabled={saving}
                 style={styles.saveButton}
               >
-                {saving
-                  ? "Saving..."
-                  : "Save changes"}
+                {saving ? "Saving..." : "Save changes"}
               </button>
             </div>
           </section>
         )}
 
-        {/* CONTENT NAVIGATION */}
-        <nav
-          aria-label="Profile content"
-          style={styles.contentTabs}
-        >
+        <nav aria-label="Profile content" style={styles.contentTabs}>
           <button
             type="button"
-            onClick={() =>
-              setActiveSection("videos")
-            }
+            onClick={() => setActiveSection("videos")}
             style={{
               ...styles.contentTab,
-              ...(activeSection ===
-              "videos"
-                ? styles.activeContentTab
-                : {}),
+              ...(activeSection === "videos" ? styles.activeContentTab : {}),
             }}
           >
-            <span style={styles.tabIcon}>
-              ▦
-            </span>
-            <span>
-              Videos
-            </span>
+            <span style={styles.tabIcon}>▦</span>
+            <span>Videos</span>
           </button>
 
           <button
             type="button"
             onClick={() => setActiveSection("drafts")}
-            style={{ ...styles.contentTab, ...(activeSection === "drafts" ? styles.activeContentTab : {}) }}
+            style={{
+              ...styles.contentTab,
+              ...(activeSection === "drafts" ? styles.activeContentTab : {}),
+            }}
           >
             <span style={styles.tabIcon}>✎</span>
             <span>Drafts</span>
@@ -1303,132 +1033,91 @@ function Profile({ onBack, onOpenDraft }) {
 
           <button
             type="button"
-            onClick={() =>
-              setActiveSection("liked")
-            }
+            onClick={() => setActiveSection("liked")}
             style={{
               ...styles.contentTab,
-              ...(activeSection ===
-              "liked"
-                ? styles.activeContentTab
-                : {}),
+              ...(activeSection === "liked" ? styles.activeContentTab : {}),
             }}
           >
-            <span style={styles.tabIcon}>
-              ♡
-            </span>
-            <span>
-              Liked
-            </span>
+            <span style={styles.tabIcon}>♡</span>
+            <span>Liked</span>
           </button>
 
           <button
             type="button"
-            onClick={() =>
-              setActiveSection(
-                "favorites"
-              )
-            }
+            onClick={() => setActiveSection("favorites")}
             style={{
               ...styles.contentTab,
-              ...(activeSection ===
-              "favorites"
-                ? styles.activeContentTab
-                : {}),
+              ...(activeSection === "favorites" ? styles.activeContentTab : {}),
             }}
           >
-            <span style={styles.tabIcon}>
-              ☆
-            </span>
-            <span>
-              Favorites
-            </span>
+            <span style={styles.tabIcon}>☆</span>
+            <span>Favorites</span>
           </button>
         </nav>
 
-        {/* VIDEO CONTENT */}
         <section style={styles.videoSection}>
-          {contentLoading &&
-          activeSection ===
-            "videos" ? (
+          {contentLoading && activeSection === "videos" ? (
             <div style={styles.contentLoading}>
-              <div style={styles.loadingSpinner}>
-                ◌
-              </div>
-              <p>
-                Loading your videos...
-              </p>
+              <div style={styles.loadingSpinner}>◌</div>
+              <p>Loading your videos...</p>
             </div>
-          ) : activeContent.length >
-            0 ? (
+          ) : activeContent.length > 0 ? (
             <div style={styles.videoGrid}>
-              {activeContent.map(
-                (video, index) =>
-                  activeSection === "drafts" ? (
-                    <DraftCard key={video.id || `${index}-${video.savedAt || 0}`} draft={video} onOpenDraft={onOpenDraft} />
-                  ) : (
-                    <ProfileVideoCard
-                      key={video.postId || video.id || video.videoId || `${index}-${video.createdAt || 0}`}
-                      video={video}
-                    />
-                  )
+              {activeContent.map((video, index) =>
+                activeSection === "drafts" ? (
+                  <DraftCard
+                    key={video.id || `${index}-${video.savedAt || 0}`}
+                    draft={video}
+                    onOpenDraft={onOpenDraft}
+                  />
+                ) : (
+                  <ProfileVideoCard
+                    key={video.postId || video.id || video.videoId || `${index}-${video.createdAt || 0}`}
+                    video={video}
+                  />
+                )
               )}
             </div>
           ) : (
             <div style={styles.emptyContent}>
               <div style={styles.emptyIcon}>
-                {activeSection ===
-                "liked"
+                {activeSection === "liked"
                   ? "♡"
-                  : activeSection ===
-                    "favorites"
+                  : activeSection === "favorites"
                   ? "☆"
                   : "▣"}
               </div>
 
               <h3 style={styles.emptyContentTitle}>
-                {activeSection ===
-                "videos"
-                  ? "Your videos"
-                  : activeContentTitle}
+                {activeSection === "videos" ? "Your videos" : activeContentTitle}
               </h3>
 
-              <p style={styles.emptyContentText}>
-                {activeContentDescription}
-              </p>
+              <p style={styles.emptyContentText}>{activeContentDescription}</p>
             </div>
           )}
         </section>
 
-        {/* SIGN OUT */}
         <div style={styles.signOutArea}>
           <button
             type="button"
-            onClick={
-              handleSignOut
-            }
+            onClick={handleSignOut}
             disabled={signingOut}
             style={{
               ...styles.signOutButton,
-              opacity: signingOut
-                ? 0.55
-                : 1,
+              opacity: signingOut ? 0.55 : 1,
             }}
           >
-            {signingOut
-              ? "Signing out..."
-              : "Sign out"}
+            {signingOut ? "Signing out..." : "Sign out"}
           </button>
         </div>
 
-        {/* STATUS MESSAGE */}
         {message && (
           <div
             role="status"
             style={{
               ...styles.message,
-              ...(messageType ===
-              "success"
+              ...(messageType === "success"
                 ? styles.successMessage
                 : styles.errorMessage),
             }}
@@ -1438,31 +1127,44 @@ function Profile({ onBack, onOpenDraft }) {
         )}
       </section>
 
-      {/* 🖼️ PHOTO FRAMING & ZOOM MODAL */}
       {cropPreviewUrl && (
         <div style={cropStyles.overlay}>
           <div style={cropStyles.modal}>
             <h3 style={cropStyles.title}>Edit Profile Picture</h3>
-            <p style={cropStyles.subtitle}>Drag to reposition and use the slider to zoom</p>
+            <p style={cropStyles.subtitle}>
+              Drag to reposition and use the slider to zoom
+            </p>
 
-            <div 
+            <div
               style={cropStyles.viewport}
               onMouseDown={(e) => {
                 setIsDragging(true);
-                setDragStart({ x: e.clientX - imageOffset.x, y: e.clientY - imageOffset.y });
+                setDragStart({
+                  x: e.clientX - imageOffset.x,
+                  y: e.clientY - imageOffset.y,
+                });
               }}
               onMouseMove={(e) => {
                 if (!isDragging) return;
-                setImageOffset({ x: e.clientX - dragStart.x, y: e.clientY - dragStart.y });
+                setImageOffset({
+                  x: e.clientX - dragStart.x,
+                  y: e.clientY - dragStart.y,
+                });
               }}
               onMouseUp={() => setIsDragging(false)}
               onTouchStart={(e) => {
                 setIsDragging(true);
-                setDragStart({ x: e.touches[0].clientX - imageOffset.x, y: e.touches[0].clientY - imageOffset.y });
+                setDragStart({
+                  x: e.touches[0].clientX - imageOffset.x,
+                  y: e.touches[0].clientY - imageOffset.y,
+                });
               }}
               onTouchMove={(e) => {
                 if (!isDragging) return;
-                setImageOffset({ x: e.touches[0].clientX - imageOffset.x, y: e.touches[0].clientY - imageOffset.y });
+                setImageOffset({
+                  x: e.touches[0].clientX - imageOffset.x,
+                  y: e.touches[0].clientY - imageOffset.y,
+                });
               }}
               onTouchEnd={() => setIsDragging(false)}
             >
@@ -1530,28 +1232,10 @@ function ProfileVideoCard({ video }) {
     video.thumbnail ||
     "";
 
-  const caption =
-    video.caption ||
-    video.description ||
-    "";
-
-  const views =
-    Number(
-      video.viewsCount ||
-        video.views ||
-        0
-    );
-
-  const likes =
-    Number(
-      video.likesCount ||
-        video.likes ||
-        0
-    );
-
-  const isPinned =
-    video.pinned === true ||
-    video.isPinned === true;
+  const caption = video.caption || video.description || "";
+  const views = Number(video.viewsCount || video.views || 0);
+  const likes = Number(video.likesCount || video.likes || 0);
+  const isPinned = video.pinned === true || video.isPinned === true;
 
   return (
     <article style={styles.videoCard}>
@@ -1572,41 +1256,23 @@ function ProfileVideoCard({ video }) {
             style={styles.videoElement}
           />
         ) : (
-          <div style={styles.videoFallback}>
-            V
-          </div>
+          <div style={styles.videoFallback}>V</div>
         )}
 
         <div style={styles.videoOverlay}>
-          <span style={styles.playBadge}>
-            ▶
-          </span>
-
-          <span style={styles.videoViews}>
-            {formatCount(views)}
-          </span>
+          <span style={styles.playBadge}>▶</span>
+          <span style={styles.videoViews}>{formatCount(views)}</span>
         </div>
 
-        {isPinned && (
-          <span style={styles.pinnedBadge}>
-            Pinned
-          </span>
-        )}
+        {isPinned && <span style={styles.pinnedBadge}>Pinned</span>}
       </div>
 
       <div style={styles.videoMeta}>
-        <p style={styles.videoCaption}>
-          {caption ||
-            "Vezlivo video"}
-        </p>
+        <p style={styles.videoCaption}>{caption || "Vezlivo video"}</p>
 
         <div style={styles.videoStats}>
-          <span>
-            ♡ {formatCount(likes)}
-          </span>
-          <span>
-            ▶ {formatCount(views)}
-          </span>
+          <span>♡ {formatCount(likes)}</span>
+          <span>▶ {formatCount(views)}</span>
         </div>
       </div>
     </article>
@@ -1614,56 +1280,30 @@ function ProfileVideoCard({ video }) {
 }
 
 function objectToVideoList(data) {
-  if (!data || typeof data !== "object") {
-    return [];
-  }
+  if (!data || typeof data !== "object") return [];
 
   return Object.entries(data)
     .map(([id, value]) => ({
       id,
       ...(value || {}),
     }))
-    .sort(
-      (a, b) =>
-        Number(b.createdAt || 0) -
-        Number(a.createdAt || 0)
-    );
+    .sort((a, b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
 }
 
 function formatCount(value) {
-  const number =
-    Number(value) || 0;
-
-  if (number < 1000) {
-    return String(number);
-  }
-
+  const number = Number(value) || 0;
+  if (number < 1000) return String(number);
   if (number < 1000000) {
-    const result =
-      number / 1000;
-
-    return `${trimDecimal(result)}K`;
+    return `${trimDecimal(number / 1000)}K`;
   }
-
   if (number < 1000000000) {
-    const result =
-      number / 1000000;
-
-    return `${trimDecimal(result)}M`;
+    return `${trimDecimal(number / 1000000)}M`;
   }
-
-  const result =
-    number / 1000000000;
-
-  return `${trimDecimal(result)}B`;
+  return `${trimDecimal(number / 1000000000)}B`;
 }
 
 function trimDecimal(value) {
-  return Number(
-    value.toFixed(
-      value < 10 ? 1 : 0
-    )
-  ).toString();
+  return Number(value.toFixed(value < 10 ? 1 : 0)).toString();
 }
 
 const styles = {
@@ -1672,11 +1312,9 @@ const styles = {
     width: "100%",
     boxSizing: "border-box",
     padding: "12px",
-    background:
-      "linear-gradient(180deg, #f6f7fb 0%, #ffffff 55%, #f6f7fb 100%)",
+    background: "linear-gradient(180deg, #f6f7fb 0%, #ffffff 55%, #f6f7fb 100%)",
     color: "#111",
   },
-
   profileCard: {
     width: "100%",
     maxWidth: "760px",
@@ -1684,12 +1322,9 @@ const styles = {
     overflow: "hidden",
     borderRadius: "22px",
     background: "#fff",
-    boxShadow:
-      "0 8px 35px rgba(0,0,0,0.10)",
-    border:
-      "1px solid rgba(0,0,0,0.08)",
+    boxShadow: "0 8px 35px rgba(0,0,0,0.10)",
+    border: "1px solid rgba(0,0,0,0.08)",
   },
-
   loadingCard: {
     width: "100%",
     maxWidth: "760px",
@@ -1697,61 +1332,50 @@ const styles = {
     margin: "0 auto",
     borderRadius: "22px",
     background: "#fff",
-    border:
-      "1px solid rgba(0,0,0,0.08)",
+    border: "1px solid rgba(0,0,0,0.08)",
     display: "flex",
     flexDirection: "column",
     alignItems: "center",
     justifyContent: "center",
     gap: "8px",
   },
-
   loadingSpinner: {
     fontSize: "38px",
     lineHeight: 1,
     color: "#777",
   },
-
   loadingText: {
     margin: 0,
     color: "#666",
     fontSize: "14px",
   },
-
   topBar: {
     height: "58px",
-    padding:
-      "0 14px",
+    padding: "0 14px",
     display: "grid",
-    gridTemplateColumns:
-      "42px 1fr auto",
+    gridTemplateColumns: "42px 1fr auto",
     alignItems: "center",
     gap: "8px",
     background: "#fff",
-    borderBottom:
-      "1px solid #eeeeee",
+    borderBottom: "1px solid #eeeeee",
     position: "relative",
     zIndex: 20,
   },
-
   topTitle: {
     textAlign: "center",
     fontSize: "16px",
     fontWeight: 800,
   },
-
   topRightActions: {
     display: "flex",
     alignItems: "center",
     justifyContent: "flex-end",
     gap: "7px",
   },
-
   iconButton: {
     width: "40px",
     height: "40px",
-    border:
-      "1px solid #dedede",
+    border: "1px solid #dedede",
     borderRadius: "11px",
     background: "#fff",
     color: "#111",
@@ -1762,14 +1386,11 @@ const styles = {
     fontWeight: 700,
     cursor: "pointer",
   },
-
   profileHeader: {
     position: "relative",
-    padding:
-      "16px 14px 12px",
+    padding: "16px 14px 12px",
     minHeight: "116px",
   },
-
   avatarWrap: {
     position: "relative",
     width: "112px",
@@ -1777,21 +1398,19 @@ const styles = {
     marginLeft: "8px",
     zIndex: 10,
   },
-
- avatarRing: {
+  avatarRing: {
     width: "112px",
     height: "112px",
     boxSizing: "border-box",
     borderRadius: "50%",
-    background: "linear-gradient(135deg, #27272a, #18181b)", // Replaces harsh white with a sleek dark neutral background
+    background: "linear-gradient(135deg, #27272a, #18181b)",
     boxShadow: "0 4px 18px rgba(0,0,0,0.20)",
-    overflow: "hidden", // Strictly clips any image or transparency inside the circle
+    overflow: "hidden",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
   },
-
- avatar: {
+  avatar: {
     width: "100%",
     height: "100%",
     display: "block",
@@ -1799,13 +1418,11 @@ const styles = {
     borderRadius: "50%",
     background: "#18181b",
   },
-
   avatarFallback: {
     width: "100%",
     height: "100%",
     borderRadius: "50%",
-    background:
-      "linear-gradient(135deg, #087f73, #19b8a6)",
+    background: "linear-gradient(135deg, #087f73, #19b8a6)",
     color: "#fff",
     display: "flex",
     alignItems: "center",
@@ -1813,7 +1430,6 @@ const styles = {
     fontSize: "48px",
     fontWeight: 800,
   },
-
   avatarCamera: {
     position: "absolute",
     right: "-3px",
@@ -1822,30 +1438,24 @@ const styles = {
     height: "42px",
     borderRadius: "50%",
     background: "#fff",
-    border:
-      "2px solid #fff",
-    boxShadow:
-      "0 3px 10px rgba(0,0,0,0.22)",
+    border: "2px solid #fff",
+    boxShadow: "0 3px 10px rgba(0,0,0,0.22)",
     display: "inline-flex",
     alignItems: "center",
     justifyContent: "center",
     fontSize: "18px",
     cursor: "pointer",
   },
-
   nameArea: {
-    padding:
-      "12px 2px 0",
+    padding: "12px 2px 0",
     maxWidth: "590px",
   },
-
   nameLine: {
     display: "flex",
     alignItems: "center",
     flexWrap: "wrap",
     gap: "7px",
   },
-
   profileName: {
     margin: 0,
     fontSize: "25px",
@@ -1853,13 +1463,11 @@ const styles = {
     fontWeight: 850,
     letterSpacing: "-0.6px",
   },
-
   verifiedBadge: {
     width: "21px",
     height: "21px",
     borderRadius: "50%",
-    background:
-      "linear-gradient(135deg, #18b7ff, #3478ff)",
+    background: "linear-gradient(135deg, #18b7ff, #3478ff)",
     color: "#fff",
     display: "inline-flex",
     alignItems: "center",
@@ -1867,14 +1475,11 @@ const styles = {
     fontSize: "13px",
     fontWeight: 900,
   },
-
   username: {
-    margin:
-      "3px 0 5px",
+    margin: "3px 0 5px",
     color: "#666",
     fontSize: "15px",
   },
-
   bio: {
     margin: 0,
     color: "#252525",
@@ -1882,40 +1487,30 @@ const styles = {
     lineHeight: 1.45,
     maxWidth: "560px",
   },
-
   accountState: {
     marginTop: "6px",
     color: "#777",
     fontSize: "13px",
   },
-
   editButton: {
     border: "none",
     background: "#111",
     color: "#fff",
     borderRadius: "11px",
-    padding:
-      "9px 12px",
+    padding: "9px 12px",
     fontSize: "13px",
     fontWeight: 800,
     cursor: "pointer",
-    boxShadow:
-      "0 3px 9px rgba(0,0,0,0.14)",
+    boxShadow: "0 3px 9px rgba(0,0,0,0.14)",
   },
-
   statsRow: {
     display: "grid",
-    gridTemplateColumns:
-      "repeat(3, 1fr)",
-    borderTop:
-      "1px solid #eeeeee",
-    borderBottom:
-      "1px solid #eeeeee",
-    padding:
-      "9px 8px",
+    gridTemplateColumns: "repeat(3, 1fr)",
+    borderTop: "1px solid #eeeeee",
+    borderBottom: "1px solid #eeeeee",
+    padding: "9px 8px",
     gap: "2px",
   },
-
   statButton: {
     border: "none",
     background: "transparent",
@@ -1927,18 +1522,15 @@ const styles = {
     color: "#111",
     padding: "3px",
   },
-
   statNumber: {
     fontSize: "19px",
     lineHeight: 1.1,
     fontWeight: 850,
   },
-
   statLabel: {
     fontSize: "12px",
     color: "#707070",
   },
-
   adminPanel: {
     margin: "12px 16px",
     padding: "14px 16px",
@@ -1947,40 +1539,34 @@ const styles = {
     border: "1px solid #7c3aed",
     color: "#fff",
   },
-
   adminHeader: {
     display: "flex",
     alignItems: "center",
     gap: "8px",
     marginBottom: "4px",
   },
-
   adminTitle: {
     margin: 0,
     fontSize: "15px",
     fontWeight: "800",
     color: "#f59e0b",
   },
-
   adminSubtitle: {
     margin: "0 0 10px 0",
     fontSize: "11px",
     color: "#d8b4fe",
     lineHeight: "1.3",
   },
-
   adminInputRow: {
     display: "flex",
     flexDirection: "column",
     gap: "8px",
   },
-
   adminBtnGroup: {
     display: "grid",
     gridTemplateColumns: "1fr 1fr",
     gap: "8px",
   },
-
   approveBtn: {
     border: "none",
     background: "linear-gradient(135deg, #f59e0b, #d97706)",
@@ -1991,7 +1577,6 @@ const styles = {
     cursor: "pointer",
     fontSize: "13px",
   },
-
   rejectBtn: {
     border: "1px solid #ef4444",
     background: "rgba(239, 68, 68, 0.15)",
@@ -2002,17 +1587,13 @@ const styles = {
     cursor: "pointer",
     fontSize: "13px",
   },
-
   editPanel: {
-    margin:
-      "8px 16px 12px",
+    margin: "8px 16px 12px",
     padding: "16px",
-    border:
-      "1px solid #e4e4e4",
+    border: "1px solid #e4e4e4",
     borderRadius: "15px",
     background: "#fafafa",
   },
-
   editPanelHeader: {
     display: "flex",
     justifyContent: "space-between",
@@ -2020,96 +1601,77 @@ const styles = {
     gap: "12px",
     marginBottom: "14px",
   },
-
   editPanelTitle: {
     margin: 0,
     fontSize: "18px",
     fontWeight: 850,
   },
-
   editPanelDescription: {
-    margin:
-      "4px 0 0",
+    margin: "4px 0 0",
     fontSize: "13px",
     color: "#707070",
   },
-
   closeButton: {
     width: "34px",
     height: "34px",
-    border:
-      "1px solid #ddd",
+    border: "1px solid #ddd",
     borderRadius: "9px",
     background: "#fff",
     fontSize: "22px",
     lineHeight: 1,
     cursor: "pointer",
   },
-
   formGrid: {
     display: "grid",
-    gridTemplateColumns:
-      "repeat(2, minmax(0, 1fr))",
+    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
     gap: "13px",
   },
-
   field: {
     display: "grid",
     gap: "6px",
   },
-
   fieldFull: {
     display: "grid",
     gap: "6px",
     gridColumn: "1 / -1",
   },
-
   fieldLabel: {
     fontSize: "13px",
     fontWeight: 800,
     color: "#333",
   },
-
   input: {
     width: "100%",
     boxSizing: "border-box",
-    border:
-      "1px solid #d6d6d6",
+    border: "1px solid #d6d6d6",
     background: "#fff",
     borderRadius: "10px",
-    padding:
-      "11px 12px",
+    padding: "11px 12px",
     fontSize: "15px",
     color: "#111",
     outline: "none",
   },
-
   textarea: {
     width: "100%",
     boxSizing: "border-box",
-    border:
-      "1px solid #d6d6d6",
+    border: "1px solid #d6d6d6",
     background: "#fff",
     borderRadius: "10px",
-    padding:
-      "11px 12px",
+    padding: "11px 12px",
     fontSize: "15px",
     color: "#111",
     resize: "vertical",
     minHeight: "95px",
   },
-
   fieldHint: {
     color: "#777",
     fontSize: "11px",
   },
-
   characterCount: {
     justifySelf: "end",
     color: "#888",
     fontSize: "11px",
   },
-
   privateRow: {
     gridColumn: "1 / -1",
     display: "flex",
@@ -2118,48 +1680,37 @@ const styles = {
     fontSize: "14px",
     cursor: "pointer",
   },
-
   formActions: {
     display: "flex",
     justifyContent: "flex-end",
     gap: "8px",
     marginTop: "15px",
   },
-
   cancelButton: {
-    border:
-      "1px solid #d5d5d5",
+    border: "1px solid #d5d5d5",
     background: "#fff",
     color: "#111",
     borderRadius: "10px",
-    padding:
-      "10px 15px",
+    padding: "10px 15px",
     fontWeight: 750,
     cursor: "pointer",
   },
-
   saveButton: {
     border: "none",
     background: "#111",
     color: "#fff",
     borderRadius: "10px",
-    padding:
-      "10px 16px",
+    padding: "10px 16px",
     fontWeight: 800,
     cursor: "pointer",
   },
-
   contentTabs: {
     display: "grid",
-    gridTemplateColumns:
-      "repeat(3, 1fr)",
-    borderTop:
-      "1px solid #ededed",
-    borderBottom:
-      "1px solid #ededed",
+    gridTemplateColumns: "repeat(3, 1fr)",
+    borderTop: "1px solid #ededed",
+    borderBottom: "1px solid #ededed",
     marginTop: "2px",
   },
-
   contentTab: {
     minHeight: "44px",
     border: "none",
@@ -2172,26 +1723,19 @@ const styles = {
     cursor: "pointer",
     fontSize: "14px",
     fontWeight: 750,
-    borderBottom:
-      "3px solid transparent",
+    borderBottom: "3px solid transparent",
   },
-
   activeContentTab: {
     color: "#111",
-    borderBottom:
-      "3px solid #111",
+    borderBottom: "3px solid #111",
   },
-
   tabIcon: {
     fontSize: "20px",
     lineHeight: 1,
   },
-
   videoSection: {
-    padding:
-      "3px 8px 4px",
+    padding: "3px 8px 4px",
   },
-
   contentLoading: {
     minHeight: "230px",
     display: "flex",
@@ -2201,40 +1745,38 @@ const styles = {
     color: "#777",
     fontSize: "13px",
   },
-
   videoGrid: {
     display: "grid",
-    gridTemplateColumns:
-      "repeat(3, minmax(0, 1fr))",
+    gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
     gap: "7px",
   },
-
   videoCard: {
     minWidth: 0,
     overflow: "hidden",
     borderRadius: "11px",
     background: "#f6f6f6",
-    border:
-      "1px solid #eeeeee",
+    border: "1px solid #eeeeee",
   },
-
+  videoCardMedia: {
+    width: "100%",
+    height: "140px",
+    objectFit: "cover",
+    display: "block",
+  },
   videoMedia: {
     width: "100%",
     aspectRatio: "4 / 5",
     maxHeight: "220px",
     position: "relative",
     overflow: "hidden",
-    background:
-      "linear-gradient(135deg, #171717, #484848)",
+    background: "linear-gradient(135deg, #171717, #484848)",
   },
-
   videoThumbnail: {
     width: "100%",
     height: "100%",
     objectFit: "cover",
     display: "block",
   },
-
   videoElement: {
     width: "100%",
     height: "100%",
@@ -2242,7 +1784,6 @@ const styles = {
     display: "block",
     background: "#111",
   },
-
   videoFallback: {
     width: "100%",
     height: "100%",
@@ -2253,7 +1794,6 @@ const styles = {
     fontSize: "34px",
     fontWeight: 900,
   },
-
   videoOverlay: {
     position: "absolute",
     left: "7px",
@@ -2264,38 +1804,30 @@ const styles = {
     justifyContent: "space-between",
     gap: "6px",
     color: "#fff",
-    textShadow:
-      "0 1px 4px rgba(0,0,0,0.8)",
+    textShadow: "0 1px 4px rgba(0,0,0,0.8)",
   },
-
   playBadge: {
     fontSize: "12px",
     lineHeight: 1,
   },
-
   videoViews: {
     fontSize: "12px",
     fontWeight: 800,
   },
-
   pinnedBadge: {
     position: "absolute",
     top: "7px",
     left: "7px",
-    padding:
-      "4px 7px",
+    padding: "4px 7px",
     borderRadius: "6px",
     background: "#111",
     color: "#fff",
     fontSize: "10px",
     fontWeight: 800,
   },
-
   videoMeta: {
-    padding:
-      "7px 8px 8px",
+    padding: "7px 8px 8px",
   },
-
   videoCaption: {
     margin: 0,
     fontSize: "11px",
@@ -2306,7 +1838,6 @@ const styles = {
     overflow: "hidden",
     color: "#222",
   },
-
   videoStats: {
     marginTop: "5px",
     display: "flex",
@@ -2314,7 +1845,6 @@ const styles = {
     color: "#777",
     fontSize: "10px",
   },
-
   emptyContent: {
     minHeight: "245px",
     display: "flex",
@@ -2322,10 +1852,8 @@ const styles = {
     alignItems: "center",
     justifyContent: "center",
     textAlign: "center",
-    padding:
-      "22px 15px",
+    padding: "22px 15px",
   },
-
   emptyIcon: {
     width: "56px",
     height: "56px",
@@ -2338,14 +1866,11 @@ const styles = {
     color: "#555",
     marginBottom: "9px",
   },
-
   emptyContentTitle: {
-    margin:
-      "0 0 5px",
+    margin: "0 0 5px",
     fontSize: "16px",
     fontWeight: 850,
   },
-
   emptyContentText: {
     margin: 0,
     maxWidth: "340px",
@@ -2353,76 +1878,56 @@ const styles = {
     fontSize: "13px",
     lineHeight: 1.45,
   },
-
   signOutArea: {
-    padding:
-      "12px 16px 17px",
+    padding: "12px 16px 17px",
   },
-
   signOutButton: {
     width: "100%",
-    border:
-      "1px solid #e1caca",
+    border: "1px solid #e1caca",
     background: "#fff",
     color: "#c40000",
     borderRadius: "11px",
-    padding:
-      "11px 14px",
+    padding: "11px 14px",
     fontWeight: 800,
     cursor: "pointer",
   },
-
   message: {
-    margin:
-      "0 16px 16px",
-    padding:
-      "10px 12px",
+    margin: "0 16px 16px",
+    padding: "10px 12px",
     borderRadius: "10px",
     fontSize: "13px",
     lineHeight: 1.4,
   },
-
   successMessage: {
     background: "#ebf8ef",
     color: "#176b2c",
-    border:
-      "1px solid #c9ead2",
+    border: "1px solid #c9ead2",
   },
-
   errorMessage: {
     background: "#fff0f0",
     color: "#b00020",
-    border:
-      "1px solid #f0cccc",
+    border: "1px solid #f0cccc",
   },
-
   backButton: {
     alignSelf: "flex-start",
     margin: "15px",
-    border:
-      "1px solid #ddd",
+    border: "1px solid #ddd",
     background: "#fff",
     color: "#111",
     borderRadius: "10px",
-    padding:
-      "9px 12px",
+    padding: "9px 12px",
     fontWeight: 700,
     cursor: "pointer",
   },
-
   emptyTitle: {
-    margin:
-      "25px 15px 5px",
+    margin: "25px 15px 5px",
   },
-
   emptyText: {
-    margin:
-      "0 15px",
+    margin: "0 15px",
     color: "#666",
   },
 };
 
-// 🖼️ Framing & Zoom Modal Styles
 const cropStyles = {
   overlay: {
     position: "fixed",
@@ -2514,10 +2019,51 @@ function DraftCard({ draft, onOpenDraft }) {
   const thumbnail = draft.thumbnailURL || "";
   const date = draft.savedAt ? new Date(draft.savedAt).toLocaleString() : "Saved draft";
   return (
-    <button type="button" onClick={() => onOpenDraft?.(draft.id)} style={{ ...styles.videoCard, border: "0", padding: 0, textAlign: "left", cursor: "pointer", position: "relative", overflow: "hidden" }}>
-      {thumbnail ? (draft.mediaType === "video" ? <video src={thumbnail} muted playsInline preload="metadata" style={styles.videoCardMedia} /> : <img src={thumbnail} alt="Draft" style={styles.videoCardMedia} />) : <div style={styles.videoCardMedia}>Draft</div>}
-      <div style={{ position: "absolute", left: 8, top: 8, padding: "4px 7px", borderRadius: 999, background: "rgba(0,0,0,.72)", color: "#fff", fontSize: 11, fontWeight: 700 }}>DRAFT</div>
-      <div style={{ padding: "8px 9px" }}><strong style={{ display: "block", fontSize: 13 }}>{draft.contentType === "reel" ? "Reel draft" : "Post draft"}</strong><span style={{ display: "block", fontSize: 11, opacity: .65, marginTop: 3 }}>{date}</span></div>
+    <button
+      type="button"
+      onClick={() => onOpenDraft?.(draft.id)}
+      style={{
+        ...styles.videoCard,
+        border: "0",
+        padding: 0,
+        textAlign: "left",
+        cursor: "pointer",
+        position: "relative",
+        overflow: "hidden",
+      }}
+    >
+      {thumbnail ? (
+        draft.mediaType === "video" ? (
+          <video src={thumbnail} muted playsInline preload="metadata" style={styles.videoCardMedia} />
+        ) : (
+          <img src={thumbnail} alt="Draft" style={styles.videoCardMedia} />
+        )
+      ) : (
+        <div style={styles.videoCardMedia}>Draft</div>
+      )}
+      <div
+        style={{
+          position: "absolute",
+          left: 8,
+          top: 8,
+          padding: "4px 7px",
+          borderRadius: 999,
+          background: "rgba(0,0,0,.72)",
+          color: "#fff",
+          fontSize: 11,
+          fontWeight: 700,
+        }}
+      >
+        DRAFT
+      </div>
+      <div style={{ padding: "8px 9px" }}>
+        <strong style={{ display: "block", fontSize: 13 }}>
+          {draft.contentType === "reel" ? "Reel draft" : "Post draft"}
+        </strong>
+        <span style={{ display: "block", fontSize: 11, opacity: 0.65, marginTop: 3 }}>
+          {date}
+        </span>
+      </div>
     </button>
   );
 }

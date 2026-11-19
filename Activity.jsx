@@ -1,9 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { onAuthStateChanged } from "firebase/auth";
-import { auth } from "./firebase.js";
 import { apiGet, apiPost } from "./apiClient.js";
-
-const API_URL = "https://vezlivo-api.vezlivo-api.workers.dev";
 
 function timeAgo(timestamp) {
   const value = Number(timestamp || 0);
@@ -30,59 +26,76 @@ export default function Activity({ onBack }) {
   const [conversations, setConversations] = useState([]);
   const [activeFilter, setActiveFilter] = useState("likes");
   const [activeChatPartner, setActiveChatPartner] = useState(null);
-  const [messages, setMessages] = useState("");
+  const [messages, setMessages] = useState([]);
   const [replyText, setReplyText] = useState("");
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [showInboxList, setShowInboxList] = useState(false);
   const [showInboxNotice, setShowInboxNotice] = useState(false);
 
+  // Sovereign auth listener via localStorage
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, setUser);
-    return () => unsubscribe();
+    const loadSavedUser = () => {
+      try {
+        const saved = localStorage.getItem("vezlivo_current_user");
+        setUser(saved ? JSON.parse(saved) : null);
+      } catch {
+        setUser(null);
+      }
+    };
+
+    loadSavedUser();
+    window.addEventListener("storage", loadSavedUser);
+    return () => window.removeEventListener("storage", loadSavedUser);
   }, []);
 
   useEffect(() => {
-    if (!user) {
+    const uid = user?.uid || user?.id;
+    if (!uid) {
       setActivities([]);
       setConversations([]);
       setLoading(false);
       return;
     }
 
+    let cancelled = false;
+
     async function fetchData() {
       try {
-        const token = await user.getIdToken();
-        
-        const actRes = await fetch(`${API_URL}/api/activities?uid=${user.uid}`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (actRes.ok) {
-          const actData = await actRes.json();
+        const actData = await apiGet(`/api/activities?uid=${encodeURIComponent(uid)}`);
+        if (!cancelled && actData) {
           setActivities(actData.activities || []);
         }
 
-        const msgRes = await apiGet(`/messages?userId=${user.uid}`);
-        if (msgRes && msgRes.conversations) {
+        const msgRes = await apiGet(`/messages?userId=${encodeURIComponent(uid)}`);
+        if (!cancelled && msgRes && msgRes.conversations) {
           setConversations(msgRes.conversations);
         }
       } catch (error) {
         console.error("Activity loading error:", error);
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
     }
 
     fetchData();
+    return () => {
+      cancelled = true;
+    };
   }, [user]);
 
   useEffect(() => {
-    if (!user || !activeChatPartner) return;
+    const uid = user?.uid || user?.id;
+    if (!uid || !activeChatPartner) return;
+
+    let cancelled = false;
 
     async function loadChat() {
       try {
-        const res = await apiGet(`/messages?userId=${user.uid}&otherUserId=${activeChatPartner.id}`);
-        if (res && res.messages) {
+        const res = await apiGet(
+          `/messages?userId=${encodeURIComponent(uid)}&otherUserId=${encodeURIComponent(activeChatPartner.id)}`
+        );
+        if (!cancelled && res && Array.isArray(res.messages)) {
           setMessages(res.messages);
         }
       } catch (err) {
@@ -92,17 +105,21 @@ export default function Activity({ onBack }) {
 
     loadChat();
     const interval = setInterval(loadChat, 4000);
-    return () => clearInterval(interval);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, [user, activeChatPartner]);
 
   const handleSendMessage = async (e) => {
     e.preventDefault();
-    if (!replyText.trim() || !activeChatPartner || !user || sending) return;
+    const uid = user?.uid || user?.id;
+    if (!replyText.trim() || !activeChatPartner || !uid || sending) return;
 
     setSending(true);
     try {
       const res = await apiPost("/messages", {
-        senderId: user.uid,
+        senderId: uid,
         receiverId: activeChatPartner.id,
         text: replyText.trim(),
       });
@@ -118,7 +135,6 @@ export default function Activity({ onBack }) {
     }
   };
 
-  // Only count UNREAD items for the notification badges so they clear when read!
   const counts = {
     likes: activities.filter((act) => act.type === "like" && act.read !== true).length,
     comments: activities.filter((act) => act.type === "comment" && act.read !== true).length,
@@ -133,20 +149,20 @@ export default function Activity({ onBack }) {
   });
 
   const markAsRead = async (activityId) => {
-    // Instantly update local state so the badge count clears right away
+    const uid = user?.uid || user?.id;
     setActivities((prev) =>
       prev.map((item) => (item.id === activityId ? { ...item, read: true } : item))
     );
 
-    // Optional backend sync if your worker supports it
     try {
-      await apiPost(`/api/activities/${activityId}/read`, { userId: user?.uid });
+      await apiPost(`/api/activities/${activityId}/read`, { userId: uid });
     } catch (err) {
       console.error("Failed to mark activity as read:", err);
     }
   };
 
-  const unreadCount = conversations.filter((c) => !c.read && c.sender_id !== user?.uid).length;
+  const currentUid = user?.uid || user?.id;
+  const unreadCount = conversations.filter((c) => !c.read && c.sender_id !== currentUid).length;
 
   // 1. CHAT CONVERSATION VIEW
   if (activeChatPartner) {
@@ -166,7 +182,7 @@ export default function Activity({ onBack }) {
               </div>
             ) : (
               messages.map((m) => {
-                const isMe = m.sender_id === user.uid;
+                const isMe = m.sender_id === currentUid;
                 return (
                   <div key={m.id || m.created_at} style={{ ...styles.bubbleRow, justifyContent: isMe ? "flex-end" : "flex-start" }}>
                     <div style={{ ...styles.bubble, ...(isMe ? styles.myBubble : styles.theirBubble) }}>
@@ -223,14 +239,14 @@ export default function Activity({ onBack }) {
                   onClick={() => {
                     setActiveChatPartner({
                       id: conv.partner_id,
-                      name: `User ${conv.partner_id.substring(0, 6)}`,
+                      name: `User ${String(conv.partner_id).substring(0, 6)}`,
                     });
                   }}
                   style={styles.row}
                 >
                   <div style={styles.iconBox}>💬</div>
                   <div style={styles.body}>
-                    <div style={styles.message}>User {conv.partner_id.substring(0, 6)}</div>
+                    <div style={styles.message}>User {String(conv.partner_id).substring(0, 6)}</div>
                     <div style={styles.comment}>{conv.text}</div>
                     <div style={styles.time}>{timeAgo(conv.created_at)}</div>
                   </div>
@@ -253,7 +269,6 @@ export default function Activity({ onBack }) {
       </header>
 
       <main style={styles.content}>
-        {/* DIRECT MESSAGES BANNER */}
         <div
           onClick={() => {
             if (conversations.length > 0) {
@@ -280,7 +295,6 @@ export default function Activity({ onBack }) {
           )}
         </div>
 
-        {/* IN-APP NOTICE */}
         {showInboxNotice && (
           <div style={styles.noticeCard}>
             <div style={{ fontSize: "22px" }}>📬</div>
@@ -292,7 +306,6 @@ export default function Activity({ onBack }) {
           </div>
         )}
 
-        {/* CATEGORY FILTER PILLS WITH UNREAD COUNTERS */}
         <div style={styles.filterRow}>
           {["likes", "comments", "follows"].map((filter) => (
             <button
@@ -314,7 +327,6 @@ export default function Activity({ onBack }) {
           ))}
         </div>
 
-        {/* ACTIVITY LIST */}
         {loading ? (
           <div style={styles.center}>
             <span>Loading notifications...</span>
@@ -343,7 +355,7 @@ export default function Activity({ onBack }) {
                 <div
                   key={item.id}
                   onClick={() => {
-                    markAsRead(item.id); // Tapping clears the unread count badge instantly!
+                    markAsRead(item.id);
                     const targetPostId = item.postId || item.post_id;
                     if (targetPostId) {
                       window.dispatchEvent(

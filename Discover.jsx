@@ -1,22 +1,39 @@
 import React, { useEffect, useState } from "react";
-import { onValue, ref, update } from "firebase/database";
-import { auth, database as db } from "./firebase.js";
-import { apiGet } from "./apiClient.js";
+import { apiGet, apiPost } from "./apiClient.js";
 
 export default function Discover({ onBack }) {
+  const [currentUser, setCurrentUser] = useState(null);
   const [users, setUsers] = useState([]);
   const [videos, setVideos] = useState([]);
   const [search, setSearch] = useState("");
   const [activeTab, setActiveTab] = useState("trending");
   const [loading, setLoading] = useState(true);
+  const [followingMap, setFollowingMap] = useState({});
 
-  // Fetch users from Cloudflare Worker + Neon DB search endpoint
+  // Sovereign auth listener via localStorage
   useEffect(() => {
+    const loadSavedUser = () => {
+      try {
+        const saved = localStorage.getItem("vezlivo_current_user");
+        setCurrentUser(saved ? JSON.parse(saved) : null);
+      } catch {
+        setCurrentUser(null);
+      }
+    };
+
+    loadSavedUser();
+    window.addEventListener("storage", loadSavedUser);
+    return () => window.removeEventListener("storage", loadSavedUser);
+  }, []);
+
+  // Fetch users from backend search endpoint
+  useEffect(() => {
+    let cancelled = false;
+
     const fetchUsers = async () => {
       try {
         const response = await apiGet(`/search/users?q=${encodeURIComponent(search)}`);
-        if (response && response.success) {
-          // Map snake_case database columns to frontend camelCase properties
+        if (!cancelled && response && response.success) {
           const mappedUsers = (response.users || []).map((u) => ({
             uid: u.uid,
             displayName: u.display_name,
@@ -26,61 +43,62 @@ export default function Discover({ onBack }) {
           setUsers(mappedUsers);
         }
       } catch (error) {
-        console.error("Worker user search error:", error);
+        console.error("User search error:", error);
       }
     };
 
     const timer = setTimeout(() => {
       fetchUsers();
-    }, 300); // Debounce search request
+    }, 300);
 
-    return () => clearTimeout(timer);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [search]);
 
+  // Fetch posts from backend API
   useEffect(() => {
-    const postsRef = ref(db, "posts");
+    let cancelled = false;
 
-    const unsubscribePosts = onValue(postsRef, (snapshot) => {
-      const data = snapshot.val() || {};
-      const allVideos = [];
+    async function loadPosts() {
+      try {
+        const data = await apiGet("/posts");
+        if (cancelled) return;
 
-      Object.entries(data).forEach(([uid, userPosts]) => {
-        if (!userPosts || typeof userPosts !== "object") {
-          return;
-        }
-
-        Object.entries(userPosts).forEach(([postId, post]) => {
-          if (!post || typeof post !== "object") {
-            return;
-          }
-
-          allVideos.push({
-            uid,
-            postId,
+        const list = Array.isArray(data) ? data : (data?.posts || []);
+        const normalized = list
+          .filter((post) => post && typeof post === "object")
+          .map((post, index) => ({
+            uid: post.user_id || post.uid || "",
+            postId: post.postId || post.id || String(index),
             ...post,
+          }))
+          .sort((a, b) => {
+            const aViews = Number(a.viewsCount || a.views || 0);
+            const bViews = Number(b.viewsCount || b.views || 0);
+            return bViews - aViews;
           });
-        });
-      });
 
-      allVideos.sort((a, b) => {
-        const aViews = Number(a.viewsCount || a.views || 0);
-        const bViews = Number(b.viewsCount || b.views || 0);
+        setVideos(normalized);
+      } catch (error) {
+        console.error("Discover posts load error:", error);
+        if (!cancelled) setVideos([]);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
 
-        return bViews - aViews;
-      });
-
-      setVideos(allVideos);
-      setLoading(false);
-    });
-
-    return () => unsubscribePosts();
+    loadPosts();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  const currentUser = auth.currentUser;
-
+  const currentUid = currentUser?.uid || currentUser?.id;
   const normalizedSearch = search.trim().toLowerCase();
 
-  const filteredUsers = users; // Already filtered by the backend worker query!
+  const filteredUsers = users;
 
   const filteredVideos = videos.filter((video) => {
     if (!normalizedSearch) {
@@ -88,7 +106,7 @@ export default function Discover({ onBack }) {
     }
 
     const caption = String(video.caption || "").toLowerCase();
-    const name = String(video.displayName || "").toLowerCase();
+    const name = String(video.displayName || video.display_name || "").toLowerCase();
     const username = String(video.username || "").toLowerCase();
 
     return (
@@ -99,20 +117,27 @@ export default function Discover({ onBack }) {
   });
 
   const displayedVideos =
-    activeTab === "trending"
-      ? filteredVideos
-      : activeTab === "videos"
+    activeTab === "trending" || activeTab === "videos"
       ? filteredVideos
       : [];
 
   const getVideoUrl = (video) => {
-    return video.mediaURL || video.videoURL || video.videoUrl || video.url || "";
+    return (
+      video.video_url ||
+      video.videoUrl ||
+      video.mediaURL ||
+      video.mediaUrl ||
+      video.videoURL ||
+      video.url ||
+      ""
+    );
   };
 
   const getUserPhoto = (user) => {
     return (
       user.photoURL ||
       user.profileURL ||
+      user.profile_url ||
       user.profileUrl ||
       "https://via.placeholder.com/100"
     );
@@ -127,29 +152,24 @@ export default function Discover({ onBack }) {
 
     return {
       uid: video.uid,
-      displayName: video.displayName || "Vezlivo User",
+      displayName: video.displayName || video.display_name || "Vezlivo User",
       username: video.username || "user",
-      photoURL: video.photoURL || video.profileURL || "",
+      photoURL: video.photoURL || video.profileURL || video.profile_url || "",
     };
   };
 
-  const handleFollow = async (uid) => {
-    if (!currentUser || uid === currentUser.uid) return;
+  const handleFollow = async (targetUid) => {
+    if (!currentUid || !targetUid || targetUid === currentUid) return;
 
+    setFollowingMap((prev) => ({ ...prev, [targetUid]: true }));
     try {
-      await update(ref(db, `users/${currentUser.uid}/following/${uid}`), {
-        uid,
-        createdAt: Date.now(),
-      });
-
-      await update(ref(db, `users/${uid}/followers/${currentUser.uid}`), {
-        uid: currentUser.uid,
-        username: currentUser.displayName || "",
-        displayName: currentUser.displayName || "",
-        createdAt: Date.now(),
+      await apiPost("/follow", {
+        userId: currentUid,
+        targetUserId: targetUid,
       });
     } catch (error) {
       console.error("Follow error:", error);
+      setFollowingMap((prev) => ({ ...prev, [targetUid]: false }));
     }
   };
 
@@ -255,13 +275,13 @@ export default function Discover({ onBack }) {
                     </span>
                   </div>
 
-                  {currentUser && currentUser.uid !== user.uid && (
+                  {currentUid && currentUid !== user.uid && (
                     <button
                       type="button"
                       onClick={() => handleFollow(user.uid)}
                       style={styles.followButton}
                     >
-                      Follow
+                      {followingMap[user.uid] ? "Following" : "Follow"}
                     </button>
                   )}
                 </div>
@@ -307,7 +327,7 @@ export default function Discover({ onBack }) {
 
                 return (
                   <article
-                    key={`${video.uid}-${video.postId}`}
+                    key={`${video.uid || "user"}-${video.postId}`}
                     style={styles.videoCard}
                   >
                     <video

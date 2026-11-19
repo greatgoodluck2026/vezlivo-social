@@ -1,10 +1,13 @@
-// File: src/apiClient.js
+// File: apiClient.js
 
-// Replace "192.168.43.150" below with your HP EliteBook's actual IPv4 address from ipconfig
+// Replace "192.168.43.150" below with your HP EliteBook's actual IPv4 address from ipconfig when testing on your local network
 const LAPTOP_LOCAL_IP = "192.168.43.150";
 
-const API_BASE_URL =
-  window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
+const CONFIGURED_API_URL = import.meta.env?.VITE_API_URL?.trim();
+
+const API_BASE_URL = CONFIGURED_API_URL
+  ? CONFIGURED_API_URL.replace(/\/+$/, "")
+  : window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1"
     ? "http://localhost:3000"
     : `http://${LAPTOP_LOCAL_IP}:3000`;
 
@@ -14,27 +17,25 @@ async function apiRequest(path, options = {}) {
     ...(options.headers || {}),
   };
 
-  const response = await fetch(
-    `${API_BASE_URL}${path}`,
-    {
-      ...options,
-      headers,
-    }
-  );
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...options,
+    headers,
+  });
 
   const text = await response.text();
   let data = {};
   try {
     data = text ? JSON.parse(text) : {};
   } catch {
-    data = { error: text ? text.slice(0, 150) : `API request failed: ${response.status}` };
+    data = {
+      error: text
+        ? text.slice(0, 150)
+        : `API request failed: ${response.status}`,
+    };
   }
 
   if (!response.ok) {
-    throw new Error(
-      data?.error ||
-      `API request failed: ${response.status}`
-    );
+    throw new Error(data?.error || `API request failed: ${response.status}`);
   }
 
   return data;
@@ -74,28 +75,26 @@ export async function veloxSync(userData) {
 export async function apiUpload(path, formData) {
   const headers = {};
 
-  const response = await fetch(
-    `${API_BASE_URL}${path}`,
-    {
-      method: "POST",
-      headers,
-      body: formData,
-    }
-  );
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    method: "POST",
+    headers,
+    body: formData,
+  });
 
   const text = await response.text();
   let data = {};
   try {
     data = text ? JSON.parse(text) : {};
   } catch {
-    data = { error: text ? text.slice(0, 150) : `API upload failed: ${response.status}` };
+    data = {
+      error: text
+        ? text.slice(0, 150)
+        : `API upload failed: ${response.status}`,
+    };
   }
 
   if (!response.ok) {
-    throw new Error(
-      data?.error ||
-      `API upload failed: ${response.status}`
-    );
+    throw new Error(data?.error || `API upload failed: ${response.status}`);
   }
 
   return data;
