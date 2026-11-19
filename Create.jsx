@@ -6,16 +6,6 @@ import React, {
 
 import { apiGet, apiPost, apiUpload } from "./apiClient.js";
 
-import {
-  onAuthStateChanged,
-} from "firebase/auth";
-
-import {
-  auth,
-} from "./firebase.js";
-
-import * as tus from "tus-js-client";
-
 const MAX_VIDEO_SIZE =
   500 * 1024 * 1024;
 
@@ -110,46 +100,22 @@ function extractMentions(text) {
     ...new Set(matches),
   ];
 }
-// Function to handle direct video upload to Mux (bypasses proxy and tus-js-client errors)
-const uploadVideoResumable = async (file, onProgress) => {
-  const apiBase = import.meta.env.VITE_API_URL || "https://vezlivo-api.vezlivo-api.workers.dev";
-  const response = await fetch(`${apiBase}/mux/uploads`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" }
-  });
-  const data = await response.json();
 
-  if (!data.success || !data.uploadUrl) {
-    throw new Error(data.error || "Failed to create Mux upload session.");
+function readSavedUser() {
+  try {
+    const saved = localStorage.getItem("vezlivo_current_user");
+    if (!saved) return null;
+    const parsed = JSON.parse(saved);
+    if (!parsed || typeof parsed !== "object") return null;
+    return {
+      ...parsed,
+      uid: parsed.uid || parsed.id || "",
+    };
+  } catch {
+    return null;
   }
+}
 
-  return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
-    xhr.open("PUT", data.uploadUrl, true);
-    xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
-
-    xhr.upload.onprogress = (event) => {
-      if (event.lengthComputable && onProgress) {
-        const percentage = Math.round((event.loaded / event.total) * 100);
-        onProgress(percentage);
-      }
-    };
-
-    xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) {
-        resolve({ uploadId: data.uploadId });
-      } else {
-        reject(new Error(`Mux direct upload failed with status ${xhr.status}`));
-      }
-    };
-
-    xhr.onerror = () => {
-      reject(new Error("Network error occurred during video upload."));
-    };
-
-    xhr.send(file);
-  });
-};
 /* =========================================================
    VEZLIVO PERSISTENT DRAFT STORAGE
 ========================================================= */
@@ -197,9 +163,9 @@ async function deleteVezlivoDraft(id) {
   });
 }
 
-function Create({ draftId = "" } = {}) {
+function Create({ draftId = "", onNavigate } = {}) {
   const [user, setUser] =
-    useState(null);
+    useState(() => readSavedUser());
 
   const [step, setStep] =
     useState("create");
@@ -435,33 +401,26 @@ function Create({ draftId = "" } = {}) {
   const musicAudioRef =
     useRef(null);
 
+  const currentUid = user?.uid || user?.id || "";
 
- /* =====================================================
-     AUTH
+
+  /* =====================================================
+     SESSION
   ===================================================== */
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
-      setUser(currentUser);
-    });
-    return () => unsubscribe();
+    const syncUser = () => setUser(readSavedUser());
+    syncUser();
+    window.addEventListener("storage", syncUser);
+    return () => window.removeEventListener("storage", syncUser);
   }, []);
 
-  useEffect(() => {
-    const handleNavigate = (e) => {
-      if (e.detail?.section) {
-        setActiveSection(e.detail.section);
-      }
-    };
-    window.addEventListener("vezlivo:navigate", handleNavigate);
-    return () => window.removeEventListener("vezlivo:navigate", handleNavigate);
-  }, []);
   useEffect(() => {
     let active = true;
     apiGet("/sounds")
       .then((result) => {
         if (!active) return;
-        const list = (result.sounds || [])
+        const list = (result?.sounds || [])
           .map((sound) => ({ ...sound, audioURL: sound.audioURL || sound.audioUrl || sound.url || "" }))
           .filter((sound) => sound.audioURL);
         setSoundLibrary(list);
@@ -1430,7 +1389,7 @@ function Create({ draftId = "" } = {}) {
       setSavingDraft(true); setError(""); setMessage("");
       const id = currentDraftId || `draft-${Date.now()}`;
       await putVezlivoDraft({
-        id, uid: user?.uid || "", contentType: contentType || "post", mediaType,
+        id, uid: currentUid, contentType: contentType || "post", mediaType,
         fileName: mediaFile.name || "Vezlivo media",
         mediaMimeType: mediaFile.type || (mediaType === "video" ? "video/webm" : "image/jpeg"),
         mediaBlob: await mediaFile.arrayBuffer(),
@@ -1569,7 +1528,6 @@ function Create({ draftId = "" } = {}) {
      PUBLISH
   ===================================================== */
   const publishPost = async () => {
-    // 🛡️ PREVENT DOUBLE SUBMISSION / MULTI-CLICK GUARD
     if (uploading) {
       return;
     }
@@ -1577,7 +1535,7 @@ function Create({ draftId = "" } = {}) {
     setMessage("");
     setError("");
 
-    if (!user) {
+    if (!currentUid) {
       setError("Please log in before publishing.");
       return;
     }
@@ -1592,7 +1550,6 @@ function Create({ draftId = "" } = {}) {
       return;
     }
 
-    // 🔑 GENERATE POST ID FIRST SO UPLOADS HAVE IT READY
     const postId = crypto.randomUUID();
     if (!postId) {
       setError("Could not create the post identifier.");
@@ -1603,7 +1560,6 @@ function Create({ draftId = "" } = {}) {
       setUploading(true);
       setUploadProgress(0);
 
-      // Trigger background upload reminder on Home.jsx and navigate home
       window.dispatchEvent(
         new CustomEvent("vezlivo:start-background-upload", {
           detail: { title: contentType === "reel" ? "Reel" : contentType === "story" ? "Story" : "Post" }
@@ -1614,13 +1570,14 @@ function Create({ draftId = "" } = {}) {
       } else {
         window.dispatchEvent(new CustomEvent("vezlivo:navigate", { detail: { section: "Home" } }));
       }
+
       const extension =
         mediaFile.name.includes(".")
           ? mediaFile.name.split(".").pop().toLowerCase()
           : mediaType === "video"
           ? "webm"
           : "jpg";
-      const storagePath = `${contentType === "story" ? "stories" : "posts"}/${user.uid}/${postId}.${extension}`;
+      const storagePath = `${contentType === "story" ? "stories" : "posts"}/${currentUid}/${postId}.${extension}`;
 
       setMessage(
         contentType === "story"
@@ -1631,38 +1588,16 @@ function Create({ draftId = "" } = {}) {
       );
 
       const uploadFile = async (file, path, onProgress) => {
-        if (file === mediaFile && mediaType === "video") {
-          // Use the true TUS resumable chunking function
-          setMessage("Uploading video via TUS resumable stream...");
-
-          const uploadResult = await uploadVideoResumable(file, (percentage) => {
-            if (onProgress) onProgress(Math.round((percentage / 100) * file.size), file.size);
-          });
-
-          setMessage("Processing video with Mux...");
-
-          // Poll Mux/Worker for processing completion using the uploadId returned by TUS
-          let completed = null;
-          for (let attempt = 0; attempt < 30; attempt++) {
-            completed = await apiPost(
-              `/mux/uploads/${encodeURIComponent(uploadResult.uploadId)}/complete`,
-              {}
-            );
-            if (completed && !completed.processing && completed.playbackId) break;
-            await new Promise((resolve) => setTimeout(resolve, 2000));
-          }
-          if (!completed || completed.processing || !completed.playbackId) {
-            throw new Error("Mux is still processing your video. Please try publishing again shortly.");
-          }
-          return { url: completed.url, key: "", playbackId: completed.playbackId, assetId: completed.assetId };
-        }
-
         const form = new FormData();
         form.append("file", file);
         form.append("path", path);
+        form.append("userId", currentUid);
         const uploaded = await apiUpload("/media/upload", form);
         if (onProgress) onProgress(file.size, file.size);
-        return { url: uploaded.url, key: uploaded.key };
+        return {
+          url: uploaded?.url || uploaded?.mediaURL || uploaded?.videoURL || "",
+          key: uploaded?.key || path,
+        };
       };
 
       let mediaTransferred = 0;
@@ -1680,7 +1615,7 @@ function Create({ draftId = "" } = {}) {
       const selectedCoverFile = coverFile;
       const coverStoragePath =
         contentType === "reel" && mediaType === "video" && selectedCoverFile
-          ? `covers/${user.uid}/${postId}.jpg`
+          ? `covers/${currentUid}/${postId}.jpg`
           : "";
 
       const uploadJobs = [
@@ -1690,7 +1625,7 @@ function Create({ draftId = "" } = {}) {
         }),
       ];
       if (musicFile) {
-        uploadJobs.push(uploadFile(musicFile, `sounds/${user.uid}/${postId}.${musicExtension}`, (transferred) => {
+        uploadJobs.push(uploadFile(musicFile, `sounds/${currentUid}/${postId}.${musicExtension}`, (transferred) => {
           musicTransferred = transferred;
           updateCombinedProgress();
         }));
@@ -1721,40 +1656,34 @@ function Create({ draftId = "" } = {}) {
 
       const mentions = extractMentions(caption);
 
-    // Pull display name, username, and profile photo safely from user state or metadata
       const displayName =
         user.displayName ||
-        user.reloadUserInfo?.displayName ||
+        user.display_name ||
+        user.username ||
         user.email?.split("@")[0] ||
         "Vezlivo User";
 
       const rawUsername =
-        user.reloadUserInfo?.screenName ||
+        user.username ||
         user.email?.split("@")[0] ||
         "user";
-      
+
       const username = rawUsername.startsWith("@") ? rawUsername : `@${rawUsername}`;
-
-      const profileURL =
-        user.photoURL ||
-        user.reloadUserInfo?.photoUrl ||
-        "";
-
+      const avatarUrl = user.photoURL || user.profileURL || user.profile_url || "";
       const now = Date.now();
 
       const baseData = {
         id: postId,
-        uid: user.uid,
+        uid: currentUid,
         displayName,
         username,
-        profileURL: user.photoURL || "",
+        profileURL: avatarUrl,
         userEmail: user.email || "",
-        userPhotoURL: user.photoURL || "",
+        userPhotoURL: avatarUrl,
         mediaType,
         mediaURL,
+        videoURL: mediaType === "video" ? mediaURL : "",
         storagePath: mediaUpload.key || "",
-        muxPlaybackId: mediaUpload.playbackId || "",
-        muxAssetId: mediaUpload.assetId || "",
         caption: caption.trim(),
         hashtags: detectedHashtags,
         mentions: [
@@ -1793,7 +1722,7 @@ function Create({ draftId = "" } = {}) {
         coverZoom,
       };
 
-    if (contentType === "story") {
+      if (contentType === "story") {
         const expiresAt = now + 24 * 60 * 60 * 1000;
         await apiPost("/stories", {
           ...baseData,
@@ -1823,7 +1752,6 @@ function Create({ draftId = "" } = {}) {
           shareToStory: contentType === "reel" && shareToStory,
         };
 
-        // Keep only this single call to publish the post/reel cleanly
         await apiPost("/posts", postData);
 
         setUploadProgress(100);
@@ -1833,6 +1761,7 @@ function Create({ draftId = "" } = {}) {
             : "Your post is live on Vezlivo."
         );
       }
+
       setTimeout(() => {
         removeMedia();
       }, 1200);
@@ -1841,7 +1770,6 @@ function Create({ draftId = "" } = {}) {
         try { await deleteVezlivoDraft(currentDraftId); }
         catch (draftDeleteError) { console.warn("Vezlivo draft cleanup failed:", draftDeleteError); }
       }
-
     } catch (publishError) {
       console.error("Vezlivo publish error:", publishError);
       setError(
@@ -1852,57 +1780,33 @@ function Create({ draftId = "" } = {}) {
       setUploading(false);
     }
   };
- 
+
   /* =====================================================
      LOGIN
   ===================================================== */
 
-  if (!user) {
+  if (!currentUid) {
     return (
-      <main
-        style={
-          styles.page
-        }
-      >
-        <section
-          style={
-            styles.loginCard
-          }
-        >
+      <main style={styles.page}>
+        <section style={styles.loginCard}>
           <img
             src="/Logo.png"
             alt="Vezlivo"
-            style={
-              styles.loginLogo
-            }
+            style={styles.loginLogo}
           />
 
-          <h1
-            style={
-              styles.title
-            }
-          >
+          <h1 style={styles.title}>
             Create on Vezlivo
           </h1>
 
-          <p
-            style={
-              styles.muted
-            }
-          >
-            Log in to create
-            and share your
-            content.
+          <p style={styles.muted}>
+            Log in to create and share your content.
           </p>
 
           <button
             type="button"
-            style={
-              styles.primaryButton
-            }
-            onClick={() =>
-              window.history.back()
-            }
+            style={styles.primaryButton}
+            onClick={() => window.history.back()}
           >
             Go back
           </button>
@@ -1918,73 +1822,39 @@ function Create({ draftId = "" } = {}) {
 
   if (cameraOpen) {
     return (
-      <main
-        style={
-          styles.cameraPage
-        }
-      >
+      <main style={styles.cameraPage}>
         <video
-          ref={
-            cameraVideoRef
-          }
+          ref={cameraVideoRef}
           autoPlay
           playsInline
           muted
-          style={
-            styles.cameraVideo
-          }
+          style={styles.cameraVideo}
         />
 
-        <div
-          style={
-            styles.cameraGradient
-          }
-        />
+        <div style={styles.cameraGradient} />
 
-        <div
-          style={
-            styles.cameraTop
-          }
-        >
+        <div style={styles.cameraTop}>
           <button
             type="button"
-            style={
-              styles.cameraIconButton
-            }
-            onClick={
-              isRecording
-                ? stopRecording
-                : stopCamera
-            }
+            style={styles.cameraIconButton}
+            onClick={isRecording ? stopRecording : stopCamera}
           >
             ×
           </button>
 
-          <div
-            style={
-              styles.cameraModeTitle
-            }
-          >
-            {contentType ===
-            "reel"
+          <div style={styles.cameraModeTitle}>
+            {contentType === "reel"
               ? "Reel"
-              : contentType ===
-                "story"
+              : contentType === "story"
               ? "Story"
               : "Post"}
           </div>
 
           <button
             type="button"
-            style={
-              styles.cameraIconButton
-            }
-            onClick={
-              switchCamera
-            }
-            disabled={
-              isRecording
-            }
+            style={styles.cameraIconButton}
+            onClick={switchCamera}
+            disabled={isRecording}
           >
             ↻
           </button>
@@ -1992,172 +1862,104 @@ function Create({ draftId = "" } = {}) {
 
 
         {!isRecording && (
-          <div
-            style={
-              styles.cameraTopControls
-            }
-          >
+          <div style={styles.cameraTopControls}>
             <button
               type="button"
-              style={
-                styles.cameraSmallControl
-              }
-              onClick={() =>
-                setShowSoundPanel(
-                  (value) =>
-                    !value
-                )
-              }
+              style={styles.cameraSmallControl}
+              onClick={() => setShowSoundPanel((value) => !value)}
             >
               ♪
-              <span>
-                Sound
-              </span>
+              <span>Sound</span>
             </button>
 
             <button
               type="button"
-              style={
-                styles.cameraSmallControl
-              }
-              onClick={() =>
-                setShowCameraOptions(
-                  (value) =>
-                    !value
-                )
-              }
+              style={styles.cameraSmallControl}
+              onClick={() => setShowCameraOptions((value) => !value)}
             >
               {recordingLimit}s
-              <span>
-                Length
-              </span>
+              <span>Length</span>
             </button>
           </div>
         )}
 
 
-        {showSoundPanel &&
-          !isRecording && (
-            <div
+        {showSoundPanel && !isRecording && (
+          <div style={styles.soundPanel}>
+            <strong>Add sound</strong>
+
+            <button
+              type="button"
               style={
-                styles.soundPanel
+                selectedSound === "Original sound"
+                  ? styles.soundOptionActive
+                  : styles.soundOption
               }
+              onClick={() => {
+                setSelectedSound("Original sound");
+                setShowSoundPanel(false);
+              }}
             >
-              <strong>
-                Add sound
-              </strong>
+              Original sound
+            </button>
 
-              <button
-                type="button"
-                style={
-                  selectedSound ===
-                  "Original sound"
-                    ? styles.soundOptionActive
-                    : styles.soundOption
-                }
-                onClick={() => {
-                  setSelectedSound(
-                    "Original sound"
-                  );
-
-                  setShowSoundPanel(
-                    false
-                  );
-                }}
-              >
-                Original sound
-              </button>
-
-              <button
-                type="button"
-                style={
-                  selectedSound ===
-                  "Vezlivo music"
-                    ? styles.soundOptionActive
-                    : styles.soundOption
-                }
-                onClick={() => {
-                  setSelectedSound(
-                    "Vezlivo music"
-                  );
-
-                  setShowSoundPanel(
-                    false
-                  );
-                }}
-              >
-                Vezlivo music
-              </button>
-            </div>
-          )}
-
-
-        {showCameraOptions &&
-          !isRecording && (
-            <div
+            <button
+              type="button"
               style={
-                styles.lengthPanel
+                selectedSound === "Vezlivo music"
+                  ? styles.soundOptionActive
+                  : styles.soundOption
               }
+              onClick={() => {
+                setSelectedSound("Vezlivo music");
+                setShowSoundPanel(false);
+              }}
             >
-              <strong>
-                Video length
-              </strong>
-
-              <button
-                type="button"
-                style={
-                  recordingLimit ===
-                  15
-                    ? styles.lengthActive
-                    : styles.lengthButton
-                }
-                onClick={() => {
-                  setRecordingLimit(
-                    15
-                  );
-
-                  setShowCameraOptions(
-                    false
-                  );
-                }}
-              >
-                15 seconds
-              </button>
-
-              <button
-                type="button"
-                style={
-                  recordingLimit ===
-                  60
-                    ? styles.lengthActive
-                    : styles.lengthButton
-                }
-                onClick={() => {
-                  setRecordingLimit(
-                    60
-                  );
-
-                  setShowCameraOptions(
-                    false
-                  );
-                }}
-              >
-                60 seconds
-              </button>
-            </div>
-          )}
+              Vezlivo music
+            </button>
+          </div>
+        )}
 
 
-        <div
-          style={
-            styles.cameraBottom
-          }
-        >
-          <div
-            style={
-              styles.cameraHint
-            }
-          >
+        {showCameraOptions && !isRecording && (
+          <div style={styles.lengthPanel}>
+            <strong>Video length</strong>
+
+            <button
+              type="button"
+              style={
+                recordingLimit === 15
+                  ? styles.lengthActive
+                  : styles.lengthButton
+              }
+              onClick={() => {
+                setRecordingLimit(15);
+                setShowCameraOptions(false);
+              }}
+            >
+              15 seconds
+            </button>
+
+            <button
+              type="button"
+              style={
+                recordingLimit === 60
+                  ? styles.lengthActive
+                  : styles.lengthButton
+              }
+              onClick={() => {
+                setRecordingLimit(60);
+                setShowCameraOptions(false);
+              }}
+            >
+              60 seconds
+            </button>
+          </div>
+        )}
+
+
+        <div style={styles.cameraBottom}>
+          <div style={styles.cameraHint}>
             {isRecording
               ? `${recordingSeconds}s / ${recordingLimit}s`
               : "Tap the button to record"}
@@ -2167,16 +1969,9 @@ function Create({ draftId = "" } = {}) {
             type="button"
             style={{
               ...styles.recordButton,
-
-              ...(isRecording
-                ? styles.recordingButton
-                : {}),
+              ...(isRecording ? styles.recordingButton : {}),
             }}
-            onClick={
-              isRecording
-                ? stopRecording
-                : startRecording
-            }
+            onClick={isRecording ? stopRecording : startRecording}
           >
             <span
               style={
@@ -2188,41 +1983,24 @@ function Create({ draftId = "" } = {}) {
           </button>
 
 
-          <div
-            style={
-              styles.cameraBottomActions
-            }
-          >
-            {contentType !==
-              "reel" && (
+          <div style={styles.cameraBottomActions}>
+            {contentType !== "reel" && (
               <button
                 type="button"
-                style={
-                  styles.cameraBottomAction
-                }
-                onClick={() =>
-                  photoInputRef.current?.click()
-                }
+                style={styles.cameraBottomAction}
+                onClick={() => photoInputRef.current?.click()}
               >
-                <span>
-                  ▧
-                </span>
+                <span>▧</span>
                 Photo
               </button>
             )}
 
             <button
               type="button"
-              style={
-                styles.cameraBottomAction
-              }
-              onClick={() =>
-                fileInputRef.current?.click()
-              }
+              style={styles.cameraBottomAction}
+              onClick={() => fileInputRef.current?.click()}
             >
-              <span>
-                ▣
-              </span>
+              <span>▣</span>
               Gallery
             </button>
           </div>
@@ -2230,35 +2008,23 @@ function Create({ draftId = "" } = {}) {
 
 
         <input
-          ref={
-            fileInputRef
-          }
+          ref={fileInputRef}
           type="file"
           accept="video/*"
           hidden
-          onChange={
-            chooseVideoOnly
-          }
+          onChange={chooseVideoOnly}
         />
 
         <input
-          ref={
-            photoInputRef
-          }
+          ref={photoInputRef}
           type="file"
           accept="image/*"
           hidden
-          onChange={
-            chooseMedia
-          }
+          onChange={chooseMedia}
         />
 
         {error && (
-          <div
-            style={
-              styles.cameraError
-            }
-          >
+          <div style={styles.cameraError}>
             {error}
           </div>
         )}
@@ -2271,236 +2037,116 @@ function Create({ draftId = "" } = {}) {
      CREATE MENU
   ===================================================== */
 
-  if (
-    step === "create"
-  ) {
+  if (step === "create") {
     return (
-      <main
-        style={
-          styles.createPage
-        }
-      >
-        <header
-          style={
-            styles.createHeader
-          }
-        >
+      <main style={styles.createPage}>
+        <header style={styles.createHeader}>
           <button
             type="button"
-            style={
-              styles.backButton
-            }
-            onClick={
-              goBack
-            }
+            style={styles.backButton}
+            onClick={goBack}
           >
             ×
           </button>
 
-          <h1
-            style={
-              styles.headerTitle
-            }
-          >
+          <h1 style={styles.headerTitle}>
             Create
           </h1>
 
-          <div
-            style={
-              styles.headerSpacer
-            }
-          />
+          <div style={styles.headerSpacer} />
         </header>
 
 
-        <section
-          style={
-            styles.createHero
-          }
-        >
+        <section style={styles.createHero}>
           <img
             src="/Logo.png"
             alt="Vezlivo"
-            style={
-              styles.heroLogo
-            }
+            style={styles.heroLogo}
           />
 
-          <h2
-            style={
-              styles.heroTitle
-            }
-          >
+          <h2 style={styles.heroTitle}>
             What do you want to create?
           </h2>
 
-          <p
-            style={
-              styles.heroSubtitle
-            }
-          >
+          <p style={styles.heroSubtitle}>
             Choose Post, Reel or Story.
           </p>
         </section>
 
 
-        <section
-          style={
-            styles.createChoiceList
-          }
-        >
-
-          {/* POST */}
-
+        <section style={styles.createChoiceList}>
           <button
             type="button"
-            style={
-              styles.createChoice
-            }
+            style={styles.createChoice}
             onClick={() => {
-              setContentType(
-                "post"
-              );
+              setContentType("post");
               setError("");
               setMessage("");
               setStep("postChooser");
             }}
           >
-            <div
-              style={
-                styles.choiceIcon
-              }
-            >
+            <div style={styles.choiceIcon}>
               +
             </div>
 
-            <div
-              style={
-                styles.choiceText
-              }
-            >
-              <strong>
-                Post
-              </strong>
-
-              <span>
-                Share a photo or video
-                with your followers.
-              </span>
+            <div style={styles.choiceText}>
+              <strong>Post</strong>
+              <span>Share a photo or video with your followers.</span>
             </div>
 
-            <b>
-              →
-            </b>
+            <b>→</b>
           </button>
 
 
-          {/* REEL */}
-
           <button
             type="button"
-            style={
-              styles.createChoice
-            }
+            style={styles.createChoice}
             onClick={() => {
-              setContentType(
-                "reel"
-              );
-
+              setContentType("reel");
               setError("");
               setMessage("");
-
-              setStep(
-                "reelChooser"
-              );
+              setStep("reelChooser");
             }}
           >
-            <div
-              style={
-                styles.choiceIcon
-              }
-            >
+            <div style={styles.choiceIcon}>
               ▶
             </div>
 
-            <div
-              style={
-                styles.choiceText
-              }
-            >
-              <strong>
-                Reel
-              </strong>
-
-              <span>
-                Create a short vertical
-                video.
-              </span>
+            <div style={styles.choiceText}>
+              <strong>Reel</strong>
+              <span>Create a short vertical video.</span>
             </div>
 
-            <b>
-              →
-            </b>
+            <b>→</b>
           </button>
 
-
-          {/* STORY */}
 
           <button
             type="button"
-            style={
-              styles.createChoice
-            }
+            style={styles.createChoice}
             onClick={() => {
-              setContentType(
-                "story"
-              );
-
+              setContentType("story");
               setError("");
               setMessage("");
-
-              setStep(
-                "storyChooser"
-              );
+              setStep("storyChooser");
             }}
           >
-            <div
-              style={
-                styles.choiceIcon
-              }
-            >
+            <div style={styles.choiceIcon}>
               ○
             </div>
 
-            <div
-              style={
-                styles.choiceText
-              }
-            >
-              <strong>
-                Story
-              </strong>
-
-              <span>
-                Share something that
-                disappears after 24 hours.
-              </span>
+            <div style={styles.choiceText}>
+              <strong>Story</strong>
+              <span>Share something that disappears after 24 hours.</span>
             </div>
 
-            <b>
-              →
-            </b>
+            <b>→</b>
           </button>
-
         </section>
 
 
         {error && (
-          <div
-            style={
-              styles.errorBox
-            }
-          >
+          <div style={styles.errorBox}>
             {error}
           </div>
         )}
@@ -2518,43 +2164,21 @@ function Create({ draftId = "" } = {}) {
     step === "reelChooser" ||
     step === "storyChooser"
   ) {
-    const isPost =
-      step === "postChooser";
-
-    const isReel =
-      step === "reelChooser";
-
-    const isStory =
-      step === "storyChooser";
+    const isPost = step === "postChooser";
+    const isReel = step === "reelChooser";
 
     return (
-      <main
-        style={
-          styles.createPage
-        }
-      >
-        <header
-          style={
-            styles.createHeader
-          }
-        >
+      <main style={styles.createPage}>
+        <header style={styles.createHeader}>
           <button
             type="button"
-            style={
-              styles.backButton
-            }
-            onClick={() =>
-              setStep("create")
-            }
+            style={styles.backButton}
+            onClick={() => setStep("create")}
           >
             ←
           </button>
 
-          <h1
-            style={
-              styles.headerTitle
-            }
-          >
+          <h1 style={styles.headerTitle}>
             {isPost
               ? "New Post"
               : isReel
@@ -2562,29 +2186,13 @@ function Create({ draftId = "" } = {}) {
               : "New Story"}
           </h1>
 
-          <div
-            style={
-              styles.headerSpacer
-            }
-          />
+          <div style={styles.headerSpacer} />
         </header>
 
 
-        <section
-          style={
-            styles.chooserHero
-          }
-        >
-          <div
-            style={
-              styles.chooserIcon
-            }
-          >
-            {isPost
-              ? "+"
-              : isReel
-              ? "▶"
-              : "○"}
+        <section style={styles.chooserHero}>
+          <div style={styles.chooserIcon}>
+            {isPost ? "+" : isReel ? "▶" : "○"}
           </div>
 
           <h2>
@@ -2605,125 +2213,62 @@ function Create({ draftId = "" } = {}) {
         </section>
 
 
-        <section
-          style={
-            styles.mediaChooserGrid
-          }
-        >
-
-          {/* CAMERA */}
-
+        <section style={styles.mediaChooserGrid}>
           <button
             type="button"
-            style={
-              styles.mediaChooserButton
-            }
-            onClick={() =>
-              openCamera(
-                "user",
-                contentType
-              )
-            }
+            style={styles.mediaChooserButton}
+            onClick={() => openCamera("user", contentType)}
           >
-            <span>
-              ●
-            </span>
-
-            <strong>
-              Camera
-            </strong>
-
-            <small>
-              Record now
-            </small>
+            <span>●</span>
+            <strong>Camera</strong>
+            <small>Record now</small>
           </button>
 
-
-          {/* PHOTO */}
 
           {!isReel && (
             <button
               type="button"
-              style={
-                styles.mediaChooserButton
-              }
-              onClick={() =>
-                photoInputRef.current?.click()
-              }
+              style={styles.mediaChooserButton}
+              onClick={() => photoInputRef.current?.click()}
             >
-              <span>
-                ▧
-              </span>
-
-              <strong>
-                Photo
-              </strong>
-
-              <small>
-                Choose photo
-              </small>
+              <span>▧</span>
+              <strong>Photo</strong>
+              <small>Choose photo</small>
             </button>
           )}
 
 
-          {/* VIDEO */}
-
           <button
             type="button"
-            style={
-              styles.mediaChooserButton
-            }
-            onClick={() =>
-              fileInputRef.current?.click()
-            }
+            style={styles.mediaChooserButton}
+            onClick={() => fileInputRef.current?.click()}
           >
-            <span>
-              ▣
-            </span>
-
-            <strong>
-              Video
-            </strong>
-
-            <small>
-              Choose video
-            </small>
+            <span>▣</span>
+            <strong>Video</strong>
+            <small>Choose video</small>
           </button>
-
         </section>
 
 
         <input
-          ref={
-            fileInputRef
-          }
+          ref={fileInputRef}
           type="file"
           accept="video/*"
           hidden
-          onChange={
-            chooseVideoOnly
-          }
+          onChange={chooseVideoOnly}
         />
 
         <input
-          ref={
-            photoInputRef
-          }
+          ref={photoInputRef}
           type="file"
           accept="image/*"
           hidden
-          onChange={
-            chooseMedia
-          }
+          onChange={chooseMedia}
         />
 
 
         {error && (
-          <div
-            style={
-              styles.errorBox
-            }
-          >
+          <div style={styles.errorBox}>
             {error}
           </div>
         )}
@@ -2736,33 +2281,19 @@ function Create({ draftId = "" } = {}) {
      EDIT
   ===================================================== */
 
-  if (
-    step === "edit"
-  ) {
+  if (step === "edit") {
     const activeBackground =
       backgroundUrl
         ? "phone"
         : selectedBackground;
 
     return (
-      <main
-        style={
-          styles.editPage
-        }
-      >
-        <header
-          style={
-            styles.editHeader
-          }
-        >
+      <main style={styles.editPage}>
+        <header style={styles.editHeader}>
           <button
             type="button"
-            style={
-              styles.lightButton
-            }
-            onClick={
-              goBack
-            }
+            style={styles.lightButton}
+            onClick={goBack}
             aria-label="Back"
           >
             ←
@@ -2770,161 +2301,116 @@ function Create({ draftId = "" } = {}) {
 
           <div className="editorHeaderTitle">
             <strong>
-              {contentType ===
-              "reel"
+              {contentType === "reel"
                 ? "Edit Reel"
-                : contentType ===
-                  "story"
+                : contentType === "story"
                 ? "Edit Story"
                 : "Edit Post"}
             </strong>
-            <span>
-              Make it yours
-            </span>
+            <span>Make it yours</span>
           </div>
 
           <button
             type="button"
-            style={
-              styles.nextButton
-            }
-            onClick={() =>
-              setStep("post")
-            }
+            style={styles.nextButton}
+            onClick={() => setStep("post")}
           >
             Next
           </button>
         </header>
 
         <div className="vezlivo-editor-shell">
-
           <section className="vezlivo-editor-preview-pane">
-  <div
-    className="vezlivo-media-stage"
-    style={
-      activeBackground !== "none"
-        ? selectedBackgroundStyle
-        : { background: "#000000" }
-    }
-  >
-    <div
-      style={{
-        ...styles.mediaFrame,
-        background: "transparent",
-      }}
-    >
-      {mediaType === "video" ? (
-        <div style={{ position: "relative", width: "100%", height: "100%", background: "#000000", display: "grid", placeItems: "center" }}>
-          {/* Loading Spinner Overlay */}
-          {uploading && (
-            <div style={{
-              position: "absolute",
-              inset: 0,
-              background: "rgba(0, 0, 0, 0.75)",
-              display: "flex",
-              flexDirection: "column",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: "12px",
-              zIndex: 5,
-            }}>
-              <div style={{
-                width: "45px",
-                height: "45px",
-                border: "4px solid rgba(255, 255, 255, 0.2)",
-                borderTop: "4px solid #ffffff",
-                borderRadius: "50%",
-                animation: "vezlivoSpin 0.8s linear infinite",
-              }} />
-              <span style={{ color: "#ffffff", fontSize: "13px", fontWeight: 600 }}>Loading Vezlivo video...</span>
+            <div
+              className="vezlivo-media-stage"
+              style={
+                activeBackground !== "none"
+                  ? selectedBackgroundStyle
+                  : { background: "#000000" }
+              }
+            >
+              <div
+                style={{
+                  ...styles.mediaFrame,
+                  background: "transparent",
+                }}
+              >
+                {mediaType === "video" ? (
+                  <div style={{ position: "relative", width: "100%", height: "100%", background: "#000000", display: "grid", placeItems: "center" }}>
+                    {uploading && (
+                      <div style={{
+                        position: "absolute",
+                        inset: 0,
+                        background: "rgba(0, 0, 0, 0.75)",
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: "12px",
+                        zIndex: 5,
+                      }}>
+                        <div style={{
+                          width: "45px",
+                          height: "45px",
+                          border: "4px solid rgba(255, 255, 255, 0.2)",
+                          borderTop: "4px solid #ffffff",
+                          borderRadius: "50%",
+                          animation: "vezlivoSpin 0.8s linear infinite",
+                        }} />
+                        <span style={{ color: "#ffffff", fontSize: "13px", fontWeight: 600 }}>Loading Vezlivo video...</span>
+                      </div>
+                    )}
+
+                    <video
+                      ref={previewVideoRef}
+                      src={previewUrl}
+                      controls
+                      playsInline
+                      autoPlay
+                      loop
+                      muted={muted || !originalAudio}
+                      onPlay={handlePreviewPlay}
+                      onPause={handlePreviewPause}
+                      onSeeked={syncMusicToVideo}
+                      onTimeUpdate={syncMusicToVideo}
+                      style={{
+                        ...styles.previewMedia,
+                        filter:
+                          FILTERS.find((item) => item.value === selectedFilter)?.value ||
+                          "none",
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <img
+                    src={previewUrl}
+                    alt="Selected Vezlivo media"
+                    style={{
+                      ...styles.previewMedia,
+                      filter:
+                        FILTERS.find((item) => item.value === selectedFilter)?.value ||
+                        "none",
+                    }}
+                  />
+                )}
+
+                {overlayText && (
+                  <div style={styles.textOverlay}>
+                    {overlayText}
+                  </div>
+                )}
+
+                {musicUrl && (
+                  <div className="vezlivo-audio-chip">
+                    ♪ {musicName || "Added sound"}
+                  </div>
+                )}
+
+                <div style={styles.previewBadge}>
+                  {contentType.toUpperCase()}
+                </div>
+              </div>
             </div>
-          )}
-
-          <video
-            ref={
-              previewVideoRef
-            }
-            src={
-              previewUrl
-            }
-            controls
-            playsInline
-            autoPlay
-            loop
-            muted={
-              muted ||
-              !originalAudio
-            }
-            onPlay={
-              handlePreviewPlay
-            }
-            onPause={
-              handlePreviewPause
-            }
-            onSeeked={
-              syncMusicToVideo
-            }
-            onTimeUpdate={
-              syncMusicToVideo
-            }
-            style={{
-              ...styles.previewMedia,
-
-              filter:
-                FILTERS.find(
-                  (item) =>
-                    item.value ===
-                    selectedFilter
-                )?.value ||
-                "none",
-            }}
-          />
-        </div>
-      ) : (
-        <img
-          src={
-            previewUrl
-          }
-          alt="Selected Vezlivo media"
-          style={{
-            ...styles.previewMedia,
-
-            filter:
-              FILTERS.find(
-                (item) =>
-                  item.value ===
-                  selectedFilter
-              )?.value ||
-              "none",
-          }}
-        />
-      )}
-
-      {overlayText && (
-        <div
-          style={
-            styles.textOverlay
-          }
-        >
-          {overlayText}
-        </div>
-      )}
-
-      {musicUrl && (
-        <div className="vezlivo-audio-chip">
-          ♪ {musicName || "Added sound"}
-        </div>
-      )}
-
-      <div
-        style={
-          styles.previewBadge
-        }
-      >
-        {contentType.toUpperCase()}
-      </div>
-    </div>
-  </div>
             {musicUrl && (
               <audio
                 ref={musicAudioRef}
@@ -2936,9 +2422,7 @@ function Create({ draftId = "" } = {}) {
 
             <div className="vezlivo-editor-timeline">
               <span>
-                {mediaType === "video"
-                  ? "Video timeline"
-                  : "Photo"}
+                {mediaType === "video" ? "Video timeline" : "Photo"}
               </span>
 
               <div className="vezlivo-timeline-track">
@@ -2952,98 +2436,56 @@ function Create({ draftId = "" } = {}) {
           </section>
 
           <aside className="vezlivo-editor-toolbar">
-
             <div className="vezlivo-toolbar-heading">
               <strong>Edit</strong>
-              <span>
-                Tools
-              </span>
+              <span>Tools</span>
             </div>
 
             <div className="vezlivo-tool-grid">
-
               <button
                 type="button"
                 className="vezlivo-editor-tool"
-                onClick={() =>
-                  setShowSoundPanel(
-                    (value) =>
-                      !value
-                  )
-                }
+                onClick={() => setShowSoundPanel((value) => !value)}
               >
                 <span>♫</span>
                 <b>Sound</b>
-                <small>
-                  {musicUrl
-                    ? "Added"
-                    : "Add music"}
-                </small>
+                <small>{musicUrl ? "Added" : "Add music"}</small>
               </button>
 
               <button
                 type="button"
                 className="vezlivo-editor-tool"
-                onClick={() =>
-                  setShowVisualPanel(
-                    (value) =>
-                      !value
-                  )
-                }
+                onClick={() => setShowVisualPanel((value) => !value)}
               >
                 <span>▧</span>
                 <b>Visual</b>
-                <small>
-                  Background
-                </small>
+                <small>Background</small>
               </button>
 
               <button
                 type="button"
                 className="vezlivo-editor-tool"
-                onClick={() =>
-                  setShowTextEditor(
-                    (value) =>
-                      !value
-                  )
-                }
+                onClick={() => setShowTextEditor((value) => !value)}
               >
                 <span>T</span>
                 <b>Text</b>
-                <small>
-                  Add words
-                </small>
+                <small>Add words</small>
               </button>
 
               <button
                 type="button"
                 className="vezlivo-editor-tool"
                 onClick={() =>
-                  setSelectedFilter(
-                    (current) => {
-                      const index =
-                        FILTERS.findIndex(
-                          (item) =>
-                            item.value ===
-                            current
-                        );
-
-                      return FILTERS[
-                        (index + 1) %
-                          FILTERS.length
-                      ].value;
-                    }
-                  )
+                  setSelectedFilter((current) => {
+                    const index = FILTERS.findIndex((item) => item.value === current);
+                    return FILTERS[(index + 1) % FILTERS.length].value;
+                  })
                 }
               >
                 <span>◐</span>
                 <b>Filter</b>
                 <small>
-                  {FILTERS.find(
-                    (item) =>
-                      item.value ===
-                      selectedFilter
-                  )?.name || "Original"}
+                  {FILTERS.find((item) => item.value === selectedFilter)?.name || "Original"}
                 </small>
               </button>
 
@@ -3053,49 +2495,25 @@ function Create({ draftId = "" } = {}) {
                     type="button"
                     className="vezlivo-editor-tool"
                     onClick={() =>
-                      setSpeed(
-                        (current) => {
-                          const index =
-                            SPEEDS.indexOf(
-                              current
-                            );
-
-                          return SPEEDS[
-                            (index + 1) %
-                              SPEEDS.length
-                          ];
-                        }
-                      )
+                      setSpeed((current) => {
+                        const index = SPEEDS.indexOf(current);
+                        return SPEEDS[(index + 1) % SPEEDS.length];
+                      })
                     }
                   >
                     <span>1×</span>
                     <b>Speed</b>
-                    <small>
-                      {speed}×
-                    </small>
+                    <small>{speed}×</small>
                   </button>
 
                   <button
                     type="button"
                     className="vezlivo-editor-tool"
-                    onClick={() =>
-                      setOriginalAudio(
-                        (value) =>
-                          !value
-                      )
-                    }
+                    onClick={() => setOriginalAudio((value) => !value)}
                   >
-                    <span>
-                      {originalAudio
-                        ? "🔊"
-                        : "🔇"}
-                    </span>
+                    <span>{originalAudio ? "🔊" : "🔇"}</span>
                     <b>Original</b>
-                    <small>
-                      {originalAudio
-                        ? "On"
-                        : "Off"}
-                    </small>
+                    <small>{originalAudio ? "On" : "Off"}</small>
                   </button>
                 </>
               )}
@@ -3103,20 +2521,12 @@ function Create({ draftId = "" } = {}) {
               <button
                 type="button"
                 className="vezlivo-editor-tool"
-                onClick={() =>
-                  setShowMoreTools(
-                    (value) =>
-                      !value
-                  )
-                }
+                onClick={() => setShowMoreTools((value) => !value)}
               >
                 <span>•••</span>
                 <b>More</b>
-                <small>
-                  More tools
-                </small>
+                <small>More tools</small>
               </button>
-
             </div>
 
             {showSoundPanel && (
@@ -3170,7 +2580,7 @@ function Create({ draftId = "" } = {}) {
                     </div>
                   )) : (
                     <div className="vezlivo-empty-panel">
-                      No {soundCategory.toLowerCase()} sounds available yet. Add sounds to Vezlivo's Firebase sound library to make them appear here.
+                      No {soundCategory.toLowerCase()} sounds available yet.
                     </div>
                   )}
                 </div>
@@ -3213,125 +2623,68 @@ function Create({ draftId = "" } = {}) {
               <div className="vezlivo-editor-panel">
                 <div className="vezlivo-panel-title">
                   <div>
-                    <strong>
-                      Visual & Background
-                    </strong>
-                    <span>
-                      Change the look behind your media
-                    </span>
+                    <strong>Visual & Background</strong>
+                    <span>Change the look behind your media</span>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setShowVisualPanel(
-                        false
-                      )
-                    }
-                  >
-                    ×
-                  </button>
+                  <button type="button" onClick={() => setShowVisualPanel(false)}>×</button>
                 </div>
 
                 <div className="vezlivo-visual-grid">
-                  {VISUAL_BACKGROUNDS.map(
-                    (visual) => (
-                      <button
-                        key={
-                          visual.value
-                        }
-                        type="button"
-                        className={
-                          activeBackground ===
-                          visual.value
-                            ? "vezlivo-visual-option active"
-                            : "vezlivo-visual-option"
-                        }
-                        onClick={() => {
-                          setSelectedBackground(
-                            visual.value
-                          );
-                          if (
-                            visual.value !==
-                            "phone"
-                          ) {
-                            setBackgroundFile(
-                              null
-                            );
-                            if (backgroundUrl) {
-                              URL.revokeObjectURL(
-                                backgroundUrl
-                              );
-                            }
-                            setBackgroundUrl(
-                              ""
-                            );
+                  {VISUAL_BACKGROUNDS.map((visual) => (
+                    <button
+                      key={visual.value}
+                      type="button"
+                      className={
+                        activeBackground === visual.value
+                          ? "vezlivo-visual-option active"
+                          : "vezlivo-visual-option"
+                      }
+                      onClick={() => {
+                        setSelectedBackground(visual.value);
+                        if (visual.value !== "phone") {
+                          setBackgroundFile(null);
+                          if (backgroundUrl) {
+                            URL.revokeObjectURL(backgroundUrl);
                           }
-                        }}
-                      >
-                        <span
-                          style={{
-                            background:
-                              visual.css,
-                          }}
-                        />
-                        <b>
-                          {visual.name}
-                        </b>
-                      </button>
-                    )
-                  )}
+                          setBackgroundUrl("");
+                        }
+                      }}
+                    >
+                      <span style={{ background: visual.css }} />
+                      <b>{visual.name}</b>
+                    </button>
+                  ))}
                 </div>
 
                 <button
                   type="button"
                   className="vezlivo-panel-action"
-                  onClick={() =>
-                    backgroundInputRef.current?.click()
-                  }
+                  onClick={() => backgroundInputRef.current?.click()}
                 >
                   <span>▣</span>
                   <div>
-                    <b>
-                      Choose visual from phone
-                    </b>
-                    <small>
-                      Use an image from your gallery as the background
-                    </small>
+                    <b>Choose visual from phone</b>
+                    <small>Use an image from your gallery as the background</small>
                   </div>
                 </button>
 
                 {backgroundUrl && (
                   <div className="vezlivo-selected-file">
                     <div>
-                      <strong>
-                        Phone visual
-                      </strong>
-                      <span>
-                        Using your selected image
-                      </span>
+                      <strong>Phone visual</strong>
+                      <span>Using your selected image</span>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={
-                        removeBackground
-                      }
-                    >
-                      Remove
-                    </button>
+                    <button type="button" onClick={removeBackground}>Remove</button>
                   </div>
                 )}
 
                 <input
-                  ref={
-                    backgroundInputRef
-                  }
+                  ref={backgroundInputRef}
                   type="file"
                   accept="image/*"
                   hidden
-                  onChange={
-                    chooseBackground
-                  }
+                  onChange={chooseBackground}
                 />
               </div>
             )}
@@ -3340,51 +2693,21 @@ function Create({ draftId = "" } = {}) {
               <div className="vezlivo-editor-panel">
                 <div className="vezlivo-panel-title">
                   <div>
-                    <strong>
-                      Add text
-                    </strong>
-                    <span>
-                      Place text over your video
-                    </span>
+                    <strong>Add text</strong>
+                    <span>Place text over your video</span>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setShowTextEditor(
-                        false
-                      )
-                    }
-                  >
-                    ×
-                  </button>
+                  <button type="button" onClick={() => setShowTextEditor(false)}>×</button>
                 </div>
 
                 <div className="vezlivo-text-row">
                   <input
-                    value={
-                      overlayText
-                    }
-                    onChange={(
-                      event
-                    ) =>
-                      setOverlayText(
-                        event.target.value
-                      )
-                    }
+                    value={overlayText}
+                    onChange={(event) => setOverlayText(event.target.value)}
                     placeholder="Write something..."
                     maxLength={120}
                   />
 
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setShowTextEditor(
-                        false
-                      )
-                    }
-                  >
-                    Done
-                  </button>
+                  <button type="button" onClick={() => setShowTextEditor(false)}>Done</button>
                 </div>
               </div>
             )}
@@ -3393,78 +2716,39 @@ function Create({ draftId = "" } = {}) {
               <div className="vezlivo-editor-panel">
                 <div className="vezlivo-panel-title">
                   <div>
-                    <strong>
-                      More editing tools
-                    </strong>
-                    <span>
-                      Quick controls for your media
-                    </span>
+                    <strong>More editing tools</strong>
+                    <span>Quick controls for your media</span>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setShowMoreTools(
-                        false
-                      )
-                    }
-                  >
-                    ×
-                  </button>
+                  <button type="button" onClick={() => setShowMoreTools(false)}>×</button>
                 </div>
 
                 <div className="vezlivo-more-tools">
                   <button
                     type="button"
-                    onClick={() => {
-                      setMuted(
-                        (value) =>
-                          !value
-                      );
-                    }}
+                    onClick={() => setMuted((value) => !value)}
                   >
-                    <b>
-                      {muted
-                        ? "🔇"
-                        : "🔊"}
-                    </b>
-                    <span>
-                      Mute preview
-                    </span>
+                    <b>{muted ? "🔇" : "🔊"}</b>
+                    <span>Mute preview</span>
                   </button>
 
                   <button
                     type="button"
-                    onClick={() => {
-                      setSelectedFilter(
-                        "none"
-                      );
-                    }}
+                    onClick={() => setSelectedFilter("none")}
                   >
-                    <b>
-                      ↺
-                    </b>
-                    <span>
-                      Reset filter
-                    </span>
+                    <b>↺</b>
+                    <span>Reset filter</span>
                   </button>
 
                   <button
                     type="button"
-                    onClick={
-                      removeMedia
-                    }
+                    onClick={removeMedia}
                   >
-                    <b>
-                      🗑
-                    </b>
-                    <span>
-                      Change media
-                    </span>
+                    <b>🗑</b>
+                    <span>Change media</span>
                   </button>
                 </div>
               </div>
             )}
-
           </aside>
         </div>
 
@@ -3540,7 +2824,7 @@ function Create({ draftId = "" } = {}) {
             <div style={styles.sectionHeaderRow}>
               <div>
                 <h2 style={styles.sectionHeading}>Choose your Reel cover</h2>
-                <p style={styles.sectionSubheading}>Move through the video and stop on the exact frame you want. Vezlivo will not choose it for you.</p>
+                <p style={styles.sectionSubheading}>Move through the video and stop on the exact frame you want.</p>
               </div>
               <button type="button" style={styles.smallDoneButton} onClick={() => setShowCoverEditor(false)}>Done</button>
             </div>
@@ -3694,7 +2978,6 @@ function Create({ draftId = "" } = {}) {
       </section>
     </main>
   );
-
 }
 
 /* =========================================================
@@ -3855,10 +3138,6 @@ const styles = {
     gap: "7px",
     cursor: "pointer",
     boxShadow: "0 5px 18px rgba(0,0,0,.04)",
-  },
-
-  chooserIconText: {
-    fontSize: "12px",
   },
 
   title: {
@@ -4173,12 +3452,6 @@ const styles = {
     cursor: "pointer",
   },
 
-  editorPreviewArea: {
-    display: "flex",
-    justifyContent: "center",
-    padding: "0 16px 15px",
-  },
-
   mediaFrame: {
     width: "min(100%, 430px)",
     height: "min(64vh, 620px)",
@@ -4221,117 +3494,6 @@ const styles = {
     wordBreak: "break-word",
   },
 
-  editTools: {
-    background: "#181818",
-    borderTop: "1px solid #292929",
-    padding: "15px 16px 28px",
-  },
-
-  toolRow: {
-    display: "grid",
-    gridTemplateColumns: "repeat(4, 1fr)",
-    gap: "8px",
-  },
-
-  toolButton: {
-    border: "none",
-    background: "#252525",
-    color: "#ffffff",
-    borderRadius: "13px",
-    padding: "10px 5px",
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    gap: "5px",
-    cursor: "pointer",
-    fontSize: "12px",
-  },
-
-  textEditor: {
-    display: "flex",
-    gap: "8px",
-    marginTop: "13px",
-  },
-
-  textInput: {
-    flex: 1,
-    border: "1px solid #444444",
-    borderRadius: "12px",
-    background: "#222222",
-    color: "#ffffff",
-    padding: "12px",
-    outline: "none",
-  },
-
-  smallButton: {
-    border: "none",
-    borderRadius: "12px",
-    padding: "0 15px",
-    background: "#ffffff",
-    color: "#111111",
-    fontWeight: 700,
-  },
-
-  editSoundPanel: {
-    marginTop: "12px",
-    padding: "12px",
-    background: "#222222",
-    borderRadius: "14px",
-    display: "flex",
-    flexDirection: "column",
-    gap: "7px",
-  },
-
-  sectionTitle: {
-    fontSize: "15px",
-    margin: "18px 0 10px",
-  },
-
-  filterScroller: {
-    display: "flex",
-    gap: "10px",
-    overflowX: "auto",
-    paddingBottom: "5px",
-  },
-
-  filterButton: {
-    minWidth: "75px",
-    border: "2px solid transparent",
-    borderRadius: "12px",
-    background: "transparent",
-    color: "#ffffff",
-    padding: "3px",
-    cursor: "pointer",
-  },
-
-  filterActive: {
-    border: "2px solid #ffffff",
-  },
-
-  filterPreview: {
-    width: "70px",
-    height: "70px",
-    borderRadius: "10px",
-    overflow: "hidden",
-    background: "#000000",
-  },
-
-  editInfo: {
-    marginTop: "16px",
-    display: "flex",
-    justifyContent: "space-between",
-    color: "#aaa",
-    fontSize: "13px",
-  },
-
-  changeButton: {
-    border: "none",
-    background: "transparent",
-    color: "#ffffff",
-    fontWeight: 700,
-    cursor: "pointer",
-  },
-
   professionalPostPage: {
     minHeight: "100vh",
     background: "#f5f6f8",
@@ -4355,17 +3517,13 @@ const styles = {
   },
   professionalBackButton: { width: "42px", height: "42px", border: "1px solid #e0e2e6", borderRadius: "12px", background: "#fff", fontSize: "24px", cursor: "pointer" },
   professionalHeaderTitle: { flex: 1, display: "flex", flexDirection: "column", gap: "2px", minWidth: 0 },
-  professionalHeaderTitleStrong: { fontSize: "17px", fontWeight: 850 },
   professionalHeaderActions: { display: "flex", alignItems: "center", gap: "8px" },
   draftHeaderButton: { border: "1px solid #dfe1e6", background: "#fff", color: "#16181c", borderRadius: "11px", padding: "10px 13px", fontWeight: 750, cursor: "pointer" },
   professionalPublishButton: { border: "none", background: "#111214", color: "#fff", borderRadius: "11px", padding: "10px 15px", fontWeight: 850, cursor: "pointer" },
-  professionalContent: { maxWidth: "1180px", margin: "0 auto", padding: "22px 16px 50px", display: "grid", gridTemplateColumns: "minmax(0, 1fr) 300px", gap: "18px", alignItems: "start" },
-  professionalContentNarrow: { gridTemplateColumns: "1fr", padding: "14px 10px 40px" },
   professionalCompactContent: { maxWidth: "820px", margin: "0 auto", padding: "16px 14px 42px", display: "flex", flexDirection: "column", gap: "14px" },
   coverEditorGridNarrow: { gridTemplateColumns: "1fr" },
   audienceGridNarrow: { gridTemplateColumns: "1fr" },
 
-  professionalMainColumn: { minWidth: 0, display: "flex", flexDirection: "column", gap: "14px" },
   professionalMediaCard: { background: "#fff", border: "1px solid #e1e3e7", borderRadius: "18px", overflow: "hidden", boxShadow: "0 5px 22px rgba(15,18,25,.04)" },
   professionalMediaPreview: { position: "relative", width: "100%", maxHeight: "650px", minHeight: "360px", background: "#0c0d0f", display: "grid", placeItems: "center", overflow: "hidden" },
   professionalMedia: { width: "100%", height: "min(650px, 70vh)", objectFit: "contain", display: "block" },
@@ -4409,10 +3567,6 @@ const styles = {
   bottomPublishActions: { display: "grid", gridTemplateColumns: "1fr 1.6fr", gap: "9px" },
   bottomDraftButton: { border: "1px solid #dfe1e6", background: "#fff", color: "#15171a", borderRadius: "12px", padding: "14px", fontWeight: 800, cursor: "pointer" },
   bottomPublishButton: { border: "none", background: "#111214", color: "#fff", borderRadius: "12px", padding: "14px", fontWeight: 850, cursor: "pointer" },
-  professionalSideCard: { position: "sticky", top: "90px", background: "#fff", border: "1px solid #e1e3e7", borderRadius: "18px", padding: "16px", boxShadow: "0 5px 22px rgba(15,18,25,.035)" },
-  sideCardHeader: { display: "flex", justifyContent: "space-between", alignItems: "center", paddingBottom: "12px", borderBottom: "1px solid #ececef" },
-  checkItem: { display: "flex", gap: "9px", padding: "12px 0", borderBottom: "1px solid #f0f1f3" },
-  sideTip: { marginTop: "13px", padding: "12px", borderRadius: "12px", background: "#f6f7f8", display: "flex", flexDirection: "column", gap: "5px" },
   coverEditorGrid: { display: "grid", gridTemplateColumns: "220px minmax(0,1fr)", gap: "18px", alignItems: "start" },
   coverPreviewBox: { position: "relative", width: "100%", aspectRatio: "9 / 16", background: "#0d0e10", borderRadius: "14px", overflow: "hidden" },
   coverPreviewImage: { width: "100%", height: "100%", display: "block", objectFit: "cover", objectPosition: "50% 50%" },
@@ -4431,251 +3585,6 @@ const styles = {
   coverFitRow: { display: "flex", flexWrap: "wrap", alignItems: "center", gap: "7px" },
   coverFitLabel: { fontSize: "12px", fontWeight: 800, marginRight: "3px" },
   secondaryActionButton: { border: "1px solid #dfe1e6", background: "#fff", borderRadius: "9px", padding: "8px 10px", fontWeight: 750, cursor: "pointer" },
-  postPage: {
-    minHeight: "100vh",
-    background: "#f7f7f8",
-    color: "#111111",
-    paddingBottom: "35px",
-  },
-
-  postHeader: {
-    height: "62px",
-    background: "#ffffff",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    padding: "0 15px",
-    borderBottom: "1px solid #e7e7e7",
-    position: "sticky",
-    top: 0,
-    zIndex: 10,
-  },
-
-  publishButton: {
-    border: "none",
-    background: "#111111",
-    color: "#ffffff",
-    borderRadius: "11px",
-    padding: "10px 15px",
-    fontWeight: 800,
-    cursor: "pointer",
-  },
-
-  postPreviewRow: {
-    display: "flex",
-    alignItems: "center",
-    gap: "14px",
-    background: "#ffffff",
-    padding: "16px",
-    borderBottom: "1px solid #e8e8e8",
-  },
-
-  smallMediaFrame: {
-    width: "72px",
-    height: "92px",
-    borderRadius: "11px",
-    overflow: "hidden",
-    background: "#111111",
-    flexShrink: 0,
-  },
-
-  smallMedia: {
-    width: "100%",
-    height: "100%",
-    objectFit: "cover",
-  },
-
-  previewDetails: {
-    minWidth: 0,
-  },
-
-  mediaTypeBadge: {
-    display: "inline-block",
-    marginTop: "6px",
-    padding: "4px 7px",
-    borderRadius: "7px",
-    background: "#f0f0f0",
-    fontSize: "10px",
-    fontWeight: 800,
-  },
-
-  smallMuted: {
-    color: "#777777",
-    fontSize: "13px",
-    margin: "5px 0 0",
-  },
-
-  postForm: {
-    maxWidth: "680px",
-    margin: "0 auto",
-    padding: "20px 16px",
-  },
-
-  label: {
-    display: "block",
-    fontWeight: 800,
-    marginBottom: "8px",
-  },
-
-  captionInput: {
-    width: "100%",
-    minHeight: "130px",
-    resize: "vertical",
-    border: "1px solid #dedede",
-    borderRadius: "15px",
-    background: "#ffffff",
-    padding: "14px",
-    fontSize: "16px",
-    lineHeight: 1.5,
-    outline: "none",
-    boxSizing: "border-box",
-  },
-
-  characterCount: {
-    textAlign: "right",
-    color: "#777777",
-    fontSize: "12px",
-    marginTop: "5px",
-  },
-
-  tagBox: {
-    marginTop: "15px",
-    padding: "13px",
-    borderRadius: "14px",
-    background: "#ffffff",
-    border: "1px solid #e5e5e5",
-  },
-
-  tags: {
-    display: "flex",
-    flexWrap: "wrap",
-    gap: "7px",
-    marginTop: "8px",
-  },
-
-  tag: {
-    padding: "6px 9px",
-    borderRadius: "20px",
-    background: "#f0f0f0",
-    fontSize: "12px",
-    fontWeight: 700,
-  },
-
-  detectedBox: {
-    marginTop: "12px",
-    padding: "11px",
-    borderRadius: "12px",
-    background: "#ffffff",
-    border: "1px solid #e5e5e5",
-    fontSize: "13px",
-  },
-
-  settingRow: {
-    marginTop: "12px",
-    padding: "16px",
-    borderRadius: "15px",
-    background: "#ffffff",
-    border: "1px solid #e5e5e5",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: "15px",
-  },
-
-  settingDescription: {
-    display: "block",
-    marginTop: "4px",
-    color: "#777777",
-    fontSize: "12px",
-  },
-
-  select: {
-    border: "1px solid #d7d7d7",
-    borderRadius: "10px",
-    padding: "9px",
-    background: "#ffffff",
-  },
-
-  switchOn: {
-    width: "48px",
-    height: "28px",
-    border: "none",
-    borderRadius: "20px",
-    background: "#111111",
-    padding: "3px",
-    display: "flex",
-    justifyContent: "flex-end",
-    cursor: "pointer",
-  },
-
-  switchOff: {
-    width: "48px",
-    height: "28px",
-    border: "none",
-    borderRadius: "20px",
-    background: "#d4d4d4",
-    padding: "3px",
-    display: "flex",
-    justifyContent: "flex-start",
-    cursor: "pointer",
-  },
-
-  storyNotice: {
-    marginTop: "14px",
-    padding: "14px",
-    borderRadius: "14px",
-    background: "#ffffff",
-    border: "1px solid #e5e5e5",
-    color: "#555555",
-    fontSize: "13px",
-    lineHeight: 1.5,
-  },
-
-  uploadBox: {
-    marginTop: "18px",
-    padding: "15px",
-    borderRadius: "15px",
-    background: "#ffffff",
-    border: "1px solid #e2e2e2",
-    textAlign: "center",
-  },
-
-  progressTrack: {
-    height: "8px",
-    background: "#e5e5e5",
-    borderRadius: "10px",
-    overflow: "hidden",
-    margin: "12px 0 7px",
-  },
-
-  progressFill: {
-    height: "100%",
-    background: "#111111",
-    borderRadius: "10px",
-    transition: "width .2s ease",
-  },
-
-  successBox: {
-    marginTop: "15px",
-    padding: "13px",
-    borderRadius: "13px",
-    background: "#edf9f0",
-    color: "#17652a",
-    fontSize: "14px",
-  },
-
-  publishLarge: {
-    width: "100%",
-    marginTop: "20px",
-    border: "none",
-    borderRadius: "15px",
-    padding: "16px",
-    background: "#111111",
-    color: "#ffffff",
-    fontSize: "16px",
-    fontWeight: 800,
-    cursor: "pointer",
-  },
 };
 
 export default Create;
